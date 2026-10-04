@@ -251,6 +251,11 @@ export function createApp({
 
   app.all('/api/*', (c) => c.json<ErrorResponse>({ error: 'Not found' }, 404))
 
+  // Keep ticket links already published in PR descriptions usable.
+  app.get('/tickets/:number{[0-9]+}', (c) =>
+    c.redirect(`/#/tickets/${c.req.param('number')}`),
+  )
+
   if (webRoot && existsSync(join(webRoot, 'index.html'))) {
     app.use('/*', serveStatic({ root: webRoot }))
     app.get('/*', serveStatic({ root: webRoot, path: 'index.html' }))

@@ -71,6 +71,8 @@ npm run dev        # local database, API on :4600 and the web app on :5173
 `npm run dev` does not restart the factory on source edits, so active agent steps
 keep running. Stop and start it explicitly to load server changes, or opt into
 automatic restarts with `npm run dev -- --watch`. Vite still hot-reloads the web app.
+Startup also builds the web app for the API origin on :4600, so PR evidence and
+ticket links work there; :5173 remains the live development UI.
 
 `npm run dev` keeps its database in `.local/`. To run against your own
 database, build the web app and serve:

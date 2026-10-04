@@ -255,7 +255,11 @@ test('maintain-pr merges base without rewriting branch, invokes writer and links
   )
   assert.equal(f.writers(), 1)
   assert.match(f.bodies[0]!, new RegExp(`Verified at ${head}`))
-  assert.match(f.bodies[0]!, /https:\/\/factory.example.test/)
+  assert.ok(
+    f.bodies[0]!.includes(
+      `https://factory.example.test/#/tickets/${f.ticket.number}`,
+    ),
+  )
   assert.ok(f.bodies[0]!.length < 4100)
   f.setChecks({ state: 'none', failures: [] })
   await f.poll()

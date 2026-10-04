@@ -1,6 +1,20 @@
 import { test, expect } from './fixtures.ts'
 import type { TicketResponse } from '../../src/api/contract.ts'
 
+test('published legacy ticket links reach the matching ticket timeline', async ({
+  page,
+  factory,
+}) => {
+  await page.goto(`${factory.url}/tickets/${factory.tickets.running}`)
+  await expect(page).toHaveURL(
+    `${factory.url}/#/tickets/${factory.tickets.running}`,
+  )
+  await expect(
+    page.getByRole('heading', { name: 'Fix the typo on the pricing page' }),
+  ).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Timeline' })).toBeVisible()
+})
+
 test('open running logs refresh, closed logs stop polling, and completion loads final output', async ({
   page,
   factory,
@@ -110,10 +124,13 @@ test('evidence belongs to its test run, media uses the configured API, and logs 
         ),
     )
     .toBe(320)
-  await page.keyboard.press('Escape')
-  await expect(viewer).toHaveCount(0)
-  await expect(thumbnail).toBeFocused()
-  await page.keyboard.press('Space')
+  for (let reopen = 0; reopen < 3; reopen++) {
+    await page.keyboard.press('Escape')
+    await expect(viewer).toHaveCount(0)
+    await expect(thumbnail).toBeFocused()
+    await page.keyboard.press('Space')
+    await expect(viewer).toBeVisible()
+  }
   await viewer.getByRole('button', { name: 'Close image' }).click()
   await expect(thumbnail).toBeFocused()
   const video = run.locator('video')

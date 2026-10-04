@@ -134,16 +134,25 @@ function ImageViewer({
     element.showModal()
     return () => element.close()
   }, [])
+  const close = () => {
+    dialog.current?.close()
+    onClose()
+  }
   return (
     <dialog
       ref={dialog}
       className="evidence-viewer"
       aria-labelledby={`image-title-${artifact.id}`}
       onClose={onClose}
+      onCancel={(event) => {
+        // Clear React state before a quick reopen can race the native close event.
+        event.preventDefault()
+        close()
+      }}
     >
       <div className="viewer-heading">
         <h2 id={`image-title-${artifact.id}`}>{artifact.title}</h2>
-        <button autoFocus onClick={() => dialog.current?.close()}>
+        <button autoFocus onClick={close}>
           Close image
         </button>
       </div>

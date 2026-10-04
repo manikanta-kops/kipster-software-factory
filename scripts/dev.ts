@@ -11,6 +11,7 @@ import {
   root,
 } from './dev-database.ts'
 import { startCluster, stopCluster } from './postgres.ts'
+import { build } from 'vite'
 
 const { values } = parseArgs({
   options: {
@@ -20,6 +21,8 @@ const { values } = parseArgs({
   },
 })
 
+// PR evidence links use the API origin, which must also serve the ticket UI.
+await build({ configFile: join(root, 'vite.config.ts') })
 startCluster(cluster)
 await ensureDevDatabase()
 
