@@ -7,9 +7,11 @@ You describe a problem and agree the outcome. The factory plans, builds, proves
 the change by running the real app, keeps the pull request ready, and only
 interrupts you for decisions that are yours to make.
 
-> **Status: foundation.** Workflows load, validate and render, and the server,
-> database and web app run. Tickets and agents arrive in the next slices; see
-> the [roadmap](docs/roadmap.md).
+> **Status: Slice 1 complete.** Register a repository, create and approve a
+> ticket in the web app, and let fresh agents build and review it before a
+> system step opens its pull request. Proven on the private factory-floor test
+> bed; the owner merges. See the [acceptance run](docs/slice-1-acceptance.md) and
+> [roadmap](docs/roadmap.md) for evidence and the next slices.
 
 ## How it works
 
