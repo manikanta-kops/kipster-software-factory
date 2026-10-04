@@ -43,6 +43,10 @@ router.post('/__test/fixtures', async (c) => {
     join(fixtureHome, 'planner.log'),
     'Planner started\nPlan ready\n<script>unsafe()</script>\n',
   )
+  await writeFile(
+    join(fixtureHome, 'plan.md'),
+    '## Safe plan\n\n- [x] Markdown works\n\n<script>window.unsafe = true</script>\n\n[Bad link](javascript:alert(1))',
+  )
   let artifactTicketNumber: number | null = null
   if (c.req.query('artifacts') === 'true') {
     const artifactTicket = await createTicket(fixture.database, {
@@ -63,8 +67,7 @@ router.post('/__test/fixtures', async (c) => {
         {
           kind: 'plan',
           title: 'Safety plan',
-          content:
-            '## Safe plan\n\n- [x] Markdown works\n\n<script>window.unsafe = true</script>\n\n[Bad link](javascript:alert(1))',
+          path: 'plan.md',
         },
         { kind: 'log', title: 'Planner log', path: 'planner.log' },
       ],

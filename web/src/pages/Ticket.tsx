@@ -22,19 +22,7 @@ export function TicketPage({ number }: { number: number }) {
   const query = useQuery(ticketQuery(number))
   if (query.isPending) return <p className="muted">Loading ticket…</p>
   if (query.isError) return <ErrorMessage error={query.error} />
-  const { ticket, workflow, attempts, artifacts, events } = query.data
-  const entries = [
-    ...attempts.map((attempt) => ({
-      type: 'attempt' as const,
-      item: attempt,
-      time: attempt.finishedAt ?? attempt.startedAt ?? attempt.createdAt,
-    })),
-    ...events.map((event) => ({
-      type: 'event' as const,
-      item: event,
-      time: event.createdAt,
-    })),
-  ].sort((a, b) => b.time.localeCompare(a.time) || b.item.id - a.item.id)
+  const { ticket, workflow } = query.data
   return (
     <article className="ticket-page">
       <a className="back-link" href="#/">
@@ -78,27 +66,70 @@ export function TicketPage({ number }: { number: number }) {
           <MarkdownBody>{ticket.body}</MarkdownBody>
         </details>
       )}
-      <section aria-labelledby="timeline-heading">
-        <h2 id="timeline-heading">Timeline</h2>
-        <p className="muted timeline-hint">Newest first</p>
-        <ol className="timeline">
-          {entries.map((entry) =>
-            entry.type === 'attempt' ? (
-              <AttemptEntry
-                key={`attempt-${entry.item.id}`}
-                attempt={entry.item}
-                detail={query.data}
-                artifacts={artifacts.filter(
-                  (artifact) => artifact.attemptId === entry.item.id,
-                )}
-              />
-            ) : (
-              <EventEntry key={`event-${entry.item.id}`} event={entry.item} />
-            ),
-          )}
-        </ol>
-      </section>
+      <Timeline key={ticket.id} detail={query.data} />
     </article>
+  )
+}
+
+function Timeline({ detail }: { detail: TicketResponse }) {
+  const [showAll, setShowAll] = useState(false)
+  const entries = [
+    ...detail.attempts
+      .filter(
+        (attempt) =>
+          showAll ||
+          attempt.finishedAt ||
+          (attempt.startedAt &&
+            attempt.waitingFor !== 'human' &&
+            attempt.waitingFor !== 'ask'),
+      )
+      .map((attempt) => ({
+        type: 'attempt' as const,
+        item: attempt,
+        time: attempt.finishedAt ?? attempt.startedAt ?? attempt.createdAt,
+      })),
+    ...(showAll ? detail.events : []).map((event) => ({
+      type: 'event' as const,
+      item: event,
+      time: event.createdAt,
+    })),
+  ].sort((a, b) => b.time.localeCompare(a.time) || b.item.id - a.item.id)
+  return (
+    <section aria-labelledby="timeline-heading">
+      <div className="timeline-heading">
+        <div>
+          <h2 id="timeline-heading">Timeline</h2>
+          <p className="muted timeline-hint">Newest first</p>
+        </div>
+        <button
+          className="timeline-toggle"
+          aria-pressed={showAll}
+          aria-controls="ticket-timeline"
+          onClick={() => setShowAll(!showAll)}
+        >
+          Show all events
+        </button>
+      </div>
+      {entries.length === 0 && (
+        <p className="muted">No step runs or decisions yet.</p>
+      )}
+      <ol id="ticket-timeline" className="timeline">
+        {entries.map((entry) =>
+          entry.type === 'attempt' ? (
+            <AttemptEntry
+              key={`attempt-${entry.item.id}`}
+              attempt={entry.item}
+              detail={detail}
+              artifacts={detail.artifacts.filter(
+                (artifact) => artifact.attemptId === entry.item.id,
+              )}
+            />
+          ) : (
+            <EventEntry key={`event-${entry.item.id}`} event={entry.item} />
+          ),
+        )}
+      </ol>
+    </section>
   )
 }
 
@@ -163,7 +194,9 @@ function ActionPanel({ detail }: { detail: TicketResponse }) {
         </p>
       ) : (
         <>
-          {waiting.for === 'human' && plan && <ArtifactView artifact={plan} />}
+          {waiting.for === 'human' && plan && (
+            <ArtifactView key={plan.id} artifact={plan} defaultOpen />
+          )}
           <fieldset disabled={mutation.isPending} className="action-fields">
             {waiting.for === 'human' ? (
               <>
@@ -286,28 +319,47 @@ function AttemptEntry({
   artifacts: readonly Artifact[]
 }) {
   const step = detail.workflow.steps.find((item) => item.id === attempt.stepId)
+  const resolution = detail.events.find(
+    (event) =>
+      event.kind === 'ask.resolved' && event.data['attemptId'] === attempt.id,
+  )
+  const outcome = resolution
+    ? resolution.data['action'] === 'move'
+      ? `Moved to ${String(resolution.data['stepId'])}`
+      : resolution.data['action'] === 'retry'
+        ? 'Retry requested'
+        : 'Cancelled'
+    : (attempt.outcome ?? attempt.status)
   return (
     <li className="attempt-entry">
       <div className="entry-heading">
         <h3>
           {attempt.stepId}{' '}
           <span className="muted">
-            {attempt.waitingFor === 'ask'
-              ? 'ask'
-              : (step?.does ?? 'you decide')}
+            {attempt.executor === 'human'
+              ? 'human decision'
+              : attempt.waitingFor === 'ask'
+                ? 'ask'
+                : (step?.does ?? 'you decide')}
           </span>
         </h3>
-        <Time value={attempt.finishedAt ?? attempt.createdAt} />
+        <Time
+          value={attempt.finishedAt ?? attempt.startedAt ?? attempt.createdAt}
+        />
       </div>
       <div className="attempt-meta">
-        <Status value={attempt.outcome ?? attempt.status} />
+        <Status value={outcome} />
         <span>{attempt.executor ?? 'Unassigned'}</span>
         <span>{duration(attempt)}</span>
       </div>
       {attempt.summary && <MarkdownBody>{attempt.summary}</MarkdownBody>}
       {attempt.error && <p className="error">{attempt.error}</p>}
       {artifacts.map((artifact) => (
-        <ArtifactView key={artifact.id} artifact={artifact} />
+        <ArtifactView
+          key={artifact.id}
+          artifact={artifact}
+          defaultOpen={attempt.executor === 'human' && artifact.kind === 'note'}
+        />
       ))}
     </li>
   )
@@ -336,8 +388,14 @@ function EventEntry({ event }: { event: FactoryEvent }) {
     </li>
   )
 }
-function ArtifactView({ artifact }: { artifact: Artifact }) {
-  const [open, setOpen] = useState(false)
+function ArtifactView({
+  artifact,
+  defaultOpen = false,
+}: {
+  artifact: Artifact
+  defaultOpen?: boolean
+}) {
+  const [open, setOpen] = useState(defaultOpen)
   const file = useQuery({
     queryKey: ['artifact', artifact.id],
     queryFn: ({ signal }) => api.artifact(artifact.id, signal),
@@ -348,6 +406,7 @@ function ArtifactView({ artifact }: { artifact: Artifact }) {
   return (
     <details
       className="artifact"
+      open={open}
       onToggle={(event) => setOpen(event.currentTarget.open)}
     >
       <summary>

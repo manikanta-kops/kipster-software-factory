@@ -849,6 +849,22 @@ textarea {
   padding: 4px 0;
   margin-bottom: 28px;
 }
+.timeline-heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.timeline-toggle {
+  color: var(--muted);
+  background: transparent;
+  font-size: 12px;
+}
+.timeline-toggle[aria-pressed='true'] {
+  background: var(--soft);
+  color: var(--text);
+}
 .timeline-hint {
   font-size: 12px;
   margin-top: 2px;
