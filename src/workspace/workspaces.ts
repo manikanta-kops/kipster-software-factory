@@ -1,12 +1,29 @@
 import { access, lstat, mkdir, readFile, writeFile, rm } from 'node:fs/promises'
 import { basename, join, resolve } from 'node:path'
 import type { Repository, Ticket } from '../domain/records.ts'
+import { loadKit } from '../kit/kit.ts'
+import type { RepositoryKit } from '../domain/records.ts'
 import { run } from '../executors/process.ts'
 
 export class Workspaces {
   readonly home: string
   private readonly queues = new Map<number, Promise<unknown>>()
-  constructor(home: string) {
+  private readonly refreshed:
+    | ((
+        repository: Repository,
+        defaultBranch: string,
+        kit: RepositoryKit,
+      ) => Promise<unknown>)
+    | undefined
+  constructor(
+    home: string,
+    refreshed?: (
+      repository: Repository,
+      defaultBranch: string,
+      kit: RepositoryKit,
+    ) => Promise<unknown>,
+  ) {
+    this.refreshed = refreshed
     this.home = resolve(home)
   }
   cache(repository: Repository) {
@@ -51,12 +68,20 @@ export class Workspaces {
       })
       if (origin !== repository.cloneUrl)
         throw new Error(`Repository cache origin changed: ${path}`)
+      await run('git', ['fetch', 'origin'], { cwd: path, signal })
+      await run('git', ['remote', 'set-head', 'origin', '--auto'], {
+        cwd: path,
+        signal,
+      })
       const head = await run(
         'git',
         ['symbolic-ref', '--short', 'refs/remotes/origin/HEAD'],
         { cwd: path, signal },
       )
-      return head.replace(/^origin\//, '')
+      const branch = head.replace(/^origin\//, '')
+      const loaded = await loadKit(path, `origin/${branch}`, signal)
+      await this.refreshed?.(repository, branch, loaded.state)
+      return branch
     })
   }
   async prepare(
@@ -80,10 +105,6 @@ export class Workspaces {
         branch: ticket.branch,
       })
       if (!(await exists(path))) {
-        await run('git', ['fetch', 'origin'], {
-          cwd: this.cache(repository),
-          signal,
-        })
         const branches = await run('git', ['branch', '--list', ticket.branch], {
           cwd: this.cache(repository),
           signal,

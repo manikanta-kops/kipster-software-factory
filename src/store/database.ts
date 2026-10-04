@@ -5,8 +5,17 @@ export type Connection = PoolClient
 /** A pool or a connection inside a transaction. */
 export type Queryable = Pick<Connection, 'query'>
 
+const urls = new WeakMap<Database, string>()
+export function databaseUrl(database: Database): string {
+  const url = urls.get(database)
+  if (!url) throw new Error('Database must be opened with openDatabase')
+  return url
+}
+
 export function openDatabase(connectionString: string): Database {
-  return new Pool({ connectionString, max: 10 })
+  const pool = new Pool({ connectionString, max: 10 })
+  urls.set(pool, connectionString)
+  return pool
 }
 
 export async function transaction<T>(

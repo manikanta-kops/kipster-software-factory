@@ -83,6 +83,14 @@ export function Repositories() {
               <p className="muted">
                 Default branch: {repository.defaultBranch}
               </p>
+              <p>
+                Kit: {repository.kit.status}
+                {repository.kit.capabilities.length > 0 &&
+                  ` · ${repository.kit.capabilities.join(', ')}`}
+              </p>
+              {repository.kit.error && (
+                <p className="error">{repository.kit.error}</p>
+              )}
               {repository.lastError && (
                 <p className="error">{repository.lastError}</p>
               )}

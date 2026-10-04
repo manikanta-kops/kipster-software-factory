@@ -1,5 +1,5 @@
 // Starts a local development factory: a persistent PostgreSQL cluster under .local/,
-// the API with file watching, and the Vite dev server for the web app.
+// the API with optional file watching, and the Vite dev server for the web app.
 import { type ChildProcess, spawn } from 'node:child_process'
 import { parseArgs } from 'node:util'
 import { join } from 'node:path'
@@ -14,6 +14,7 @@ import { startCluster, stopCluster } from './postgres.ts'
 
 const { values } = parseArgs({
   options: {
+    watch: { type: 'boolean' },
     'no-scheduler': { type: 'boolean' },
     home: { type: 'string' },
   },
@@ -26,8 +27,7 @@ const children: ChildProcess[] = [
   spawn(
     process.execPath,
     [
-      '--watch-path=src',
-      '--watch-path=workflows',
+      ...(values.watch ? ['--watch-path=src', '--watch-path=workflows'] : []),
       'src/cli.ts',
       'serve',
       '--database-url',

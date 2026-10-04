@@ -11,9 +11,10 @@ test('home separates attention, progress and finished tickets', async ({
   ).toBeVisible()
   await expect(page.locator('output.status')).toHaveText('Live')
   await expect(page.getByText('A loop reached its limit.')).toBeVisible()
-  await expect(
-    page.getByRole('link', { name: 'Open pull request' }),
-  ).toHaveAttribute('href', /pull\/42$/)
+  await expect(page.locator('a[href$="/pull/42"]')).toHaveAttribute(
+    'href',
+    /pull\/42$/,
+  )
   await expect(page.getByText('Add a dark mode toggle')).toBeHidden()
   await page.getByText('Show finished (2)').click()
   await expect(page.getByText('Add a dark mode toggle')).toBeVisible()
@@ -147,8 +148,7 @@ test('create a ticket and explain unavailable workflows', async ({
   await page
     .getByLabel('Repository', { exact: true })
     .selectOption('kipster/demo-shop')
-  await expect(page.getByRole('radio', { name: /^feature / })).toBeDisabled()
-  await expect(page.getByText(/Missing capabilities:/).first()).toBeVisible()
+  await expect(page.getByRole('radio', { name: /^feature / })).toBeEnabled()
   await page.getByRole('radio', { name: /^quick-change / }).check()
   await page
     .getByLabel('Title', { exact: true })
@@ -497,4 +497,75 @@ test('queued tickets keep internal events out of the default timeline', async ({
   await expect(
     timeline.getByText('attempt · queued · plan', { exact: true }),
   ).toBeVisible()
+})
+
+test('repositories show valid and invalid kits and gate workflows on capabilities', async ({
+  page,
+  factory,
+}) => {
+  await page.goto(`${factory.url}/#/repositories`)
+  const valid = page
+    .locator('.repository-list li')
+    .filter({ hasText: 'kipster/demo-shop' })
+  await expect(valid).toContainText('Kit: valid')
+  await expect(valid).toContainText('setup, verify')
+  const invalid = page
+    .locator('.repository-list li')
+    .filter({ hasText: 'kipster/invalid-kit' })
+  await expect(invalid).toContainText('Kit: invalid')
+  await expect(invalid).toContainText('verify.ready:')
+  await page.goto(`${factory.url}/#/tickets/new`)
+  await page
+    .getByLabel('Repository', { exact: true })
+    .selectOption('kipster/invalid-kit')
+  await expect(page.getByRole('radio', { name: /^feature / })).toBeDisabled()
+  await expect(page.getByText(/Missing capabilities:/).first()).toBeVisible()
+})
+
+test('demo evidence endpoints provide decodable image and video with recorded verdict commits', async ({
+  page,
+  factory,
+  request,
+}) => {
+  const proof = (await (
+    await request.get(
+      `${factory.url}/api/tickets/${factory.tickets.proofPassed}`,
+    )
+  ).json()) as TicketResponse
+  const image = proof.artifacts.find((a) => a.mediaType === 'image/png')!
+  const video = proof.artifacts.find((a) => a.mediaType === 'video/webm')!
+  expect(proof.attempts.find((a) => a.stepId === 'test')!.headCommit).toMatch(
+    /^[a-f0-9]{40}$/,
+  )
+  await page.goto(factory.url)
+  await page.setContent(
+    `<img src="${factory.url}/api/artifacts/${image.id}"><video src="${factory.url}/api/artifacts/${video.id}" preload="auto"></video>`,
+  )
+  await expect
+    .poll(() =>
+      page
+        .locator('img')
+        .evaluate(
+          (element) =>
+            (element as unknown as { naturalWidth: number }).naturalWidth,
+        ),
+    )
+    .toBe(320)
+  await expect
+    .poll(() =>
+      page
+        .locator('video')
+        .evaluate(
+          (element) =>
+            (element as unknown as { readyState: number }).readyState,
+        ),
+    )
+    .toBeGreaterThanOrEqual(2)
+  expect(
+    await page
+      .locator('video')
+      .evaluate(
+        (element) => (element as unknown as { videoWidth: number }).videoWidth,
+      ),
+  ).toBe(32)
 })

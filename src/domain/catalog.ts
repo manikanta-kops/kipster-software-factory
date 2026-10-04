@@ -118,6 +118,12 @@ function fixed(success: string, outcomes: readonly string[]) {
 }
 
 export const actions = {
+  'verify-kit': {
+    summary:
+      'Proves the committed kit with setup, check and an isolated running instance.',
+    params: noParams,
+    contract: fixed('passed', ['passed', 'failed']),
+  },
   decide: {
     summary:
       'Asks the decision model a typed question and routes on its answer and confidence.',

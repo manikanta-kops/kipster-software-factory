@@ -541,7 +541,7 @@ describe('artifacts', () => {
     await mkdir(join(home, 'evidence'), { recursive: true })
     await writeFile(
       join(home, 'evidence', 'shot.png'),
-      Buffer.from([137, 80, 78, 71]),
+      Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]),
     )
     await writeFile(
       join(home, 'evidence', 'page.html'),
@@ -597,7 +597,7 @@ describe('artifacts', () => {
     assert.equal(image.headers.get('Content-Type'), 'image/png')
     assert.deepEqual(
       [...new Uint8Array(await image.arrayBuffer())],
-      [137, 80, 78, 71],
+      [137, 80, 78, 71, 13, 10, 26, 10],
     )
     const html = await get('Page')
     assert.equal(html.status, 200)
@@ -734,4 +734,78 @@ describe('event stream', () => {
     })
     assert.equal(response.status, 400)
   })
+})
+
+test('additive proof contract: kit status/capabilities, commit and media type in existing endpoints', async () => {
+  const repository = await readyRepository('proof/api')
+  await markRepositoryReady(database, repository.id, {
+    kit: {
+      status: 'invalid',
+      error: 'verify.start: missing {port}',
+      capabilities: [],
+    },
+  })
+  let repositories = await json<RepositoriesResponse>(
+    await app.request('/api/repositories'),
+    200,
+  )
+  assert.deepEqual(
+    repositories.repositories.find((r) => r.id === repository.id)!.kit,
+    {
+      status: 'invalid',
+      error: 'verify.start: missing {port}',
+      capabilities: [],
+    },
+  )
+  await markRepositoryReady(database, repository.id, {
+    kit: { status: 'valid', error: null, capabilities: ['setup', 'verify'] },
+  })
+  repositories = await json<RepositoriesResponse>(
+    await app.request('/api/repositories'),
+    200,
+  )
+  assert.deepEqual(
+    repositories.repositories.find((r) => r.id === repository.id)!.capabilities,
+    ['setup', 'verify'],
+  )
+  const { ticket: created } = await newTicket('proof/api')
+  const [claimed] = (await claimAttempts(database, 100)).filter(
+    (c) => c.ticket.id === created.id,
+  )
+  assert.ok(claimed)
+  await markRunning(database, claimed.attempt.id, 'codex')
+  const path = join(home, 'misleading-name.txt')
+  await writeFile(path, Buffer.from('89504e470d0a1a0a', 'hex'))
+  const commit = 'c'.repeat(40)
+  await completeAttempt(
+    database,
+    claimed.attempt.id,
+    {
+      outcome: 'done',
+      summary: 'Recorded',
+      artifacts: [
+        { kind: 'evidence', title: 'Detected image', path },
+        { kind: 'plan', title: 'Plan', content: 'Plan' },
+      ],
+    },
+    { headCommit: commit },
+  )
+  const detail = await json<TicketResponse>(
+    await app.request(`/api/tickets/${created.number}`),
+    200,
+  )
+  assert.equal(detail.attempts[0]!.headCommit, commit)
+  assert.equal(detail.attempts[1]!.headCommit, null)
+  const image = detail.artifacts.find((a) => a.title === 'Detected image')!
+  assert.equal(image.mediaType, 'image/png')
+  assert.equal(
+    detail.artifacts.find((a) => a.kind === 'plan')!.mediaType,
+    'text/markdown',
+  )
+  assert.equal(
+    (await app.request(`/api/artifacts/${image.id}`)).headers.get(
+      'content-type',
+    ),
+    image.mediaType,
+  )
 })

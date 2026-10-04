@@ -1,8 +1,7 @@
 // Only this test server exposes fixture creation; production API routes are unchanged.
 import { serve } from '@hono/node-server'
-import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import { tmpdir } from 'node:os'
 import { createApp } from '../../src/api/app.ts'
 import { BUILT_WEB_APP } from '../../src/server.ts'
 import { listenForEvents } from '../../src/store/events.ts'
@@ -21,7 +20,7 @@ if (!process.env['KSF_TEST_DATABASE_URL'] || !port)
 const store = await createDemoStore()
 const events = listenForEvents(store.database)
 await events.ready
-const home = await mkdtemp(join(tmpdir(), 'ksf-e2e-'))
+const home = store.home
 const app = createApp({
   database: store.database,
   library: await builtInLibrary(),
@@ -38,7 +37,7 @@ const { Hono } = await import('hono')
 const router = new Hono()
 router.post('/__test/fixtures', async (c) => {
   const fixture = await createDemoStore()
-  const fixtureHome = await mkdtemp(join(home, 'fixture-'))
+  const fixtureHome = fixture.home
   await writeFile(
     join(fixtureHome, 'planner.log'),
     'Planner started\nPlan ready\n<script>unsafe()</script>\n',

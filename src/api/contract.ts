@@ -19,6 +19,7 @@ export type {
   HumanChoice,
   Repository,
   RepositoryStatus,
+  RepositoryKit,
   Ticket,
   TicketAskReason,
   TicketStatus,

@@ -68,6 +68,10 @@ npm ci
 npm run dev        # local database, API on :4600 and the web app on :5173
 ```
 
+`npm run dev` does not restart the factory on source edits, so active agent steps
+keep running. Stop and start it explicitly to load server changes, or opt into
+automatic restarts with `npm run dev -- --watch`. Vite still hot-reloads the web app.
+
 `npm run dev` keeps its database in `.local/`. To run against your own
 database, build the web app and serve:
 
@@ -96,6 +100,9 @@ normal dev server, seed, then use `npm run dev -- --no-scheduler` (or
 `kf serve --no-scheduler`). A database marked as demo refuses to start a
 scheduler, including after a restart. Keep real runs in a separate checkout's
 `.local/` database. Development workspaces and evidence also live under
-`.local/factory/`; override with `npm run dev -- --home <directory>`.
+`.local/factory/`. Demo media is generated there (synthetic images/video/logs,
+never real verification evidence); seed with `--home <directory>` when serving a
+different home. The demo includes valid/invalid kits and current/stale feature
+verdicts with recorded commits. Override with `npm run dev -- --home <directory>`.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md). Licensed under [Apache-2.0](LICENSE).
