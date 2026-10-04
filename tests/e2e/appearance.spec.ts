@@ -76,6 +76,57 @@ for (const colorScheme of ['light', 'dark'] as const) {
           path,
           contentType: 'image/png',
         })
+        if (screen.name === 'ticket') {
+          const panel = page.getByRole('region', {
+            name: 'Review and approve the plan',
+          })
+          await expect(
+            panel.getByRole('heading', { name: 'Acceptance scenarios' }),
+          ).toBeVisible()
+          await expect(panel.locator('details')).toHaveAttribute('open', '')
+          const planPath = testInfo.outputPath(
+            `open-plan-${size}-${colorScheme}.png`,
+          )
+          await panel.screenshot({ path: planPath })
+          await testInfo.attach(`open-plan-${size}-${colorScheme}`, {
+            path: planPath,
+            contentType: 'image/png',
+          })
+        }
+        if (screen.name === 'ask') {
+          const timeline = page.getByRole('region', { name: 'Timeline' })
+          await expect(timeline.locator('.event-entry')).toHaveCount(0)
+          const timelinePath = testInfo.outputPath(
+            `timeline-${size}-${colorScheme}.png`,
+          )
+          await timeline.screenshot({ path: timelinePath })
+          await testInfo.attach(`timeline-${size}-${colorScheme}`, {
+            path: timelinePath,
+            contentType: 'image/png',
+          })
+          await timeline
+            .getByRole('button', { name: 'Show all events' })
+            .click()
+          await expect(
+            timeline.getByText('attempt · claimed', { exact: false }).first(),
+          ).toBeVisible()
+          await timeline
+            .getByRole('heading', { name: 'Timeline', exact: true })
+            .scrollIntoViewIfNeeded()
+          expect(
+            await page.evaluate(
+              'document.documentElement.scrollWidth <= window.innerWidth',
+            ),
+          ).toBeTruthy()
+          const eventsPath = testInfo.outputPath(
+            `all-events-${size}-${colorScheme}.png`,
+          )
+          await page.screenshot({ path: eventsPath })
+          await testInfo.attach(`all-events-${size}-${colorScheme}`, {
+            path: eventsPath,
+            contentType: 'image/png',
+          })
+        }
       }
     })
   }

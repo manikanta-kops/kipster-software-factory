@@ -24,7 +24,6 @@ test('approve a plan', async ({ page, factory, request }) => {
   const panel = page.getByRole('region', {
     name: 'Review and approve the plan',
   })
-  await panel.getByText('Plan', { exact: true }).click()
   await expect(
     panel.getByRole('heading', { name: 'Acceptance scenarios' }),
   ).toBeVisible()
@@ -106,6 +105,24 @@ for (const action of ['retry', 'move', 'cancel'] as const)
     expect(detail.ticket.currentStep).toBe(
       action === 'move' ? 'build' : 'review',
     )
+    const decision = page
+      .getByRole('region', { name: 'Timeline' })
+      .locator('.attempt-entry')
+      .first()
+    await expect(decision).toContainText('human decision')
+    await expect(decision).toContainText(
+      action === 'retry'
+        ? 'Retry requested'
+        : action === 'move'
+          ? 'Moved to build'
+          : 'Cancelled',
+    )
+    if (action !== 'cancel')
+      await expect(
+        decision.getByText('Use the existing validation helper.', {
+          exact: true,
+        }),
+      ).toBeVisible()
     if (action !== 'cancel')
       expect(
         detail.artifacts.some(
@@ -212,13 +229,25 @@ test('live updates reconcile another client, reconnect, and keep one stream acro
   await request.post(
     `${factory.url}/api/tickets/${detail.ticket.number}/decision`,
     {
-      data: { attemptId: detail.ticket.waiting!.attemptId, choice: 'approved' },
+      data: {
+        attemptId: detail.ticket.waiting!.attemptId,
+        choice: 'approved',
+        comment: 'Approved from another client.',
+      },
     },
   )
   await expect(page.locator('.ticket-meta .badge')).toHaveText('queued')
   await expect(
     page.getByRole('button', { name: 'Approve', exact: true }),
   ).toHaveCount(0)
+  const timeline = page.getByRole('region', { name: 'Timeline' })
+  await expect(timeline.locator('.attempt-entry').first()).toContainText(
+    'approved',
+  )
+  await expect(
+    timeline.getByText('Approved from another client.', { exact: true }),
+  ).toBeVisible()
+  await expect(timeline.locator('.event-entry')).toHaveCount(0)
   await page.getByRole('link', { name: 'Repositories', exact: true }).click()
   await page.getByRole('link', { name: 'Needs you', exact: true }).click()
   expect(streams).toBe(1)
@@ -253,8 +282,7 @@ test.describe('artifact files', () => {
     await expect(
       page.getByRole('heading', { name: 'Inspect artifacts safely' }),
     ).toBeVisible()
-    expect(fetched).toHaveLength(0)
-    await page.locator('.action-panel').getByText('Safety plan plan').click()
+    await expect.poll(() => fetched.length).toBe(1)
     await expect(page.getByRole('heading', { name: 'Safe plan' })).toBeVisible()
     await expect(page.locator('.markdown script')).toHaveCount(0)
     await expect(
@@ -264,7 +292,7 @@ test.describe('artifact files', () => {
     await expect(
       page.locator('pre').filter({ hasText: 'Planner started' }),
     ).toBeVisible()
-    expect(fetched).toHaveLength(1)
+    expect(fetched).toHaveLength(2)
   })
 })
 
@@ -339,7 +367,7 @@ test('runtime API base directs fetch and live events to a separate factory', asy
   expect(requests.filter((url) => url.endsWith('/api/events'))).toHaveLength(1)
 })
 
-test('keyboard users can skip navigation and expand the plan', async ({
+test('keyboard users can skip navigation, collapse and reopen the plan', async ({
   page,
   factory,
 }) => {
@@ -353,11 +381,120 @@ test('keyboard users can skip navigation and expand the plan', async ({
   await page.keyboard.press('Enter')
   await expect(page.locator('main')).toBeFocused()
   const plan = page.locator('.action-panel summary')
+  const content = page.locator('.action-panel').getByRole('heading', {
+    name: 'Acceptance scenarios',
+  })
+  await expect(content).toBeVisible()
   await plan.focus()
   await page.keyboard.press('Enter')
+  await expect(content).toBeHidden()
+  await page.keyboard.press('Space')
   await expect(
     page
       .locator('.action-panel')
       .getByRole('heading', { name: 'Acceptance scenarios' }),
+  ).toBeVisible()
+})
+
+test('timeline groups step runs and human decisions, with internal events behind a keyboard toggle', async ({
+  page,
+  factory,
+}) => {
+  await page.goto(`${factory.url}/#/tickets/${factory.tickets.askAfterLimit}`)
+  const timeline = page.getByRole('region', { name: 'Timeline' })
+  const runs = timeline.locator('.attempt-entry')
+  await expect(runs).toHaveCount(8)
+  await expect(runs.first()).toContainText('review')
+  await expect(runs.first().locator('.badge')).toHaveText('changes needed')
+  await expect(runs.first()).toContainText('The validation still accepts')
+  await expect(runs.first().locator('.attempt-meta')).toContainText(/\d+s/)
+  await expect(runs.first().getByText('Review round 2 finding')).toBeVisible()
+  await expect(
+    timeline.getByText('Also cover addresses with a plus sign, like', {
+      exact: false,
+    }),
+  ).toBeVisible()
+  await expect(timeline.locator('.event-entry')).toHaveCount(0)
+  const times = await runs
+    .locator('time')
+    .evaluateAll((elements) =>
+      elements.map((element) => element.getAttribute('datetime')!),
+    )
+  expect(times).toEqual([...times].sort().reverse())
+  const toggle = timeline.getByRole('button', { name: 'Show all events' })
+  await expect(toggle).toHaveAttribute('aria-pressed', 'false')
+  await toggle.focus()
+  await page.keyboard.press('Space')
+  await expect(toggle).toHaveAttribute('aria-pressed', 'true')
+  for (const kind of [
+    'attempt · claimed',
+    'ticket · status',
+    'attempt · queued',
+    'artifact · added',
+    'decision · made',
+  ]) {
+    await expect(
+      timeline.getByText(kind, { exact: false }).first(),
+    ).toBeVisible()
+  }
+  const allTimes = await timeline
+    .locator('time')
+    .evaluateAll((elements) =>
+      elements.map((element) => element.getAttribute('datetime')!),
+    )
+  expect(allTimes).toEqual([...allTimes].sort().reverse())
+  await page.keyboard.press('Enter')
+  await expect(toggle).toHaveAttribute('aria-pressed', 'false')
+  await expect(timeline.locator('.event-entry')).toHaveCount(0)
+})
+
+test('all-events preference survives live decisions and returns to a quiet timeline', async ({
+  page,
+  factory,
+  request,
+}) => {
+  const number = factory.tickets.approvePlan
+  await page.goto(`${factory.url}/#/tickets/${number}`)
+  await expect(page.locator('output.status')).toHaveText('Live')
+  const timeline = page.getByRole('region', { name: 'Timeline' })
+  const toggle = timeline.getByRole('button', { name: 'Show all events' })
+  await toggle.click()
+  const detail = (await (
+    await request.get(`${factory.url}/api/tickets/${number}`)
+  ).json()) as TicketResponse
+  await request.post(`${factory.url}/api/tickets/${number}/decision`, {
+    data: {
+      attemptId: detail.ticket.waiting!.attemptId,
+      choice: 'changes-needed',
+      comment: 'Include empty reports.',
+    },
+  })
+  await expect(
+    timeline.getByText('Include empty reports.', { exact: true }),
+  ).toBeVisible()
+  await expect(toggle).toHaveAttribute('aria-pressed', 'true')
+  await expect(
+    timeline.getByText('decision · made · approve-plan', { exact: true }),
+  ).toBeVisible()
+  await toggle.click()
+  await expect(timeline.locator('.attempt-entry')).toHaveCount(2)
+  await expect(
+    timeline.locator('.attempt-entry').first().locator('.badge'),
+  ).toHaveText('changes needed')
+  await expect(timeline.locator('.event-entry')).toHaveCount(0)
+})
+
+test('queued tickets keep internal events out of the default timeline', async ({
+  page,
+  factory,
+}) => {
+  await page.goto(`${factory.url}/#/tickets/${factory.tickets.queued}`)
+  const timeline = page.getByRole('region', { name: 'Timeline' })
+  await expect(
+    timeline.getByText('No step runs or decisions yet.'),
+  ).toBeVisible()
+  await timeline.getByRole('button', { name: 'Show all events' }).click()
+  await expect(
+    timeline.getByText('attempt · queued · plan', { exact: true }),
   ).toBeVisible()
 })
