@@ -2,6 +2,8 @@ import { Pool, type PoolClient } from 'pg'
 
 export type Database = Pool
 export type Connection = PoolClient
+/** A pool or a connection inside a transaction. */
+export type Queryable = Pick<Connection, 'query'>
 
 export function openDatabase(connectionString: string): Database {
   return new Pool({ connectionString, max: 10 })

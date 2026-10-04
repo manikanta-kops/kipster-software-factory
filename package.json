@@ -13,6 +13,7 @@
     "dev": "node scripts/dev.ts",
     "start": "node src/cli.ts serve",
     "kf": "node src/cli.ts",
+    "seed:demo": "node scripts/seed-demo.ts",
     "build": "vite build",
     "check": "npm run lint && npm run format:check && npm run typecheck",
     "lint": "oxlint",

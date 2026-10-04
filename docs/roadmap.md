@@ -1,8 +1,7 @@
 # Roadmap
 
 The factory grows in slices. Each slice works end to end and is proven on the
-[kipster-factory-floor](https://github.com/manikanta-kops/kipster-factory-floor)
-test bed before the next starts.
+kipster-factory-floor test bed, a private repository, before the next starts.
 
 ## Slice 0: Foundation (done)
 

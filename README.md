@@ -75,7 +75,8 @@ npm run kf -- serve --database-url postgresql://localhost/factory
 ```
 
 Or put `{"databaseUrl": "…", "port": 4600}` in `~/.kipster-factory/config.json`
-and run `npm start`.
+and run `npm start`. Browsers on other origins may call the API only if they are
+listed in `allowedOrigins` (default: the Vite dev server and the Tauri shell).
 
 ## Develop
 
@@ -84,6 +85,7 @@ npm run check      # lint, format and type checks
 npm test           # unit and integration tests against a throwaway PostgreSQL
 npm run test:e2e   # browser tests against the built app
 npm run kf -- check [dir]   # validate a directory of workflow files
+npm run seed:demo  # fill the dev database with tickets in every state
 ```
 
 See [CONTRIBUTING.md](CONTRIBUTING.md). Licensed under [Apache-2.0](LICENSE).

@@ -37,6 +37,7 @@ describe('loadLibrary', () => {
       'large-feature',
       'onboard-repo',
       'phase',
+      'quick-change',
     ])
   })
 

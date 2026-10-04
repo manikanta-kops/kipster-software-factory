@@ -1,8 +1,10 @@
 import { fileURLToPath } from 'node:url'
 import { serve } from '@hono/node-server'
 import { createApp } from './api/app.ts'
+import { defaultHome } from './config.ts'
 import { BUILT_IN_WORKFLOWS, loadLibrary } from './library/library.ts'
 import { openDatabase } from './store/database.ts'
+import { listenForEvents } from './store/events.ts'
 import { migrate } from './store/migrate.ts'
 import { recordWorkflowVersions } from './store/workflows.ts'
 
@@ -16,6 +18,9 @@ export interface FactoryOptions {
   readonly host?: string
   readonly workflows?: string
   readonly webRoot?: string
+  /** Factory home (default: ~/.kipster-factory). */
+  readonly home?: string
+  readonly allowedOrigins?: readonly string[]
 }
 
 export interface RunningFactory {
@@ -41,9 +46,16 @@ export async function startFactory(
     throw error
   }
 
+  const events = listenForEvents(database)
+  await events.ready
   const app = createApp({
     database,
     library: loaded.library,
+    events,
+    home: options.home ?? defaultHome(),
+    ...(options.allowedOrigins === undefined
+      ? {}
+      : { allowedOrigins: options.allowedOrigins }),
     ...(options.webRoot === undefined ? {} : { webRoot: options.webRoot }),
   })
   const host = options.host ?? '127.0.0.1'
@@ -60,9 +72,12 @@ export async function startFactory(
   return {
     url: `http://${host}:${options.port}`,
     async close() {
-      await new Promise<void>((resolve, reject) =>
-        server.close((error) => (error ? reject(error) : resolve())),
-      )
+      await events.close()
+      await new Promise<void>((resolve, reject) => {
+        server.close((error) => (error ? reject(error) : resolve()))
+        // Event streams stay open until their clients leave; don't wait for them.
+        if ('closeAllConnections' in server) server.closeAllConnections()
+      })
       await database.end()
     },
   }
