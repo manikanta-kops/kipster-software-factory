@@ -1,22 +1,15 @@
 import { useSyncExternalStore } from 'react'
 
-const listeners = new Set<() => void>()
-
 function subscribe(listener: () => void) {
-  listeners.add(listener)
-  window.addEventListener('popstate', listener)
-  return () => {
-    listeners.delete(listener)
-    window.removeEventListener('popstate', listener)
-  }
+  window.addEventListener('hashchange', listener)
+  return () => window.removeEventListener('hashchange', listener)
 }
-
 export function usePath(): string {
-  return useSyncExternalStore(subscribe, () => window.location.pathname)
+  return useSyncExternalStore(
+    subscribe,
+    () => window.location.hash.slice(1) || '/',
+  )
 }
-
 export function navigate(path: string) {
-  if (path === window.location.pathname) return
-  window.history.pushState(null, '', path)
-  for (const listener of listeners) listener()
+  window.location.hash = path
 }

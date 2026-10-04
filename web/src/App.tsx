@@ -1,78 +1,93 @@
-import type { MouseEvent, ReactNode } from 'react'
-import { api } from './api.ts'
+import { useEffect, useRef } from 'react'
 import { Logo } from './components/Logo.tsx'
 import { NeedsYou } from './pages/NeedsYou.tsx'
 import { Workflows } from './pages/Workflows.tsx'
-import { navigate, usePath } from './router.ts'
-import { useResource } from './useResource.ts'
+import { NewTicket } from './pages/NewTicket.tsx'
+import { TicketPage } from './pages/Ticket.tsx'
+import { Repositories } from './pages/Repositories.tsx'
+import { usePath } from './router.ts'
+import { useLiveEvents } from './queries.ts'
 
 export function App() {
   const path = usePath()
-  const health = useResource(api.health)
+  const live = useLiveEvents()
+  const main = useRef<HTMLElement>(null)
+  useEffect(() => {
+    document.title =
+      path === '/'
+        ? 'Needs you · Kipster'
+        : `${path.split('/').filter(Boolean).join(' / ')} · Kipster`
+    main.current?.focus()
+  }, [path])
+  const ticket = /^\/tickets\/(\d+)$/.exec(path)
   const onWorkflows = path.startsWith('/workflows')
-
   return (
     <div className="shell">
+      <a
+        className="skip-link"
+        href="#main"
+        onClick={(event) => {
+          event.preventDefault()
+          main.current?.focus()
+        }}
+      >
+        Skip to content
+      </a>
       <header className="bar">
-        <Link to="/" className="brand">
+        <a
+          href="#/"
+          className="brand"
+          aria-label="Kipster Software Factory home"
+        >
           <Logo />
           <span>Kipster Software Factory</span>
-        </Link>
+        </a>
         <nav aria-label="Main">
-          <Link to="/" current={!onWorkflows}>
+          <a href="#/" aria-current={path === '/' ? 'page' : undefined}>
             Needs you
-          </Link>
-          <Link to="/workflows" current={onWorkflows}>
+          </a>
+          <a
+            href="#/repositories"
+            aria-current={path === '/repositories' ? 'page' : undefined}
+          >
+            Repositories
+          </a>
+          <a href="#/workflows" aria-current={onWorkflows ? 'page' : undefined}>
             Workflows
-          </Link>
+          </a>
         </nav>
         <output
-          className={`status ${health.state}`}
-          title={health.state === 'failed' ? health.error : undefined}
+          className={`status ${live}`}
+          aria-live="polite"
+          title="Live updates"
         >
-          {health.state === 'ready'
-            ? 'Online'
-            : health.state === 'loading'
+          {live === 'ready'
+            ? 'Live'
+            : live === 'connecting'
               ? 'Connecting'
-              : 'Offline'}
+              : 'Reconnecting'}
         </output>
       </header>
-      <main>
-        {onWorkflows ? (
+      <main id="main" ref={main} tabIndex={-1}>
+        {path === '/' ? (
+          <NeedsYou />
+        ) : path === '/tickets/new' ? (
+          <NewTicket />
+        ) : ticket ? (
+          <TicketPage key={ticket[1]} number={Number(ticket[1])} />
+        ) : path === '/repositories' ? (
+          <Repositories />
+        ) : onWorkflows ? (
           <Workflows selected={path.split('/')[2]} />
         ) : (
-          <NeedsYou />
+          <section className="quiet">
+            <h1>Page not found</h1>
+            <a href="#/" className="text-link">
+              Back to Needs you
+            </a>
+          </section>
         )}
       </main>
     </div>
-  )
-}
-
-function Link({
-  to,
-  current,
-  className,
-  children,
-}: {
-  to: string
-  current?: boolean
-  className?: string
-  children: ReactNode
-}) {
-  const follow = (event: MouseEvent<HTMLAnchorElement>) => {
-    if (event.metaKey || event.ctrlKey || event.shiftKey || event.button !== 0)
-      return
-    event.preventDefault()
-    navigate(to)
-  }
-  return (
-    <a
-      href={to}
-      onClick={follow}
-      className={className}
-      aria-current={current ? 'page' : undefined}
-    >
-      {children}
-    </a>
   )
 }
