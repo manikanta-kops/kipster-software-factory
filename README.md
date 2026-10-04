@@ -7,9 +7,11 @@ You describe a problem and agree the outcome. The factory plans, builds, proves
 the change by running the real app, keeps the pull request ready, and only
 interrupts you for decisions that are yours to make.
 
-> **Status: foundation.** Workflows load, validate and render, and the server,
-> database and web app run. Tickets and agents arrive in the next slices; see
-> the [roadmap](docs/roadmap.md).
+> **Status: Slice 1 complete.** Register a repository, create and approve a
+> ticket in the web app, and let fresh agents build and review it before a
+> system step opens its pull request. Proven on the private factory-floor test
+> bed; the owner merges. See the [roadmap](docs/roadmap.md) for the next
+> slices.
 
 ## How it works
 
@@ -85,7 +87,15 @@ npm run check      # lint, format and type checks
 npm test           # unit and integration tests against a throwaway PostgreSQL
 npm run test:e2e   # browser tests against the built app
 npm run kf -- check [dir]   # validate a directory of workflow files
+npm run dev -- --no-scheduler # serve UI without running agents
 npm run seed:demo  # fill the dev database with tickets in every state
 ```
+
+Demo seeding requires an empty database with no running scheduler. Stop the
+normal dev server, seed, then use `npm run dev -- --no-scheduler` (or
+`kf serve --no-scheduler`). A database marked as demo refuses to start a
+scheduler, including after a restart. Keep real runs in a separate checkout's
+`.local/` database. Development workspaces and evidence also live under
+`.local/factory/`; override with `npm run dev -- --home <directory>`.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md). Licensed under [Apache-2.0](LICENSE).

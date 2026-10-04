@@ -1,6 +1,6 @@
 import { defineConfig, devices } from '@playwright/test'
 
-const port = 4617
+const port = Number(process.env['KSF_E2E_PORT'] ?? 4617)
 
 export default defineConfig({
   testDir: 'tests/e2e',

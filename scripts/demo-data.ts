@@ -4,6 +4,7 @@
 import type { ArtifactInput } from '../src/domain/lifecycle.ts'
 import type { Library } from '../src/library/library.ts'
 import type { Database } from '../src/store/database.ts'
+import { acquireSchedulerLock } from '../src/store/scheduler.ts'
 import { migrate } from '../src/store/migrate.ts'
 import {
   createRepository,
@@ -40,6 +41,18 @@ export async function seedDemo(
   library: Library,
 ): Promise<DemoTickets> {
   await migrate(database)
+  const lock = await acquireSchedulerLock(database, () => {}, 'demo')
+  try {
+    return await seedLocked(database, library)
+  } finally {
+    lock.close()
+  }
+}
+
+async function seedLocked(
+  database: Database,
+  library: Library,
+): Promise<DemoTickets> {
   if (await getRepository(database, DEMO_REPOSITORY)) {
     throw new Error(`The database already has demo data (${DEMO_REPOSITORY})`)
   }

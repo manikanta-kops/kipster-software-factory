@@ -704,12 +704,11 @@ describe('event stream', () => {
 
   test('announces new events live', async () => {
     const response = await app.request('/api/events')
-    let created = false
+    let creating: Promise<unknown> | undefined
     const messages = await readEvents(response, (received) => {
       // Create the ticket only once the stream is open, so its events arrive live.
-      if (received.length === 1 && !created) {
-        created = true
-        void newTicket('acme/shop', 'Live')
+      if (received.length === 1 && !creating) {
+        creating = newTicket('acme/shop', 'Live')
       }
       return received.some((message) => {
         const event =
@@ -717,6 +716,8 @@ describe('event stream', () => {
         return event?.kind === 'attempt.queued'
       })
     })
+    // The request finishes after its events are sent; let it finish before the pool closes.
+    await creating
     const live = messages
       .filter((message) => message.event === undefined)
       .map((message) => JSON.parse(message.data) as EventMessage)

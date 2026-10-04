@@ -50,6 +50,11 @@ if (instruction.commit) {
     `Build ${count}`,
   ])
 }
+if (role === 'builder')
+  await writeFile(
+    join(directory, 'verification.md'),
+    `Verification build ${count + 1}: checks passed.`,
+  )
 if (!instruction.missing)
   await writeFile(
     join(directory, 'result.json'),
@@ -65,17 +70,25 @@ if (!instruction.missing)
                   {
                     kind: 'plan',
                     title: 'Approved plan',
-                    content: 'Acceptance: committed change file exists.',
+                    content: `Acceptance plan ${count + 1}: committed change file exists.`,
                   },
                 ]
-              : instruction.outcome === 'changes-needed'
+              : role === 'builder'
                 ? [
                     {
-                      kind: 'finding',
-                      title: 'Serious correction',
-                      content: 'Add a second change file.',
+                      kind: 'evidence',
+                      title: 'Verification',
+                      path: join(directory, 'verification.md'),
                     },
                   ]
-                : [],
+                : instruction.outcome === 'changes-needed'
+                  ? [
+                      {
+                        kind: 'finding',
+                        title: 'Serious correction',
+                        content: 'Add a second change file.',
+                      },
+                    ]
+                  : [],
         }),
   )

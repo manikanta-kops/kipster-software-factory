@@ -134,8 +134,9 @@ through the existing lifecycle, never through a saved agent conversation.
 `executors/process.ts` launches commands through a small Node supervisor. Each
 command has its own POSIX process group. A timeout, cancellation or shutdown
 kills the entire group. IPC disconnect also kills it if the factory crashes
-(including SIGKILL); descendants are terminated when the leader exits. The
-supervisor is not a sandbox. Agents use the owner's CLI logins, environment,
+(including SIGKILL); descendants are terminated when the leader exits. If a group kill reports `EPERM`, the supervisor checks the OS process table:
+only a group with no live members counts as already stopped. A permission
+failure with live members still fails the attempt. The supervisor is not a sandbox. Agents use the owner's CLI logins, environment,
 configuration and unrestricted tools on the Mac. Role instructions reserve
 pushes and GitHub mutations for system steps.
 
@@ -176,10 +177,19 @@ Verified against installed Codex **0.160.0** and Claude Code **2.1.289**:
   command resumes a session or restricts tools. Stdout and stderr stream to an
   on-disk log recorded as an artifact before launching, including failed runs.
 
+`kf serve --no-scheduler` and `npm run dev -- --no-scheduler` serve the UI/API
+without executing tickets. Demo seeding holds the scheduler's advisory lock,
+requires an empty database and permanently marks it as demo before inserting
+fixtures. A scheduler refuses that database before recovery or cloning. Migration
+003 also recognizes existing demo-shop data. Development uses `.local/factory`
+by default so its database and workspace IDs stay together across checkouts.
+
 ### Workspaces and evidence
 
 `workspace/` serializes Git operations per repository. Registered pending
-repositories are cloned and marked ready or failed through the store. The cache
+repositories are cloned and marked ready or failed through the store. The cache's
+`origin/HEAD` supplies the default branch; attempts also repair old registrations
+that assumed `main`. The cache
 is kept at `repositories/<repository-id>/repo`; ticket worktrees live at
 `worktrees/<ticket-id>/repo`, on the ticket's `kipster/<number>-<slug>` branch.
 Before creating a ticket worktree, the cache fetches origin and branches from
@@ -189,8 +199,12 @@ without a matching record are never adopted.
 
 Only terminal (`done` or `cancelled`) tickets are eligible for removal, after
 their executor has exited. Cleanup uses `git worktree remove` without force and
-keeps branch references. Dirty, untracked, ignored or locked worktrees are
-retained for inspection. The cache and `steps/` evidence are retained. This slice
+keeps branch references. Dirty, untracked or locked worktrees are retained for inspection. Cleanup removes
+only ignored directories named `node_modules`, `dist`, `build`, `coverage`,
+`playwright-report` or `test-results`, after checking ownership, branch, locks,
+tracked content and symlinks. All other ignored files retain the worktree.
+The database records successful removal (or an already absent worktree), so
+subsequent passes and restarts skip it. The cache and `steps/` evidence are retained. This slice
 does not synchronize branches with a moving base, run CI or provision kit
 capabilities; workflows needing those capabilities remain gated by the store.
 
@@ -242,8 +256,10 @@ parsed for routing. Logs survive failures and cancellation.
 `needs-decision`. It pushes the ticket branch, then calls the small `github/`
 interface backed by `gh`. It looks up the repository's existing PR for the branch
 (including closed and merged PRs), updates an open PR's title/body or creates one
-if none exists. The title is the ticket title; the body combines the ticket,
-plan, writer notes and step summaries. The URL is persisted before reporting
+if none exists. The title is the ticket title; the body combines the ticket, approved plan,
+latest finished step summaries, successful verification evidence and writer
+notes. Superseded plans, prior review rounds and operational human notes stay
+in the ticket timeline. The URL is persisted before reporting
 `ready`, making retry after a partial publication idempotent. `merge` parks the
 attempt as `pull-request-merge`; polling reports `merged` or `rejected` when the
 owner merges or closes it. The factory never invokes `gh pr merge`. Other system
