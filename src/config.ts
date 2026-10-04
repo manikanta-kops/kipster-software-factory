@@ -19,7 +19,38 @@ export function defaultHome(): string {
   return join(homedir(), '.kipster-factory')
 }
 
+export const agentConfig = z.strictObject({
+  cli: z.enum(['codex', 'claude']),
+  model: z.string().min(1).optional(),
+})
+export const engineConfig = z.object({
+  concurrency: z.int().positive().default(2),
+  stepTimeoutMinutes: z.number().positive().default(60),
+  agents: z
+    .strictObject({
+      default: agentConfig.default({ cli: 'codex' }),
+      roles: z
+        .partialRecord(
+          z.enum([
+            'planner',
+            'builder',
+            'reviewer',
+            'writer',
+            'tester',
+            'reproducer',
+            'onboarder',
+          ]),
+          agentConfig,
+        )
+        .default({}),
+    })
+    .default({ default: { cli: 'codex' }, roles: {} }),
+})
+export type EngineConfig = z.infer<typeof engineConfig>
+export type AgentConfig = z.infer<typeof agentConfig>
+
 const configFile = z.strictObject({
+  ...engineConfig.shape,
   databaseUrl: z.string().min(1),
   port: z.int().min(1).max(65_535).default(DEFAULT_PORT),
   allowedOrigins: z

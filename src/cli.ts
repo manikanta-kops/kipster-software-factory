@@ -61,6 +61,9 @@ async function main(argv: string[]): Promise<number> {
       databaseUrl: config.databaseUrl,
       port: port ?? config.port,
       allowedOrigins: config.allowedOrigins,
+      concurrency: config.concurrency,
+      stepTimeoutMinutes: config.stepTimeoutMinutes,
+      agents: config.agents,
     }
   }
 

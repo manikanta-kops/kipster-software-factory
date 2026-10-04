@@ -594,6 +594,31 @@ export async function setPullRequestUrl(
   })
 }
 
+/** Keeps evidence available even when an executor fails or the ticket is cancelled. */
+export async function addAttemptArtifacts(
+  database: Database,
+  attemptId: number,
+  artifacts: readonly ArtifactInput[],
+): Promise<void> {
+  const parsed = parseStepResult({
+    outcome: 'evidence',
+    summary: 'Executor evidence',
+    artifacts,
+  })
+  await transaction(database, async (connection) => {
+    const locked = await lockByAttempt(connection, attemptId)
+    const events: NewEvent[] = []
+    await insertArtifacts(
+      connection,
+      locked.id,
+      attemptId,
+      parsed.artifacts,
+      events,
+    )
+    await recordEvents(connection, events)
+  })
+}
+
 // Lifecycle plumbing
 
 interface Locked {
