@@ -1,23 +1,18 @@
 // Starts a local development factory: a persistent PostgreSQL cluster under .local/,
 // the API with file watching, and the Vite dev server for the web app.
 import { type ChildProcess, spawn } from 'node:child_process'
-import { createHash } from 'node:crypto'
 import { join } from 'node:path'
-import { fileURLToPath } from 'node:url'
-import { Client } from 'pg'
 import { DEFAULT_PORT } from '../src/config.ts'
-import { clusterUrl, startCluster, stopCluster } from './postgres.ts'
-
-const root = fileURLToPath(new URL('..', import.meta.url))
-const repoKey = createHash('sha256').update(root).digest('hex').slice(0, 8)
-const cluster = {
-  data: join(root, '.local', 'postgres'),
-  socketDirectory: join('/tmp', `ksf-dev-${repoKey}`),
-}
-const DATABASE = 'factory'
+import {
+  devCluster as cluster,
+  devDatabaseUrl,
+  ensureDevDatabase,
+  root,
+} from './dev-database.ts'
+import { startCluster, stopCluster } from './postgres.ts'
 
 startCluster(cluster)
-await ensureDatabase()
+await ensureDevDatabase()
 
 const children: ChildProcess[] = [
   spawn(
@@ -28,7 +23,7 @@ const children: ChildProcess[] = [
       'src/cli.ts',
       'serve',
       '--database-url',
-      clusterUrl(cluster, DATABASE),
+      devDatabaseUrl,
       '--port',
       String(DEFAULT_PORT),
     ],
@@ -58,18 +53,4 @@ for (const child of children) {
       process.exitCode = 1
     }
   })
-}
-
-async function ensureDatabase() {
-  const client = new Client({ connectionString: clusterUrl(cluster) })
-  await client.connect()
-  try {
-    const { rowCount } = await client.query(
-      'SELECT 1 FROM pg_database WHERE datname = $1',
-      [DATABASE],
-    )
-    if (rowCount === 0) await client.query(`CREATE DATABASE ${DATABASE}`)
-  } finally {
-    await client.end()
-  }
 }

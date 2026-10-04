@@ -48,14 +48,20 @@ async function main(argv: string[]): Promise<number> {
     return 0
   }
 
+  const home = values.home ?? defaultHome()
   const settings = async () => {
     const port = values.port === undefined ? undefined : parsePort(values.port)
     const databaseUrl = values['database-url']
     if (databaseUrl !== undefined) {
-      return { databaseUrl, port: port ?? DEFAULT_PORT }
+      return { home, databaseUrl, port: port ?? DEFAULT_PORT }
     }
-    const config = await readConfig(values.home ?? defaultHome())
-    return { databaseUrl: config.databaseUrl, port: port ?? config.port }
+    const config = await readConfig(home)
+    return {
+      home,
+      databaseUrl: config.databaseUrl,
+      port: port ?? config.port,
+      allowedOrigins: config.allowedOrigins,
+    }
   }
 
   if (command === 'migrate') {

@@ -248,3 +248,22 @@ function checkRoutes(step: Step, ids: Set<string>, errors: string[]) {
 function message(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
 }
+
+/** Capabilities the workflow's steps need that `provided` lacks, with the steps that need each. */
+export function missingCapabilities(
+  workflow: Workflow,
+  provided: readonly string[],
+): readonly {
+  readonly capability: string
+  readonly steps: readonly string[]
+}[] {
+  const missing = new Map<string, string[]>()
+  for (const step of workflow.steps) {
+    if (step.kind === 'human') continue
+    for (const need of step.needs) {
+      if (provided.includes(need)) continue
+      missing.set(need, [...(missing.get(need) ?? []), step.id])
+    }
+  }
+  return [...missing].map(([capability, steps]) => ({ capability, steps }))
+}

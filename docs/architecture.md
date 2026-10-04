@@ -39,10 +39,12 @@ The catalog in `src/domain/catalog.ts` is the single list of each.
 
 ```
 src/
-  domain/       Pure rules: catalog, workflow parsing and validation, routing.
+  domain/       Pure rules: catalog, workflow parsing and validation, routing,
+                the ticket lifecycle and the records the API returns.
                 No I/O; the web app imports its types.
   library/      Loads and versions workflow files.
-  store/        PostgreSQL access and append-only migrations.
+  store/        PostgreSQL access and append-only migrations. The only place
+                that writes SQL; the engine and API call its functions.
   api/          HTTP API (Hono) and the response contract shared with the web app.
   server.ts     Composes the store, library and API into a running factory.
   cli.ts        `kf serve | migrate | check`.
@@ -75,6 +77,29 @@ flowchart LR
   N -->|ask| H
   N -->|finish or cancel| D[Done]
 ```
+
+## Ticket lifecycle
+
+A ticket runs one step at a time as a series of **attempts**; the database
+allows at most one open (pending, running or waiting) attempt per ticket.
+`src/domain/lifecycle.ts` decides every move and `src/store/tickets.ts` applies
+it, with its artifacts and events, in one transaction.
+
+- Agent and system steps start as `pending`. A scheduler claims them, marks
+  them `running`, then completes them with a `StepResult` or fails them.
+- Human steps start as `waiting` for you: approved, changes-needed (with a
+  comment) or rejected.
+- An outcome routed to `ask`, a failed attempt, or a second interruption in a
+  row opens a `waiting` ask at that step. You retry it, move to any step, or
+  cancel, optionally with a note.
+- A merge step can wait for its pull request to be merged, then complete.
+- Limits count finished runs of a step; interrupted attempts and asks do not
+  count. An interrupted attempt is retried once automatically.
+- The ticket's status comes from its latest attempt: queued, running,
+  needs-you, done or cancelled.
+
+Every write appends events. `GET /api/events` streams them with Server-Sent
+Events, and a client that reconnects with Last-Event-ID misses nothing.
 
 ## Repositories on disk
 

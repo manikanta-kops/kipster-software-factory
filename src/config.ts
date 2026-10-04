@@ -5,6 +5,15 @@ import { z } from 'zod'
 
 export const DEFAULT_PORT = 4600
 
+/** Browser origins allowed to call the API: the Vite dev server and the Tauri desktop shell. */
+export const DEFAULT_ALLOWED_ORIGINS: readonly string[] = [
+  'http://localhost:5173',
+  'http://127.0.0.1:5173',
+  'tauri://localhost',
+  'http://tauri.localhost',
+  'https://tauri.localhost',
+]
+
 /** Where the factory keeps its configuration and, later, repository caches and evidence. */
 export function defaultHome(): string {
   return join(homedir(), '.kipster-factory')
@@ -13,6 +22,9 @@ export function defaultHome(): string {
 const configFile = z.strictObject({
   databaseUrl: z.string().min(1),
   port: z.int().min(1).max(65_535).default(DEFAULT_PORT),
+  allowedOrigins: z
+    .array(z.string().min(1))
+    .default(() => [...DEFAULT_ALLOWED_ORIGINS]),
 })
 
 export type FactoryConfig = z.infer<typeof configFile>

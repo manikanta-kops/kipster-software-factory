@@ -66,6 +66,11 @@ export function startCluster(cluster: Cluster): void {
   }
 }
 
+export function isClusterRunning(cluster: Cluster): boolean {
+  const result = spawnSync('pg_ctl', ['-D', cluster.data, 'status'], { env })
+  return result.status === 0
+}
+
 export function stopCluster(cluster: Cluster): void {
   try {
     run('pg_ctl', ['-D', cluster.data, '-m', 'fast', '-w', '-t', '60', 'stop'])
