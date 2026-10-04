@@ -32,11 +32,27 @@ readable evidence linked to a commit and clearer runtime/cleanup status.
 
 ## Slice 3: Ready to merge
 
-`maintain-pr` keeps the pull request current: updates from base, waits for CI,
-and sends the ticket back when either changes something. The writer keeps the
-description clear, with a diagram. Pull request comments become
-`changes-needed`. The Slice 1 run also showed the need for a concise PR
-narrative linking to evidence instead of embedding the full plan and logs.
+The system-action path is implemented and covered locally. `maintain-pr` fetches
+and merges the default branch without rewriting history, aborts conflicts with
+file findings, and reports `base-moved` when the latest tester verdict no longer
+covers the resulting commit. A fresh writer session creates a short description
+per head with evidence links, `Verified at <sha>`, an optional Mermaid diagram,
+and a Merge danger line explaining reversibility and blast radius.
+
+After pushing, CI is checked at the exact head. Pending checks park persistently
+without a scheduler slot. Required checks must pass; failures return log excerpts
+to the builder, no checks continue immediately, and `with.ciTimeoutMinutes`
+(default 60) bounds waiting with an owner decision. `with.factoryUrl` sets the
+public evidence-link origin. While merge waits, current change requests and new
+owner comments become deduplicated comment artifacts and `changes-needed`.
+The owner still performs every merge.
+
+Local coverage uses PostgreSQL, bare Git remotes, stubbed GitHub and the fake
+writer. This slice is not yet proven end to end on the factory-floor: a live
+GitHub run must exercise base movement/retest, CI pending/failure/log retrieval,
+owner feedback/rebuild, and merge/close. The independent tester execution and
+web presentation work are separate changes; this PR adds the additive
+`pull-request-checks` waiting value for the web to display.
 
 ## Slice 4: Decisions and merging
 

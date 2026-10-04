@@ -28,7 +28,12 @@ export type AttemptStatus = (typeof ATTEMPT_STATUSES)[number]
 export const OPEN_STATUSES = ['pending', 'running', 'waiting'] as const
 export type OpenStatus = (typeof OPEN_STATUSES)[number]
 
-export const WAITING_FOR = ['human', 'ask', 'pull-request-merge'] as const
+export const WAITING_FOR = [
+  'human',
+  'ask',
+  'pull-request-merge',
+  'pull-request-checks',
+] as const
 export type WaitingFor = (typeof WAITING_FOR)[number]
 
 /** Why a ticket asks you: the routing reasons, plus a failed step or a step interrupted twice. */

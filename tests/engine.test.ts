@@ -117,6 +117,12 @@ async function setup(t: TestContext, script: object = {}) {
   const requests: Parameters<GitHub['maintain']>[0][] = []
   let inspections = 0
   const github: GitHub = {
+    async checks() {
+      return { state: 'none', failures: [] }
+    },
+    async feedback() {
+      return []
+    },
     async maintain(input) {
       requests.push(input)
       return { url: 'https://github.com/fixture/repo/pull/1', state }
@@ -221,19 +227,13 @@ test('quick-change: approval, two builds, review loop, PR, merge wait and termin
   assert.equal(waiting.attempts.filter((a) => a.stepId === 'build').length, 2)
   assert.equal(f.requests.length, 1)
   assert.equal(f.requests[0]!.title, ticket.title)
-  assert.match(f.requests[0]!.body, /Acceptance plan 2/)
-  assert.match(f.requests[0]!.body, /Verification build 2/)
+  assert.match(f.requests[0]!.body, /Verified at [a-f0-9]{40}/)
+  assert.match(f.requests[0]!.body, /Merge danger: two-way door/)
   assert.doesNotMatch(
     f.requests[0]!.body,
-    /Acceptance plan 1|Verification build 1|Revise the original/,
+    /Acceptance plan|Verification build|fake reviewer/,
   )
-  assert.match(f.requests[0]!.body, /fake builder completed 2/)
-  assert.match(f.requests[0]!.body, /fake reviewer completed 2/)
-  assert.doesNotMatch(
-    f.requests[0]!.body,
-    /fake builder completed 1|fake reviewer completed 1|Use the plan/,
-  )
-  assert.equal(waiting.artifacts.filter((a) => a.kind === 'log').length, 6)
+  assert.equal(waiting.artifacts.filter((a) => a.kind === 'log').length, 7)
   const buildPrompt = await readFile(
     join(f.invocations[4]!, 'prompt.md'),
     'utf8',

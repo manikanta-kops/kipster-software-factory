@@ -469,6 +469,7 @@ function isRunning(attempt: AttemptState): boolean {
   return (
     attempt.status === 'running' ||
     (attempt.status === 'waiting' &&
-      attempt.waitingFor === 'pull-request-merge')
+      (attempt.waitingFor === 'pull-request-merge' ||
+        attempt.waitingFor === 'pull-request-checks'))
   )
 }

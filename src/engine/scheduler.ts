@@ -1,3 +1,7 @@
+import {
+  pollPullRequestChecks,
+  pollPullRequestFeedback,
+} from './pull-requests.ts'
 import { run as runProcess } from '../executors/process.ts'
 import { engineConfig, type EngineConfig } from '../config.ts'
 import { executeAgent, type AgentExecutor } from '../executors/cli.ts'
@@ -48,6 +52,14 @@ export async function startScheduler(
       markRepositoryReady(database, repository.id, { defaultBranch, kit }),
   )
   const github = options.github ?? realGitHub
+  const runnerOptions = {
+    database,
+    home: workspaces.home,
+    config,
+    workspaces,
+    github,
+    execute: options.execute ?? executeAgent,
+  }
   const report =
     options.onError ?? ((error: unknown) => console.error('Scheduler:', error))
   const lifetime = new AbortController()
@@ -150,6 +162,22 @@ export async function startScheduler(
     }
     if (Date.now() >= nextMergePoll) {
       nextMergePoll = Date.now() + (options.mergePollMs ?? 60_000)
+      for (const context of await listWaitingForMerge(
+        database,
+        'pull-request-checks',
+      )) {
+        if (stopped) return
+        if (active.has(context.attempt.id)) continue
+        try {
+          await pollPullRequestChecks(
+            runnerOptions,
+            context,
+            AbortSignal.any([lifetime.signal, AbortSignal.timeout(30_000)]),
+          )
+        } catch (error) {
+          if (!stopped) report(error)
+        }
+      }
       for (const context of await listWaitingForMerge(database)) {
         if (stopped) return
         try {
@@ -159,7 +187,13 @@ export async function startScheduler(
             context.ticket.pullRequestUrl,
             AbortSignal.any([lifetime.signal, AbortSignal.timeout(30_000)]),
           )
-          if (pr.state !== 'OPEN') {
+          if (pr.state === 'OPEN') {
+            await pollPullRequestFeedback(
+              runnerOptions,
+              context,
+              AbortSignal.any([lifetime.signal, AbortSignal.timeout(30_000)]),
+            )
+          } else {
             const signal = AbortSignal.any([
               lifetime.signal,
               AbortSignal.timeout(30_000),

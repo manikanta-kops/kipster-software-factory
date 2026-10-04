@@ -1,3 +1,5 @@
+import { inspectChecks, type Checks } from './checks.ts'
+import { inspectFeedback, type PullRequestFeedback } from './feedback.ts'
 import { run } from '../executors/process.ts'
 
 export interface PullRequest {
@@ -5,6 +7,17 @@ export interface PullRequest {
   state: 'OPEN' | 'MERGED' | 'CLOSED'
 }
 export interface GitHub {
+  checks(
+    repository: string,
+    url: string,
+    head: string,
+    signal: AbortSignal,
+  ): Promise<Checks>
+  feedback(
+    repository: string,
+    url: string,
+    signal: AbortSignal,
+  ): Promise<PullRequestFeedback[]>
   maintain(input: {
     repository: string
     branch: string
@@ -22,6 +35,10 @@ export interface GitHub {
 }
 export function createGitHub(command: typeof run = run): GitHub {
   return {
+    checks: (repository, url, head, signal) =>
+      inspectChecks(command, repository, url, head, signal),
+    feedback: (repository, url, signal) =>
+      inspectFeedback(command, repository, url, signal),
     async maintain({ repository, branch, base, title, body, cwd, signal }) {
       const prs = JSON.parse(
         await command(

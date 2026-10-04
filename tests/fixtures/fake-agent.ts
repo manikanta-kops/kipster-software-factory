@@ -73,22 +73,30 @@ if (!instruction.missing)
                     content: `Acceptance plan ${count + 1}: committed change file exists.`,
                   },
                 ]
-              : role === 'builder'
+              : role === 'writer'
                 ? [
                     {
-                      kind: 'evidence',
-                      title: 'Verification',
-                      path: join(directory, 'verification.md'),
+                      kind: 'note',
+                      title: 'PR description',
+                      content: `This change implements the requested behavior.\n\nEvidence: [factory](${JSON.parse(/Evidence links: (.+)/.exec(prompt)?.[1] ?? '[]')[0]?.url ?? /Ticket timeline: (\S+)/.exec(prompt)?.[1] ?? 'http://localhost:4600'}).\n\nVerified at ${/Head commit: ([a-f0-9]+)/.exec(prompt)?.[1]}\n\nMerge danger: two-way door; revert the commit. Blast radius: this repository.`,
                     },
                   ]
-                : instruction.outcome === 'changes-needed'
+                : role === 'builder'
                   ? [
                       {
-                        kind: 'finding',
-                        title: 'Serious correction',
-                        content: 'Add a second change file.',
+                        kind: 'evidence',
+                        title: 'Verification',
+                        path: join(directory, 'verification.md'),
                       },
                     ]
-                  : [],
+                  : instruction.outcome === 'changes-needed'
+                    ? [
+                        {
+                          kind: 'finding',
+                          title: 'Serious correction',
+                          content: 'Add a second change file.',
+                        },
+                      ]
+                    : [],
         }),
   )

@@ -1,10 +1,11 @@
+import { maintainPullRequest } from './pull-requests.ts'
 import { loadKit } from '../kit/kit.ts'
 import {
   startVerification,
   VerificationError,
   verificationFinding,
 } from '../verification/harness.ts'
-import { copyFile, mkdir, readFile, writeFile } from 'node:fs/promises'
+import { copyFile, mkdir, writeFile } from 'node:fs/promises'
 import { extname, join } from 'node:path'
 import type { EngineConfig } from '../config.ts'
 import { markRepositoryReady } from '../store/repositories.ts'
@@ -14,7 +15,6 @@ import {
   completeAttempt,
   getTicketDetail,
   recordAttemptHeadCommit,
-  setPullRequestUrl,
   waitForPullRequestMerge,
   type AttemptContext,
 } from '../store/tickets.ts'
@@ -55,7 +55,7 @@ async function executeAttempt(
   context: AttemptContext,
   signal: AbortSignal,
 ): Promise<void> {
-  const { database, home, config, workspaces, github, execute } = options
+  const { database, home, config, workspaces, execute } = options
   const { ticket, step, attempt } = context
   let { repository } = context
   const detail = await getTicketDetail(database, ticket.number)
@@ -231,98 +231,6 @@ async function executeAttempt(
       return
     }
   } else if (step.kind === 'system' && step.action === 'maintain-pr') {
-    if (Number(await git(['rev-list', '--count', `${base}..HEAD`])) === 0) {
-      await completeAttempt(
-        database,
-        attempt.id,
-        {
-          outcome: 'needs-decision',
-          summary: 'The ticket branch has no commits to publish.',
-          artifacts: [],
-        },
-        { headCommit: await git(['rev-parse', 'HEAD']) },
-      )
-      return
-    }
-    await git(['push', '--set-upstream', 'origin', ticket.branch])
-    const approval = detail.attempts.findLast(
-      (a) => a.waitingFor === 'human' && a.outcome === 'approved',
-    )
-    const plan = approval
-      ? detail.artifacts.findLast(
-          (a) => a.kind === 'plan' && a.attemptId < approval.id,
-        )
-      : undefined
-    const latest = [
-      ...new Map(
-        detail.attempts
-          .filter(
-            (a) =>
-              a.status === 'finished' && a.summary && a.waitingFor === null,
-          )
-          .map((a) => [a.stepId, a]),
-      ).values(),
-    ]
-    const successful = new Set(
-      latest
-        .filter((a) => a.outcome === 'done' || a.outcome === 'passed')
-        .map((a) => a.id),
-    )
-    const writers = new Set(
-      detail.workflow.steps
-        .filter(
-          (candidate) =>
-            candidate.kind === 'agent' && candidate.role === 'writer',
-        )
-        .map((candidate) => candidate.id),
-    )
-    const writerAttempts = new Set(
-      latest
-        .filter((candidate) => writers.has(candidate.stepId))
-        .map((candidate) => candidate.id),
-    )
-    const descriptions = await Promise.all(
-      detail.artifacts
-        .filter(
-          (a) =>
-            a.id === plan?.id ||
-            (successful.has(a.attemptId) &&
-              a.kind === 'evidence' &&
-              (a.content !== null || /\.(md|txt)$/i.test(a.path ?? ''))) ||
-            (a.kind === 'note' && writerAttempts.has(a.attemptId)),
-        )
-        .map(
-          async (a) =>
-            `## ${a.title}\n\n${a.content ?? (await readFile(await artifactPath(home, a.path!), 'utf8'))}`,
-        ),
-    )
-    const body = [
-      ticket.body,
-      ...latest
-        .filter((a) => a.stepId !== 'plan')
-        .map((a) => `## ${a.stepId}\n\n${a.summary}`),
-      ...descriptions,
-    ].join('\n\n')
-    const pr = await github.maintain({
-      repository: repository.slug,
-      branch: ticket.branch,
-      base: repository.defaultBranch,
-      title: ticket.title,
-      body,
-      cwd,
-      signal,
-    })
-    signal.throwIfAborted()
-    await setPullRequestUrl(database, ticket.id, pr.url)
-    await completeAttempt(
-      database,
-      attempt.id,
-      {
-        outcome: 'ready',
-        summary: `Pull request: ${pr.url}`,
-        artifacts: [],
-      },
-      { headCommit: await git(['rev-parse', 'HEAD']) },
-    )
+    await maintainPullRequest(options, { ...context, repository }, cwd, signal)
   } else throw new Error(`Step ${step.id} is not supported in this slice`)
 }
