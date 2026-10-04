@@ -15,8 +15,12 @@ function unavailable(
     return `Repository is ${repository.status}. It must be ready to start a ticket.`
   const missing = [
     ...new Set(workflow.steps.flatMap((step) => step.needs)),
-  ].filter((need) => !repository.capabilities.includes(need))
-  return missing.length ? `Missing capabilities: ${missing.join(', ')}.` : null
+  ].filter((need) => !repository.kit.capabilities.includes(need))
+  return missing.includes('verify')
+    ? 'This repository needs a verified kit to run this workflow.'
+    : missing.length
+      ? `Missing capabilities: ${missing.join(', ')}.`
+      : null
 }
 export function NewTicket() {
   const repositories = useQuery(repositoriesQuery)
@@ -32,6 +36,21 @@ export function NewTicket() {
   const selectedWorkflow = workflows.data?.workflows.find(
     (item) => item.name === workflow,
   )
+  const onboardWorkflow = workflows.data?.workflows.find(
+    (item) => item.name === 'onboard-repo',
+  )
+  const needsKit =
+    selectedRepository &&
+    workflows.data?.workflows.some(
+      (item) =>
+        ['feature', 'bug'].includes(item.name) &&
+        item.steps.some((step) => step.needs.includes('verify')) &&
+        !selectedRepository.kit.capabilities.includes('verify'),
+    )
+  const canOnboard =
+    needsKit &&
+    onboardWorkflow &&
+    !unavailable(selectedRepository, onboardWorkflow)
   const canCreate =
     selectedWorkflow &&
     !unavailable(selectedRepository, selectedWorkflow) &&
@@ -88,6 +107,31 @@ export function NewTicket() {
               </a>{' '}
               to start.
             </p>
+          )}
+          {canOnboard && (
+            <aside
+              className="onboard-shortcut"
+              aria-label="Repository onboarding"
+            >
+              <p>
+                Start an onboard-repo ticket to prepare and verify the kit for{' '}
+                {repository}.
+              </p>
+              <button
+                type="button"
+                disabled={create.isPending}
+                onClick={() =>
+                  create.mutate({
+                    repository,
+                    workflow: 'onboard-repo',
+                    title: `Verify the kit for ${repository}`,
+                    body: 'Prepare a repository kit and verify it so feature and bug workflows can run.',
+                  })
+                }
+              >
+                {create.isPending ? 'Creating…' : 'Start onboard-repo ticket'}
+              </button>
+            </aside>
           )}
           <fieldset className="workflow-choices">
             <legend>Workflow</legend>
