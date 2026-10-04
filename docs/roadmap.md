@@ -17,12 +17,10 @@ CLIs, each ending with a `result.json` outcome. Human steps appear in Needs you
 with approve, change and reject. A system step opens the pull request. The
 ticket page shows the plan, comments and every attempt.
 
-Proven on 2026-10-04 with the real default Codex executor, web-only ticket
-operations, a requested plan revision, independent review and
-[factory-floor PR #1](https://github.com/manikanta-kops/kipster-factory-floor/pull/1).
-Crash/retry, a real decision and cancellation cleanup were exercised. The PR
-is left for the owner to merge. See the [acceptance record](slice-1-acceptance.md)
-for the timeline, fixes, tests and remaining limits.
+Proven with the real default Codex executor on the factory-floor test bed:
+web-only ticket operations, a requested plan revision, independent review and
+an opened pull request, plus crash recovery, a real decision and cancellation
+cleanup.
 
 ## Slice 2: Proof
 

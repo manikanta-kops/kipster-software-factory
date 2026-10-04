@@ -10,8 +10,8 @@ interrupts you for decisions that are yours to make.
 > **Status: Slice 1 complete.** Register a repository, create and approve a
 > ticket in the web app, and let fresh agents build and review it before a
 > system step opens its pull request. Proven on the private factory-floor test
-> bed; the owner merges. See the [acceptance run](docs/slice-1-acceptance.md) and
-> [roadmap](docs/roadmap.md) for evidence and the next slices.
+> bed; the owner merges. See the [roadmap](docs/roadmap.md) for the next
+> slices.
 
 ## How it works
 
