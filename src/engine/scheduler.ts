@@ -19,6 +19,7 @@ import {
   listTickets,
   listWaitingForMerge,
   markRunning,
+  markWorktreeCleaned,
   type AttemptContext,
 } from '../store/tickets.ts'
 import { Workspaces } from '../workspace/workspaces.ts'
@@ -169,11 +170,12 @@ export async function startScheduler(
     })) {
       if (stopped) return
       try {
-        await workspaces.prepareRepository(
+        const defaultBranch = await workspaces.prepareRepository(
           repository,
           AbortSignal.any([lifetime.signal, AbortSignal.timeout(300_000)]),
         )
-        if (!stopped) await markRepositoryReady(database, repository.id)
+        if (!stopped)
+          await markRepositoryReady(database, repository.id, { defaultBranch })
       } catch (error) {
         if (!stopped)
           await markRepositoryFailed(database, repository.id, String(error))
@@ -181,6 +183,7 @@ export async function startScheduler(
     }
     for (const ticket of await listTickets(database, {
       status: ['done', 'cancelled'],
+      cleanupPending: true,
     })) {
       if (stopped) return
       if (
@@ -192,7 +195,8 @@ export async function startScheduler(
       const repository = await getRepositoryById(database, ticket.repository.id)
       if (repository) {
         try {
-          await workspaces.cleanup(ticket, repository, lifetime.signal)
+          if (await workspaces.cleanup(ticket, repository, lifetime.signal))
+            await markWorktreeCleaned(database, ticket.id)
         } catch (error) {
           if (!stopped) report(error)
         }

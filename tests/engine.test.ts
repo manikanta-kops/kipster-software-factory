@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict'
 import { execFileSync, spawn } from 'node:child_process'
 import {
+  symlink,
+  rename,
   mkdtemp,
   mkdir,
   writeFile,
@@ -31,6 +33,7 @@ import {
   decide,
   getTicketDetail,
   markRunning,
+  listTickets,
   resolveAsk,
 } from '../src/store/tickets.ts'
 import { Workspaces } from '../src/workspace/workspaces.ts'
@@ -196,6 +199,18 @@ test('quick-change: approval, two builds, review loop, PR, merge wait and termin
   await decide(f.store.database, {
     ticketNumber: ticket.number,
     attemptId: approval.ticket.waiting!.attemptId,
+    choice: 'changes-needed',
+    comment: 'Revise the original plan.',
+  })
+  const revised = await until(
+    () => f.detail(ticket.number),
+    (d) =>
+      d.ticket.waiting?.for === 'human' &&
+      d.ticket.waiting.attemptId !== approval.ticket.waiting!.attemptId,
+  )
+  await decide(f.store.database, {
+    ticketNumber: ticket.number,
+    attemptId: revised.ticket.waiting!.attemptId,
     choice: 'approved',
     comment: 'Use the plan.',
   })
@@ -206,10 +221,21 @@ test('quick-change: approval, two builds, review loop, PR, merge wait and termin
   assert.equal(waiting.attempts.filter((a) => a.stepId === 'build').length, 2)
   assert.equal(f.requests.length, 1)
   assert.equal(f.requests[0]!.title, ticket.title)
-  assert.match(f.requests[0]!.body, /Acceptance/)
-  assert.equal(waiting.artifacts.filter((a) => a.kind === 'log').length, 5)
+  assert.match(f.requests[0]!.body, /Acceptance plan 2/)
+  assert.match(f.requests[0]!.body, /Verification build 2/)
+  assert.doesNotMatch(
+    f.requests[0]!.body,
+    /Acceptance plan 1|Verification build 1|Revise the original/,
+  )
+  assert.match(f.requests[0]!.body, /fake builder completed 2/)
+  assert.match(f.requests[0]!.body, /fake reviewer completed 2/)
+  assert.doesNotMatch(
+    f.requests[0]!.body,
+    /fake builder completed 1|fake reviewer completed 1|Use the plan/,
+  )
+  assert.equal(waiting.artifacts.filter((a) => a.kind === 'log').length, 6)
   const buildPrompt = await readFile(
-    join(f.invocations[3]!, 'prompt.md'),
+    join(f.invocations[4]!, 'prompt.md'),
     'utf8',
   )
   assert.match(buildPrompt, /Add a second change file/)
@@ -527,4 +553,172 @@ test('clone failure marks a registered repository failed', async (t) => {
     (r) => r?.status === 'failed',
   )
   assert.match(repo!.lastError!, /git exited/)
+})
+
+test('cleanup removes ignored dependencies and build output, preserves unknown state and skips cleaned tickets', async (t) => {
+  const f = await setup(t)
+  await markRepositoryReady(f.store.database, f.repository.id)
+  const ticket = await f.ticket()
+  const workspaces = new Workspaces(f.home)
+  const signal = new AbortController().signal
+  const cwd = await workspaces.prepare(ticket, f.repository, signal)
+  await writeFile(
+    join(cwd, '.gitignore'),
+    'node_modules/\ndist/\n.env\n.local/\n',
+  )
+  await run('git', ['add', '.gitignore'], { cwd })
+  await run(
+    'git',
+    [
+      '-c',
+      'user.name=Fixture',
+      '-c',
+      'user.email=fixture@example.test',
+      'commit',
+      '-m',
+      'Ignore generated files',
+    ],
+    { cwd },
+  )
+  for (const folder of ['node_modules', 'dist', '.local']) {
+    await mkdir(join(cwd, folder))
+    await writeFile(join(cwd, folder, 'keep.txt'), folder)
+  }
+  await writeFile(join(cwd, '.env'), 'secret')
+  const terminal = { ...ticket, status: 'cancelled' as const }
+  assert.equal(await workspaces.cleanup(terminal, f.repository, signal), false)
+  assert.equal(await exists(join(cwd, 'node_modules')), false)
+  assert.equal(await exists(join(cwd, 'dist')), false)
+  assert.equal(await readFile(join(cwd, '.env'), 'utf8'), 'secret')
+  assert.equal(
+    await readFile(join(cwd, '.local', 'keep.txt'), 'utf8'),
+    '.local',
+  )
+  await rm(join(cwd, '.env'))
+  await rm(join(cwd, '.local'), { recursive: true })
+  await cancelTicket(f.store.database, { ticketNumber: ticket.number })
+  await f.start()
+  await until(
+    () => exists(cwd),
+    (present) => !present,
+  )
+  await until(
+    () =>
+      listTickets(f.store.database, {
+        status: ['cancelled'],
+        cleanupPending: true,
+      }),
+    (tickets) => tickets.length === 0,
+  )
+  assert.equal(await exists(workspaces.cache(f.repository)), true)
+  assert.equal(await workspaces.cleanup(terminal, f.repository, signal), true)
+})
+
+test('cleanup preserves locked worktrees and ignored symlinks', async (t) => {
+  const f = await setup(t)
+  await markRepositoryReady(f.store.database, f.repository.id)
+  const ticket = await f.ticket()
+  const workspaces = new Workspaces(f.home)
+  const signal = new AbortController().signal
+  const cwd = await workspaces.prepare(ticket, f.repository, signal)
+  await writeFile(join(cwd, '.gitignore'), 'dist/\nnode_modules\n')
+  await run('git', ['add', '.gitignore'], { cwd })
+  await run(
+    'git',
+    [
+      '-c',
+      'user.name=Fixture',
+      '-c',
+      'user.email=fixture@example.test',
+      'commit',
+      '-m',
+      'Ignore output',
+    ],
+    { cwd },
+  )
+  await mkdir(join(cwd, 'dist'))
+  await writeFile(join(cwd, 'dist', 'output'), 'output')
+  await run('git', ['worktree', 'lock', cwd], {
+    cwd: workspaces.cache(f.repository),
+  })
+  const terminal = { ...ticket, status: 'done' as const }
+  assert.equal(await workspaces.cleanup(terminal, f.repository, signal), false)
+  assert.equal(await exists(join(cwd, 'dist', 'output')), true)
+  await run('git', ['worktree', 'unlock', cwd], {
+    cwd: workspaces.cache(f.repository),
+  })
+  await symlink(f.root, join(cwd, 'node_modules'))
+  assert.equal(await workspaces.cleanup(terminal, f.repository, signal), false)
+  assert.equal(
+    await readFile(join(f.root, 'source', 'README.md'), 'utf8'),
+    'fixture\n',
+  )
+})
+
+test('registration discovers a non-main default branch and retries repair old registrations', async (t) => {
+  const f = await setup(t)
+  await run('git', ['branch', '-m', 'main', 'next'], { cwd: f.bare })
+  await f.start()
+  const ticket = await f.ticket()
+  await until(
+    () => f.detail(ticket.number),
+    (d) => d.ticket.waiting?.for === 'human',
+  )
+  assert.equal(
+    (await getRepository(f.store.database, f.repository.slug))?.defaultBranch,
+    'next',
+  )
+  await markRepositoryReady(f.store.database, f.repository.id, {
+    defaultBranch: 'main',
+  })
+  const second = await f.ticket('Repair legacy registration')
+  await until(
+    () => f.detail(second.number),
+    (d) => d.ticket.waiting?.for === 'human',
+  )
+  assert.equal(
+    (await getRepository(f.store.database, f.repository.slug))?.defaultBranch,
+    'next',
+  )
+})
+
+test('cleanup never follows a replaced worktree root symlink', async (t) => {
+  const f = await setup(t)
+  await markRepositoryReady(f.store.database, f.repository.id)
+  const ticket = await f.ticket()
+  const workspaces = new Workspaces(f.home)
+  const signal = new AbortController().signal
+  const cwd = await workspaces.prepare(ticket, f.repository, signal)
+  await writeFile(join(cwd, '.gitignore'), 'dist/\n')
+  await run('git', ['add', '.gitignore'], { cwd })
+  await run(
+    'git',
+    [
+      '-c',
+      'user.name=Fixture',
+      '-c',
+      'user.email=fixture@example.test',
+      'commit',
+      '-m',
+      'Ignore output',
+    ],
+    { cwd },
+  )
+  await mkdir(join(cwd, 'dist'))
+  await writeFile(join(cwd, 'dist', 'keep'), 'external output')
+  const moved = join(f.root, 'moved-worktree')
+  await rename(cwd, moved)
+  await symlink(moved, cwd)
+  assert.equal(
+    await workspaces.cleanup(
+      { ...ticket, status: 'cancelled' },
+      f.repository,
+      signal,
+    ),
+    false,
+  )
+  assert.equal(
+    await readFile(join(moved, 'dist', 'keep'), 'utf8'),
+    'external output',
+  )
 })
