@@ -11,7 +11,7 @@ import {
   root,
 } from './dev-database.ts'
 import { startCluster, stopCluster } from './postgres.ts'
-import { build } from 'vite'
+import { run } from '../src/executors/process.ts'
 
 const { values } = parseArgs({
   options: {
@@ -21,8 +21,16 @@ const { values } = parseArgs({
   },
 })
 
-// PR evidence links use the API origin, which must also serve the ticket UI.
-await build({ configFile: join(root, 'vite.config.ts') })
+// Vite mutates NODE_ENV; build separately so agents still install dev dependencies.
+console.log(
+  await run(
+    process.execPath,
+    [join(root, 'node_modules/vite/bin/vite.js'), 'build'],
+    {
+      cwd: root,
+    },
+  ),
+)
 startCluster(cluster)
 await ensureDevDatabase()
 
