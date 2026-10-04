@@ -219,7 +219,13 @@ export function createApp({
         'Content-Type': 'text/markdown; charset=utf-8',
       })
     }
-    const file = await openArtifactFile(home, artifact.path as string)
+    const file = await openArtifactFile(
+      home,
+      artifact.path as string,
+      c.req.method === 'GET' && !c.req.header('If-Range')
+        ? c.req.header('Range')
+        : undefined,
+    )
     if (!file.ok) {
       return file.reason === 'outside-home'
         ? c.json<ErrorResponse>(
@@ -233,9 +239,11 @@ export function createApp({
             404,
           )
     }
-    return c.body(file.body, 200, {
+    return c.body(file.body ?? '', file.status, {
       'Content-Type': file.type,
       'Content-Length': String(file.size),
+      'Accept-Ranges': 'bytes',
+      ...(file.contentRange ? { 'Content-Range': file.contentRange } : {}),
     })
   })
 

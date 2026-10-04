@@ -574,4 +574,33 @@ test('demo evidence endpoints provide decodable image and video with recorded ve
         (element) => (element as unknown as { videoWidth: number }).videoWidth,
       ),
   ).toBe(32)
+  type SeekingVideo = {
+    duration: number
+    currentTime: number
+    seekable: { length: number; end(index: number): number }
+  }
+  const duration = await page
+    .locator('video')
+    .evaluate((element) => (element as unknown as SeekingVideo).duration)
+  await expect
+    .poll(() =>
+      page.locator('video').evaluate((element) => {
+        const player = element as unknown as SeekingVideo
+        return player.seekable.length ? player.seekable.end(0) : 0
+      }),
+    )
+    .toBeGreaterThan(0)
+  await page.locator('video').evaluate((element) => {
+    const player = element as unknown as SeekingVideo
+    player.currentTime = player.duration / 2
+  })
+  await expect
+    .poll(() =>
+      page
+        .locator('video')
+        .evaluate(
+          (element) => (element as unknown as SeekingVideo).currentTime,
+        ),
+    )
+    .toBeCloseTo(duration / 2, 2)
 })

@@ -7,9 +7,11 @@ import { Readable } from 'node:stream'
 export type ArtifactFile =
   | {
       readonly ok: true
-      readonly body: ReadableStream<Uint8Array>
+      readonly body: ReadableStream<Uint8Array> | null
       readonly type: string
       readonly size: number
+      readonly status: 200 | 206 | 416
+      readonly contentRange?: string
     }
   | { readonly ok: false; readonly reason: 'outside-home' | 'missing' }
 
@@ -57,17 +59,57 @@ function inside(root: string, target: string): boolean {
 export async function openArtifactFile(
   home: string,
   path: string,
+  range?: string,
 ): Promise<ArtifactFile> {
   const file = await inspectArtifactFile(home, path)
   if (!file.ok) return file
+  const selected = byteRange(range, file.size)
+  const type = file.type.startsWith('text/')
+    ? `${file.type}; charset=utf-8`
+    : file.type
+  if (selected === 'unsatisfiable')
+    return {
+      ok: true,
+      body: null,
+      type,
+      size: 0,
+      status: 416,
+      contentRange: `bytes */${file.size}`,
+    }
   return {
     ok: true,
     body: Readable.toWeb(
-      createReadStream(file.path),
+      createReadStream(file.path, selected),
     ) as ReadableStream<Uint8Array>,
-    type: file.type.startsWith('text/')
-      ? `${file.type}; charset=utf-8`
-      : file.type,
-    size: file.size,
+    type,
+    size: selected ? selected.end - selected.start + 1 : file.size,
+    status: selected ? 206 : 200,
+    ...(selected
+      ? { contentRange: `bytes ${selected.start}-${selected.end}/${file.size}` }
+      : {}),
+  }
+}
+
+function byteRange(
+  header: string | undefined,
+  size: number,
+): { start: number; end: number } | 'unsatisfiable' | undefined {
+  // Ignore unsupported units, multipart and malformed ranges; serve the full file.
+  const match = /^bytes=(\d*)-(\d*)$/i.exec(header?.trim() ?? '')
+  if (!match || (!match[1] && !match[2])) return
+  const first = match[1] ? Number(match[1]) : undefined
+  const last = match[2] ? Number(match[2]) : undefined
+  if ([first, last].some((n) => n !== undefined && !Number.isSafeInteger(n)))
+    return
+  if (first !== undefined && last !== undefined && last < first) return
+  if (
+    !size ||
+    (first !== undefined && first >= size) ||
+    (first === undefined && last === 0)
+  )
+    return 'unsatisfiable'
+  return {
+    start: first ?? Math.max(0, size - last!),
+    end: first === undefined ? size - 1 : Math.min(last ?? size - 1, size - 1),
   }
 }
