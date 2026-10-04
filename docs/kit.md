@@ -140,9 +140,10 @@ and symlink checks remain. Old files receive the generic type until resolved by
 the API. Evidence files must stay under factory home, and are copied into step
 storage when an agent result is ingested.
 
-`Attempt.headCommit` is a nullable full object ID observed by the factory at
-completion. Agent steps and verify-kit/maintain-pr/merge record it; execution failures also retain
-an observation if their checkout is readable. Null
+`Attempt.headCommit` is a nullable full object ID observed by the factory.
+Ordinary agent steps and verify-kit/maintain-pr/merge record it at completion;
+tester and reproducer steps pin the tested commit before isolated execution.
+Execution failures also retain an observation if their checkout is readable. Null
 means no commit observation (legacy records, human decisions or attempts that
 failed before the branch could be read). It is separate from the agent result;
 agents cannot self-report it. Compare a verdict's commit to the latest observed
@@ -151,10 +152,17 @@ sufficient to display a stale verdict. Live branch/base movement detection and
 retest routing belong to ready-to-merge (Slice 3); this foundation does not assert
 that a stored latest commit is a live Git ref.
 
-Tester (2B) should load the trusted default-branch kit, call the harness for the
-exact ticket commit, supply URL/checkouts/evidenceDir to its fresh tester session,
-race execution against `exited`, retain evidence, discard tester edits and await
-stop in finally. Web (2C) consumes kit, mediaType and headCommit from the existing
+Tester and reproducer execution loads the trusted default-branch kit and its
+verification documents. The tester uses the exact ticket HEAD; the reproducer
+uses the base HEAD. Bug testers receive separate base and head instances and
+must attach evidence from both. The runner races agents against instance exits,
+retains evidence, discards checkout edits and awaits stop in finally. Proof
+attempts pin headCommit before execution; successful tester summaries include
+`Verified at <sha>`. `isLatestTesterVerdictCurrent(database, ticketId, sha)` in
+`store/verdicts.ts` checks the latest tester execution against a caller-supplied
+live commit. See [Independent proof](architecture.md#independent-proof-slice-2b).
+
+Web (2C) consumes kit, mediaType and headCommit from the existing
 endpoints and uses the artifact endpoint for media. Ready-to-merge (3) must compare
 live HEAD/base with verdict commits before treating evidence as current, and
 retest after synchronization. No workflow step fields or result.json fields were
