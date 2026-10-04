@@ -6,6 +6,7 @@ import { isLatestTesterVerdictCurrent } from '../store/verdicts.ts'
 import {
   completeAttempt,
   getTicketDetail,
+  requeuePullRequestMaintenance,
   setPullRequestUrl,
   waitForPullRequestMerge,
   type AttemptContext,
@@ -221,12 +222,54 @@ export async function pollPullRequestChecks(
         content: `[${f.name}](${f.url})\n\n${f.excerpt.slice(-2000)}`,
       })),
     )
+  } else if (await pollPullRequestBase(options, context, signal)) {
+    return
   } else if (checks.state !== 'pending') {
     await finish(
       'ready',
       `Pull request: ${ticket.pullRequestUrl}. ${checks.state === 'none' ? 'No checks configured.' : 'CI passed.'}`,
     )
   }
+}
+
+export async function pollPullRequestBase(
+  options: RunnerOptions,
+  context: AttemptContext,
+  signal: AbortSignal,
+): Promise<boolean> {
+  const { database, workspaces } = options
+  const { ticket, repository, attempt, workflow } = context
+  const detail = (await getTicketDetail(database, ticket.number))!
+  if (
+    !detail.attempts.some((previous) =>
+      workflow.steps.some(
+        (step) =>
+          step.id === previous.stepId &&
+          step.kind === 'system' &&
+          step.action === 'maintain-pr',
+      ),
+    )
+  )
+    return false
+  const branch = await workspaces.prepareRepository(repository, signal)
+  const cwd = workspaces.path(ticket)
+  const base = await run('git', ['rev-parse', `origin/${branch}`], {
+    cwd,
+    signal,
+  })
+  const missing = await run('git', ['rev-list', '--count', `HEAD..${base}`], {
+    cwd,
+    signal,
+  })
+  if (Number(missing) === 0) return false
+  signal.throwIfAborted()
+  // Polling never merges or starts a writer outside the scheduler's execution limit.
+  await requeuePullRequestMaintenance(
+    database,
+    attempt.id,
+    `Base origin/${branch} advanced to ${base}; queued maintain-pr to synchronize and refresh verification before merge.`,
+  )
+  return true
 }
 
 export async function pollPullRequestFeedback(

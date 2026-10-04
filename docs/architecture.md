@@ -273,7 +273,8 @@ note explains the change and why, links current-commit evidence in the factory,
 optionally includes a small Mermaid diagram, identifies `Verified at <sha>`, and
 states `Merge danger:` with a one-way/two-way door and blast radius. Output is
 limited to 4,000 characters and must link evidence (or the ticket when none is
-available). CI is still pending at this point; the prose must not claim it passed.
+available). CI is still pending at this point; the prose describes its status at
+writing and links current checks rather than making a lasting status claim.
 The factory caches the description by ticket and head, records the note and run
 log, and rejects writer worktree edits. Invalid output gets one fresh retry.
 Full plans, logs and prior review rounds remain in the factory timeline.
@@ -292,6 +293,15 @@ links and at most 2,000 characters of log per check. Actions logs come from
 `gh run view --job --log-failed`; other providers use their supplied summary/text,
 and unavailable logs are explicitly labelled. API errors leave the wait intact;
 the deadline still applies.
+
+CI and owner-merge waits also fetch the default branch. If it contains commits
+missing from the ticket, the lifecycle closes the obsolete wait and queues a
+fresh attempt of the most recent `maintain-pr` step. This works with the ticket's
+saved workflow version. Polling itself neither merges nor starts a writer;
+normal scheduler capacity controls that work. Maintenance merges the base and
+requires a fresh tester verdict for the resulting commit before republishing.
+Standalone merge workflows without prior maintenance retain their existing
+behavior, and new review feedback still goes to the builder first.
 
 Configure `maintain-pr` through `with`, for example:
 
@@ -325,9 +335,10 @@ verdicts, CI outcomes/timeouts, restart and executor-slot release, writer cachin
 and feedback deduplication. `tests/github.test.ts` checks pagination, required
 checks, bounded log excerpts and feedback filtering. These do not prove live
 GitHub publication, CI propagation timing, provider permissions or feedback
-round trips; those still need a factory-floor run. A read-only adapter smoke check
-on an existing merged GitHub PR returned passed checks and read its feedback
-endpoints successfully; it did not exercise those transitions.
+round trips by themselves. The live factory-floor acceptance run additionally
+exercised onboarding, real feature and base/head bug evidence, required CI waits,
+writer publication, owner feedback and merges, and base movement with fresh proof.
+See the [roadmap](roadmap.md) for the acceptance scope and remaining limits.
 
 `tests/engine.test.ts` uses a scripted executable, real PostgreSQL and local bare
 Git repositories, with GitHub calls substituted behind the interface. It covers

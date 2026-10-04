@@ -7,6 +7,7 @@ import {
   afterDecision,
   afterFailure,
   afterInterruption,
+  afterPullRequestBaseAdvance,
   afterResolution,
   afterResult,
   type AttemptState,
@@ -668,6 +669,27 @@ describe('capabilities', () => {
       }),
     )
   })
+})
+
+test('base refresh cannot bypass human decisions, running work or workflows without maintenance', () => {
+  for (const current of [
+    humanWaiting('approve-plan'),
+    askWaiting('maintain-pr'),
+    attempt('maintain-pr', 'running'),
+  ])
+    rejects(
+      () => afterPullRequestBaseAdvance(quick, [current]),
+      'conflict',
+      /not waiting for a pull request/,
+    )
+  rejects(
+    () =>
+      afterPullRequestBaseAdvance(quick, [
+        attempt('merge', 'waiting', { waitingFor: 'pull-request-merge' }),
+      ]),
+    'conflict',
+    /No prior pull request maintenance/,
+  )
 })
 
 describe('branch names', () => {

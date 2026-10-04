@@ -1,5 +1,6 @@
 import {
   pollPullRequestChecks,
+  pollPullRequestBase,
   pollPullRequestFeedback,
 } from './pull-requests.ts'
 import { run as runProcess } from '../executors/process.ts'
@@ -188,11 +189,17 @@ export async function startScheduler(
             AbortSignal.any([lifetime.signal, AbortSignal.timeout(30_000)]),
           )
           if (pr.state === 'OPEN') {
-            await pollPullRequestFeedback(
+            const feedback = await pollPullRequestFeedback(
               runnerOptions,
               context,
               AbortSignal.any([lifetime.signal, AbortSignal.timeout(30_000)]),
             )
+            if (!feedback)
+              await pollPullRequestBase(
+                runnerOptions,
+                context,
+                AbortSignal.any([lifetime.signal, AbortSignal.timeout(30_000)]),
+              )
           } else {
             const signal = AbortSignal.any([
               lifetime.signal,
