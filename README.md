@@ -1,0 +1,89 @@
+<p align="center">
+  <strong>Kipster Software Factory</strong><br />
+  Turns tickets into pull requests you can trust.
+</p>
+
+You describe a problem and agree the outcome. The factory plans, builds, proves
+the change by running the real app, keeps the pull request ready, and only
+interrupts you for decisions that are yours to make.
+
+> **Status: foundation.** Workflows load, validate and render, and the server,
+> database and web app run. Tickets and agents arrive in the next slices; see
+> the [roadmap](docs/roadmap.md).
+
+## How it works
+
+A **ticket** belongs to one repository and runs one **workflow**. A workflow is
+a list of steps of three kinds:
+
+| Kind   | What happens                                                          |
+| ------ | --------------------------------------------------------------------- |
+| agent  | A fresh agent session in a fixed **role** (planner, builder, tester…) |
+| human  | The ticket waits for you to approve, request changes or reject        |
+| system | Deterministic work: keep the PR current, merge, split, decide         |
+
+Each step reports an outcome, and **routes** send the ticket forward, back to
+an earlier step, or to you. Loops have limits, so nothing spins forever.
+
+```yaml
+name: bug
+description: Reproduce the bug first, fix it, prove the fix and land it.
+steps:
+  - id: reproduce
+    kind: agent
+    role: reproducer
+    needs: [verify]
+  - id: fix
+    kind: agent
+    role: builder
+  - id: test
+    kind: agent
+    role: tester
+    needs: [verify]
+    limit: 3
+    routes:
+      changes-needed: fix
+  - id: merge
+    kind: system
+    action: merge
+```
+
+Each repository describes how to build, run and verify itself in a `.kipster/`
+folder, so the engine stays the same for every project.
+
+- [Architecture](docs/architecture.md): concepts, modules and data flow
+- [Workflow format](docs/workflows.md): every field, outcome and default
+- [Workflow guide](docs/workflow-guide.md): principles for workflows you can trust
+
+## Run it
+
+Requires Node.js 26.10 (see `.nvmrc`) and PostgreSQL 18 (`initdb` and `pg_ctl`
+on `PATH`).
+
+```sh
+nvm install
+npm ci
+npm run dev        # local database, API on :4600 and the web app on :5173
+```
+
+`npm run dev` keeps its database in `.local/`. To run against your own
+database, build the web app and serve:
+
+```sh
+npm run build
+npm run kf -- serve --database-url postgresql://localhost/factory
+```
+
+Or put `{"databaseUrl": "…", "port": 4600}` in `~/.kipster-factory/config.json`
+and run `npm start`.
+
+## Develop
+
+```sh
+npm run check      # lint, format and type checks
+npm test           # unit and integration tests against a throwaway PostgreSQL
+npm run test:e2e   # browser tests against the built app
+npm run kf -- check [dir]   # validate a directory of workflow files
+```
+
+See [CONTRIBUTING.md](CONTRIBUTING.md). Licensed under [Apache-2.0](LICENSE).

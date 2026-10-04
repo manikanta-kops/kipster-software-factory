@@ -1,0 +1,44 @@
+name: feature
+description: Agree a plan with you, build it, prove it in the running app and land it.
+steps:
+  - id: plan
+    kind: agent
+    role: planner
+
+  - id: approve-plan
+    kind: human
+    routes:
+      changes-needed: plan
+
+  - id: build
+    kind: agent
+    role: builder
+
+  - id: test
+    kind: agent
+    role: tester
+    needs: [verify]
+    limit: 3
+    routes:
+      changes-needed: build
+
+  - id: review
+    kind: agent
+    role: reviewer
+    limit: 2
+    routes:
+      changes-needed: build
+
+  - id: maintain-pr
+    kind: system
+    action: maintain-pr
+    routes:
+      conflict: build
+      ci-failed: build
+      base-moved: test
+
+  - id: merge
+    kind: system
+    action: merge
+    routes:
+      changes-needed: build

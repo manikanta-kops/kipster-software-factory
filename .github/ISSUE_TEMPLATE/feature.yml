@@ -1,0 +1,18 @@
+name: Feature
+description: Something the factory should do.
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What you are trying to do and what gets in the way.
+    validations:
+      required: true
+  - type: textarea
+    id: outcome
+    attributes:
+      label: Outcome
+      description: What would be true when this is done? How would you check it?
+    validations:
+      required: true
