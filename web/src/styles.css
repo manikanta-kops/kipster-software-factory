@@ -8,9 +8,9 @@
   --lit: #f2a516;
   --unlit: #e6e2d8;
   --you: #d6336c;
-  --loop: #d98a0b;
+  --loop: #94600a;
   --ahead: #4f63d2;
-  --ok: #2f9e5b;
+  --ok: #247844;
   --radius: 12px;
   font-family:
     ui-sans-serif,
@@ -454,5 +454,604 @@ main {
 
   .workflow {
     padding: 20px;
+  }
+}
+
+/* Ticket workspace */
+:root {
+  color-scheme: light dark;
+}
+button,
+input,
+textarea,
+select {
+  font: inherit;
+}
+button,
+.button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 42px;
+  padding: 9px 15px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text);
+  cursor: pointer;
+  font-weight: 550;
+}
+button:hover,
+.button:hover {
+  background: var(--soft);
+}
+button.primary,
+.button.primary {
+  color: var(--bg);
+  background: var(--text);
+  border-color: var(--text);
+}
+button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+button.danger {
+  color: var(--you);
+}
+a:focus-visible,
+button:focus-visible,
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible,
+summary:focus-visible {
+  outline: 2px solid var(--ahead);
+  outline-offset: 4px;
+}
+main:focus {
+  outline: none;
+}
+.skip-link {
+  position: fixed;
+  top: 8px;
+  left: 12px;
+  clip-path: inset(50%);
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  white-space: nowrap;
+  z-index: 5;
+  padding: 12px;
+  background: var(--surface);
+}
+.skip-link:focus {
+  clip-path: none;
+  width: auto;
+  height: auto;
+}
+.text-link {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.page-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: start;
+  gap: 24px;
+  margin: 22px 0 30px;
+}
+.page-heading h1 {
+  overflow-wrap: anywhere;
+  font-size: 30px;
+  line-height: 1.2;
+  font-weight: 600;
+  letter-spacing: -0.025em;
+  margin-bottom: 8px;
+}
+h2 {
+  font-size: 18px;
+  font-weight: 600;
+}
+h3 {
+  margin: 0;
+  font-size: 15px;
+}
+.page-heading .button {
+  flex-shrink: 0;
+}
+.home-page {
+  max-width: 880px;
+  margin: auto;
+}
+.attention-cards {
+  display: grid;
+  gap: 14px;
+}
+.attention-card {
+  padding: 22px 24px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--you);
+  border-radius: var(--radius);
+}
+.attention-label {
+  color: var(--you);
+  font-size: 13px;
+  font-weight: 600;
+  margin-bottom: 8px;
+}
+.attention-card h2 {
+  margin-bottom: 4px;
+}
+.attention-card h2 a:hover {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.attention-card > p:not(.attention-label) {
+  margin-top: 5px;
+  font-size: 14px;
+}
+.card-links {
+  display: flex;
+  gap: 24px;
+  margin-top: 16px;
+  font-size: 13px;
+}
+.progress-section {
+  margin-top: 38px;
+}
+.progress-section h2 {
+  margin-bottom: 12px;
+}
+.progress-section h2 span {
+  margin-left: 6px;
+  font-weight: 400;
+}
+.ticket-list,
+.repository-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.ticket-list li {
+  border-bottom: 1px solid var(--line);
+}
+.ticket-list a {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 20px;
+  padding: 15px 0;
+}
+.ticket-list a:hover {
+  background: var(--soft);
+}
+.ticket-list-title {
+  min-width: 0;
+}
+.ticket-list small {
+  display: block;
+  color: var(--muted);
+  margin-top: 4px;
+}
+.badge {
+  display: inline-block;
+  flex-shrink: 0;
+  width: fit-content;
+  padding: 3px 9px;
+  border-radius: 6px;
+  background: var(--soft);
+  color: var(--muted);
+  font-size: 12px;
+  white-space: nowrap;
+}
+.badge.needs-you,
+.badge.failed {
+  color: var(--you);
+}
+.badge.running {
+  color: var(--ahead);
+}
+.badge.done,
+.badge.ready,
+.badge.approved {
+  color: var(--ok);
+}
+.finished {
+  margin-top: 24px;
+  color: var(--muted);
+}
+summary {
+  cursor: pointer;
+  padding: 10px 0;
+  font-size: 14px;
+}
+summary:hover {
+  color: var(--text);
+}
+.form-page {
+  max-width: 740px;
+  margin: auto;
+}
+form > label,
+.action-fields > label,
+.repository-form > label {
+  display: block;
+  font-weight: 550;
+  margin: 20px 0 8px;
+}
+label .muted {
+  font-weight: 400;
+  font-size: 13px;
+  margin-left: 8px;
+}
+input:not([type='radio']),
+textarea,
+select {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 10px 12px;
+}
+textarea {
+  resize: vertical;
+}
+.workflow-choices {
+  margin: 24px 0;
+  padding: 0;
+  border: 0;
+  display: grid;
+  gap: 8px;
+}
+.workflow-choices legend {
+  font-weight: 550;
+  margin-bottom: 8px;
+}
+.workflow-choice {
+  display: flex;
+  gap: 12px;
+  border: 1px solid var(--line);
+  padding: 14px;
+  border-radius: 8px;
+  background: var(--surface);
+  cursor: pointer;
+}
+.workflow-choice:has(:checked) {
+  border-color: var(--ahead);
+}
+.workflow-choice.unavailable {
+  background: transparent;
+  cursor: not-allowed;
+}
+.workflow-choice input {
+  margin-top: 5px;
+  align-self: start;
+  accent-color: var(--ahead);
+}
+.workflow-choice span span,
+.workflow-choice small {
+  display: block;
+  color: var(--muted);
+  font-size: 13px;
+  margin-top: 4px;
+}
+.workflow-choice small {
+  color: var(--you);
+}
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 18px;
+}
+.error {
+  margin-top: 10px;
+  overflow-wrap: anywhere;
+}
+.input-row {
+  display: flex;
+  gap: 10px;
+}
+.input-row button {
+  flex-shrink: 0;
+}
+.repository-form {
+  max-width: 740px;
+  margin-bottom: 32px;
+}
+.repository-list li {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 22px 0;
+  border-top: 1px solid var(--line);
+}
+.repository-list h2 {
+  overflow-wrap: anywhere;
+}
+.repository-list p {
+  font-size: 13px;
+  margin-top: 6px;
+}
+.ticket-page {
+  max-width: 880px;
+  margin: auto;
+}
+.back-link {
+  color: var(--muted);
+  font-size: 13px;
+}
+.ticket-heading {
+  margin-top: 18px;
+}
+.ticket-heading h1 {
+  margin-top: 8px;
+}
+.ticket-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: center;
+  color: var(--muted);
+  font-size: 13px;
+}
+.action-panel {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-top: 3px solid var(--you);
+  border-radius: var(--radius);
+  padding: 24px;
+  margin: 24px 0;
+}
+.action-panel > p {
+  margin-top: 8px;
+}
+.action-fields {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  min-width: 0;
+}
+.cancel-ticket {
+  margin-top: 18px;
+}
+.step-track {
+  margin: 28px 0;
+}
+.step-track ol {
+  list-style: none;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.step-track li {
+  padding: 8px 12px;
+  border-left: 2px solid var(--line);
+  color: var(--muted);
+  font-size: 13px;
+}
+.step-track li[aria-current] {
+  border-color: var(--you);
+  color: var(--text);
+  background: var(--soft);
+}
+.step-track small {
+  display: block;
+  font-size: 11px;
+}
+.ticket-description {
+  border-block: 1px solid var(--line);
+  padding: 4px 0;
+  margin-bottom: 28px;
+}
+.timeline-hint {
+  font-size: 12px;
+  margin-top: 2px;
+}
+.timeline {
+  list-style: none;
+  padding: 0;
+  margin: 18px 0;
+}
+.timeline > li {
+  margin: 0 0 12px;
+}
+.attempt-entry {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 18px 20px;
+  background: var(--surface);
+}
+.entry-heading {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  align-items: baseline;
+  justify-content: space-between;
+}
+.entry-heading h3 span {
+  font-size: 13px;
+  font-weight: 400;
+  margin-left: 8px;
+}
+time {
+  font-size: 11px;
+  color: var(--muted);
+}
+.attempt-meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  font-size: 12px;
+  color: var(--muted);
+  margin: 8px 0;
+}
+.event-entry {
+  padding: 4px 20px;
+  color: var(--muted);
+  font-size: 12px;
+  border-left: 1px solid var(--line);
+  margin-left: 12px !important;
+}
+.event-entry summary {
+  font-size: 11px;
+  padding: 4px 0;
+}
+.artifact {
+  border-top: 1px solid var(--line);
+  margin-top: 12px;
+}
+.artifact summary span {
+  font-size: 12px;
+  margin-left: 8px;
+}
+pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  background: var(--soft);
+  padding: 14px;
+  border-radius: 6px;
+  font-size: 12px;
+  max-height: 440px;
+  overflow: auto;
+}
+.markdown {
+  overflow-wrap: anywhere;
+  font-size: 14px;
+  line-height: 1.7;
+}
+.markdown > * {
+  margin: 12px 0;
+}
+.markdown h1,
+.markdown h2,
+.markdown h3 {
+  font-size: 16px;
+  font-weight: 600;
+}
+.markdown a {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.markdown code {
+  background: var(--soft);
+  padding: 2px 4px;
+  border-radius: 3px;
+  font-size: 0.9em;
+}
+.markdown pre code {
+  padding: 0;
+}
+.markdown table {
+  display: block;
+  max-width: 100%;
+  overflow: auto;
+  border-collapse: collapse;
+}
+.markdown td,
+.markdown th {
+  padding: 6px 12px;
+  border: 1px solid var(--line);
+  text-align: left;
+}
+.markdown blockquote {
+  border-left: 2px solid var(--line);
+  padding-left: 16px;
+  color: var(--muted);
+}
+@media (max-width: 900px) {
+  .brand span {
+    display: none;
+  }
+}
+@media (max-width: 560px) {
+  .shell {
+    padding: 0 16px 40px;
+  }
+  .bar {
+    height: auto;
+    min-height: 64px;
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 12px 0;
+  }
+  .bar nav {
+    order: 3;
+    width: 100%;
+    justify-content: space-between;
+  }
+  .bar nav a {
+    padding: 8px 10px;
+  }
+  .bar .brand span {
+    display: inline;
+    font-size: 13px;
+  }
+  .bar .status {
+    font-size: 11px;
+  }
+  main {
+    padding-top: 12px;
+  }
+  .page-heading {
+    gap: 14px;
+    margin-top: 14px;
+  }
+  .page-heading h1 {
+    overflow-wrap: anywhere;
+    font-size: 25px;
+  }
+  .page-heading p {
+    font-size: 13px;
+  }
+  .page-heading .button {
+    padding: 9px 12px;
+    font-size: 13px;
+  }
+  .attention-card {
+    padding: 18px;
+  }
+  .input-row {
+    flex-wrap: wrap;
+  }
+  .input-row button {
+    width: 100%;
+  }
+  .action-panel {
+    padding: 18px;
+  }
+  .ticket-list a {
+    align-items: start;
+    gap: 12px;
+  }
+  .attempt-entry {
+    padding: 16px;
+  }
+  .workflow {
+    padding: 20px 16px;
+    min-width: 0;
+  }
+  .node {
+    padding: 10px;
+    gap: 8px;
+  }
+  .chip {
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation: none !important;
+    transition: none !important;
   }
 }

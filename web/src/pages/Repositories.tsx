@@ -1,0 +1,99 @@
+import { useState } from 'react'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import type { CreateRepositoryRequest } from '../../../src/api/contract.ts'
+import { api } from '../api.ts'
+import { ErrorMessage, Status } from '../components/Shared.tsx'
+import { repositoriesQuery } from '../queries.ts'
+
+function repositoryInput(input: string): CreateRepositoryRequest {
+  const value = input.trim()
+  if (/^[\w.-]+\/[\w.-]+$/.test(value)) return { slug: value }
+  const scp = /^git@[^:]+:([\w.-]+\/[\w.-]+?)(?:\.git)?$/.exec(value)
+  if (scp?.[1]) return { slug: scp[1], cloneUrl: value }
+  try {
+    const parsed = new URL(value)
+    const slug = parsed.pathname
+      .replace(/^\//, '')
+      .replace(/\/$/, '')
+      .replace(/\.git$/, '')
+    if (
+      ['https:', 'http:', 'ssh:'].includes(parsed.protocol) &&
+      /^[\w.-]+\/[\w.-]+$/.test(slug)
+    )
+      return { slug, cloneUrl: value }
+  } catch {
+    /* Fall through to the input hint. */
+  }
+  throw new Error(
+    'Enter owner/name or a clone URL such as https://github.com/owner/name.git.',
+  )
+}
+export function Repositories() {
+  const query = useQuery(repositoriesQuery)
+  const client = useQueryClient()
+  const [input, setInput] = useState('')
+  const add = useMutation({
+    mutationFn: (value: string) => api.createRepository(repositoryInput(value)),
+    onSuccess: () => {
+      setInput('')
+      void client.invalidateQueries({ queryKey: ['repositories'] })
+    },
+  })
+  return (
+    <section>
+      <header className="page-heading">
+        <div>
+          <h1>Repositories</h1>
+          <p className="muted">Where your tickets become changes.</p>
+        </div>
+      </header>
+      <form
+        className="repository-form"
+        onSubmit={(event) => {
+          event.preventDefault()
+          add.mutate(input)
+        }}
+      >
+        <label htmlFor="repository-input">Add a repository</label>
+        <div className="input-row">
+          <input
+            id="repository-input"
+            placeholder="owner/name or clone URL"
+            required
+            value={input}
+            onChange={(event) => {
+              setInput(event.target.value)
+              add.reset()
+            }}
+          />
+          <button className="primary" disabled={!input.trim() || add.isPending}>
+            {add.isPending ? 'Adding…' : 'Add repository'}
+          </button>
+        </div>
+        <ErrorMessage error={add.error} />
+        {add.isSuccess && <output>Repository added. Waiting for setup.</output>}
+      </form>
+      <ErrorMessage error={query.error} />
+      {query.isPending && <p className="muted">Loading repositories…</p>}
+      <ul className="repository-list">
+        {query.data?.repositories.map((repository) => (
+          <li key={repository.id}>
+            <div>
+              <h2>{repository.slug}</h2>
+              <p className="muted">
+                Default branch: {repository.defaultBranch}
+              </p>
+              {repository.lastError && (
+                <p className="error">{repository.lastError}</p>
+              )}
+            </div>
+            <Status value={repository.status} />
+          </li>
+        ))}
+      </ul>
+      {query.data?.repositories.length === 0 && (
+        <p className="muted">No repositories yet. Add one above.</p>
+      )}
+    </section>
+  )
+}

@@ -1,18 +1,17 @@
-import { api } from '../api.ts'
+import { useQuery } from '@tanstack/react-query'
+import { workflowsQuery } from '../queries.ts'
 import { WorkflowDiagram } from '../components/WorkflowDiagram.tsx'
-import { navigate } from '../router.ts'
-import { useResource } from '../useResource.ts'
 
 export function Workflows({ selected }: { selected: string | undefined }) {
-  const resource = useResource(api.workflows)
+  const resource = useQuery(workflowsQuery)
 
-  if (resource.state === 'loading') {
+  if (resource.isPending) {
     return <p className="muted">Loading workflows…</p>
   }
-  if (resource.state === 'failed') {
+  if (resource.isError) {
     return (
       <p className="error" role="alert">
-        Could not load workflows: {resource.error}
+        Could not load workflows: {resource.error.message}
       </p>
     )
   }
@@ -30,12 +29,8 @@ export function Workflows({ selected }: { selected: string | undefined }) {
           {workflows.map((workflow) => (
             <li key={workflow.name}>
               <a
-                href={`/workflows/${workflow.name}`}
+                href={`#/workflows/${workflow.name}`}
                 aria-current={workflow === current ? 'page' : undefined}
-                onClick={(event) => {
-                  event.preventDefault()
-                  navigate(`/workflows/${workflow.name}`)
-                }}
               >
                 <span className="name">{workflow.name}</span>
                 <span className="description">{workflow.description}</span>
