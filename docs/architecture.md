@@ -46,7 +46,12 @@ src/
   store/        PostgreSQL access and append-only migrations. The only place
                 that writes SQL; the engine and API call its functions.
   api/          HTTP API (Hono) and the response contract shared with the web app.
-  server.ts     Composes the store, library and API into a running factory.
+  engine/       Scheduler, context packets, step execution and system actions.
+  executors/    Fresh Codex/Claude CLI sessions and process-group supervision.
+  workspace/    Repository caches, ticket worktrees and ownership-aware cleanup.
+  github/       Small gh-backed PR interface.
+  roles/        Base instructions for each catalog role.
+  server.ts     Composes the store, library, engine and API into a running factory.
   cli.ts        `kf serve | migrate | check`.
   config.ts     Factory home and config.json.
 web/            React app: what needs you, workflows, and later tickets.
@@ -55,11 +60,9 @@ scripts/        Development and test PostgreSQL clusters.
 tests/          Unit and integration tests (node:test) and browser tests (Playwright).
 ```
 
-Modules added by later slices sit beside these: `engine/` (the scheduler that
-runs steps), `executors/` (Claude Code and Codex, later kips), `workspace/`
-(repository cache and per-ticket worktrees), `github/` (pull requests, checks,
-comments), `kit/` (reading `.kipster/`) and `decider/` (typed decisions). They
-are part of the factory, not plugins.
+Later slices extend these modules with CI/checks and add `kit/` (repository
+capabilities) and `decider/` (typed decisions). They are part of the factory,
+not plugins.
 
 ## Data flow
 
@@ -108,3 +111,150 @@ secrets persist. Each ticket gets its own worktree and branch for its lifetime.
 Each verification gets a disposable checkout of the exact commit, its own
 database copy and ports, and is thrown away afterwards; only the evidence is
 kept. Other repositories a ticket reads are cached read-only.
+
+## Step engine (Slice 1)
+
+`server.ts` starts `engine/scheduler.ts` alongside the HTTP API. Before any
+recovery or claiming, the scheduler acquires a **session-level PostgreSQL
+advisory lock** through `store/scheduler.ts`, on a dedicated connection held
+until work stops. A second factory on the same database refuses to start.
+Losing that connection stops claiming and aborts active processes; restart the
+factory to recover. Only `store/` contains SQL. No API response shapes changed.
+
+Startup calls `interruptRunning`: abandoned claims are released, and running
+attempts follow the lifecycle's retry-once interruption rule. The scheduler
+claims up to `concurrency` attempts across tickets, wakes on the events NOTIFY,
+and polls every 15 seconds as a fallback. Merge-waiting attempts consume no
+executor slot; their PR states are checked about once a minute. Cancellation
+notifications abort the running step independently of slow cloning or GitHub
+requests. Shutdown stops claiming, terminates active process groups, waits for
+exit and records interruptions before releasing the lock. A restart resumes
+through the existing lifecycle, never through a saved agent conversation.
+
+`executors/process.ts` launches commands through a small Node supervisor. Each
+command has its own POSIX process group. A timeout, cancellation or shutdown
+kills the entire group. IPC disconnect also kills it if the factory crashes
+(including SIGKILL); descendants are terminated when the leader exits. The
+supervisor is not a sandbox. Agents use the owner's CLI logins, environment,
+configuration and unrestricted tools on the Mac. Role instructions reserve
+pushes and GitHub mutations for system steps.
+
+### Configuration
+
+`kf serve --home <directory>` chooses the factory home (default
+`~/.kipster-factory`) containing `config.json`:
+
+```json
+{
+  "databaseUrl": "postgresql://localhost/kipster",
+  "port": 4600,
+  "concurrency": 2,
+  "stepTimeoutMinutes": 60,
+  "agents": {
+    "default": { "cli": "codex" },
+    "roles": {
+      "planner": { "cli": "claude", "model": "sonnet" },
+      "builder": { "cli": "codex" }
+    }
+  }
+}
+```
+
+`concurrency` is a positive integer; `stepTimeoutMinutes` is positive and covers
+workspace preparation and both result-file tries within the same attempt.
+Omitted agent settings use Codex. A role entry replaces the default selection;
+its optional `model` is passed to that CLI. Accepted CLI names are `codex` and
+`claude`; accepted role keys come from the catalog. `allowedOrigins` retains its
+existing meaning. The existing `--database-url` shortcut runs with defaults
+instead of reading `config.json`.
+
+Verified against installed Codex **0.160.0** and Claude Code **2.1.289**:
+
+- Codex: `codex exec --dangerously-bypass-approvals-and-sandbox --ephemeral --json -`
+- Claude: `claude --print --dangerously-skip-permissions --no-session-persistence --output-format stream-json --verbose`
+- Both accept an optional `--model <model>`; prompts go through stdin. Neither
+  command resumes a session or restricts tools. Stdout and stderr stream to an
+  on-disk log recorded as an artifact before launching, including failed runs.
+
+### Workspaces and evidence
+
+`workspace/` serializes Git operations per repository. Registered pending
+repositories are cloned and marked ready or failed through the store. The cache
+is kept at `repositories/<repository-id>/repo`; ticket worktrees live at
+`worktrees/<ticket-id>/repo`, on the ticket's `kipster/<number>-<slug>` branch.
+Before creating a ticket worktree, the cache fetches origin and branches from
+`origin/<defaultBranch>`. Later steps and restarts reuse that worktree and branch.
+An ownership record ties each path to its repository/ticket; pre-existing paths
+without a matching record are never adopted.
+
+Only terminal (`done` or `cancelled`) tickets are eligible for removal, after
+their executor has exited. Cleanup uses `git worktree remove` without force and
+keeps branch references. Dirty, untracked, ignored or locked worktrees are
+retained for inspection. The cache and `steps/` evidence are retained. This slice
+does not synchronize branches with a moving base, run CI or provision kit
+capabilities; workflows needing those capabilities remain gated by the store.
+
+### Prompt and result contract
+
+`engine/prompt.ts` combines `roles/<role>.md`, step `instructions`, an optional
+repository `.kipster/roles/<role>.md`, and a context packet. The packet includes
+the title/body, latest plan before human approval (labelled unapproved until
+approval), prior step summaries and findings with attempt IDs, human comments
+and notes, branch and diff statistics. Each role runs in a new CLI session.
+Planners supply acceptance scenarios and never commit; builders implement and
+commit; reviewers read the diff once, block only serious problems and leave
+minor notes in the summary. Writers provide PR prose as note artifacts.
+Non-authoring roles that change the worktree fail for human inspection; their
+changes are preserved rather than silently published.
+
+The factory writes the prompt to
+`steps/<ticket-id>/<attempt-id>/<try>/prompt.md`, outside the repository, and
+instructs the agent to write `result.json` beside it:
+
+```json
+{
+  "outcome": "done",
+  "summary": "Implemented and verified the approved change.",
+  "artifacts": [
+    {
+      "kind": "evidence",
+      "title": "Verification",
+      "content": "Commands and observed results…"
+    }
+  ]
+}
+```
+
+All three keys are required. Outcomes must belong to the role's catalog contract
+or be `needs-decision`. Summary is nonempty. Artifacts use the existing lifecycle
+schema: kind (`plan`, `comment`, `finding`, `evidence`, `log`, `note`), title, and
+exactly one of Markdown `content` or a `path` to an existing file under the
+factory home. Symlink escapes are rejected. File artifacts are copied into the
+step directory before completion so worktree cleanup cannot erase evidence.
+A successful planner must include a plan artifact. Missing or invalid results
+get one fresh CLI retry in a separate directory; a second invalid result fails
+the attempt and opens a human ask. Timeouts fail immediately. Chat text is never
+parsed for routing. Logs survive failures and cancellation.
+
+### System actions and verification
+
+`maintain-pr` requires a commit ahead of the base; otherwise it reports
+`needs-decision`. It pushes the ticket branch, then calls the small `github/`
+interface backed by `gh`. It looks up the repository's existing PR for the branch
+(including closed and merged PRs), updates an open PR's title/body or creates one
+if none exists. The title is the ticket title; the body combines the ticket,
+plan, writer notes and step summaries. The URL is persisted before reporting
+`ready`, making retry after a partial publication idempotent. `merge` parks the
+attempt as `pull-request-merge`; polling reports `merged` or `rejected` when the
+owner merges or closes it. The factory never invokes `gh pr merge`. Other system
+actions explicitly fail to a human in this slice.
+
+`tests/engine.test.ts` uses a scripted executable, real PostgreSQL and local bare
+Git repositories, with GitHub calls substituted behind the interface. It covers
+the quick-change approval/review loop, merge waiting, failure/retry, process-group
+timeout/cancellation, crash recovery, lock exclusion, concurrency and ownership.
+`node scripts/live-engine-check.ts [source-repository]` is an explicit opt-in
+smoke check using the real default CLI: it clones the source into a temporary
+home, removes its remote, runs planner and builder, validates both results and
+checks the local commit. It retains evidence and never pushes. Real GitHub
+publication/merge and Claude execution are not exercised by that smoke check.
