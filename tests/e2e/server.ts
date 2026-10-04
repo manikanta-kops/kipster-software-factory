@@ -1,6 +1,6 @@
 // Only this test server exposes fixture creation; production API routes are unchanged.
 import { serve } from '@hono/node-server'
-import { rm, writeFile } from 'node:fs/promises'
+import { appendFile, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { createApp } from '../../src/api/app.ts'
 import { BUILT_WEB_APP } from '../../src/server.ts'
@@ -11,6 +11,7 @@ import {
   createTicket,
   markRunning,
   getTicketDetail,
+  addAttemptArtifacts,
 } from '../../src/store/tickets.ts'
 import { createDemoStore } from '../helpers/demo.ts'
 import { builtInLibrary, builtInWorkflow } from '../helpers/store.ts'
@@ -31,7 +32,11 @@ const app = createApp({
 })
 const fixtures = new Map<
   string,
-  { close: () => Promise<void>; disconnect: () => void }
+  {
+    close: () => Promise<void>
+    disconnect: () => void
+    updateLog: (finish: boolean) => Promise<void>
+  }
 >()
 // Register before the app's static fallback by composing a small fixture router.
 const { Hono } = await import('hono')
@@ -79,6 +84,15 @@ router.post('/__test/fixtures', async (c) => {
     join(fixtureHome, 'plan.md'),
     '## Safe plan\n\n- [x] Markdown works\n\n<script>window.unsafe = true</script>\n\n[Bad link](javascript:alert(1))',
   )
+  const running = await getTicketDetail(
+    fixture.database,
+    fixture.tickets.running,
+  )
+  const runningAttempt = running!.attempts.at(-1)!
+  await writeFile(join(fixtureHome, 'running.log'), 'Agent started\n')
+  await addAttemptArtifacts(fixture.database, runningAttempt.id, [
+    { kind: 'log', title: 'Live agent log', path: 'running.log' },
+  ])
   let artifactTicketNumber: number | null = null
   if (c.req.query('artifacts') === 'true') {
     const artifactTicket = await createTicket(fixture.database, {
@@ -134,6 +148,20 @@ router.post('/__test/fixtures', async (c) => {
   }
   fixtures.set(url, {
     disconnect,
+    updateLog: async (finish) => {
+      await appendFile(
+        join(fixtureHome, 'running.log'),
+        finish ? 'Agent finished\n' : 'Agent made progress\n',
+      )
+      if (finish)
+        await completeAttempt(fixture.database, runningAttempt.id, {
+          outcome: 'done',
+          summary: 'Plan ready.',
+          artifacts: [
+            { kind: 'plan', title: 'Plan', content: 'Fix the typo.' },
+          ],
+        })
+    },
     close: async () => {
       await fixtureEvents.close()
       disconnect()
@@ -151,6 +179,14 @@ router.post('/__test/fixtures', async (c) => {
 router.post('/__test/disconnect', async (c) => {
   const { url } = await c.req.json<{ url: string }>()
   fixtures.get(url)?.disconnect()
+  return c.json({ ok: true })
+})
+router.post('/__test/update-log', async (c) => {
+  const { url, finish = false } = await c.req.json<{
+    url: string
+    finish?: boolean
+  }>()
+  await fixtures.get(url)?.updateLog(finish)
   return c.json({ ok: true })
 })
 router.post('/__test/dispose', async (c) => {

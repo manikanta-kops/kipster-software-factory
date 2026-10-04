@@ -12,9 +12,11 @@ const videos = new Set(['video/webm', 'video/mp4'])
 export function ArtifactView({
   artifact,
   defaultOpen = false,
+  live = false,
 }: {
   artifact: Artifact
   defaultOpen?: boolean
+  live?: boolean
 }) {
   const [open, setOpen] = useState(defaultOpen)
   const [viewing, setViewing] = useState(false)
@@ -25,10 +27,11 @@ export function ArtifactView({
     artifact.mediaType.startsWith('text/') ||
     artifact.mediaType === 'application/json'
   const file = useQuery({
-    queryKey: ['artifact', artifact.id],
+    queryKey: ['artifact', artifact.id, live],
     queryFn: ({ signal }) => api.artifact(artifact.id, signal),
     enabled: open && artifact.content === null && isText,
     staleTime: Infinity,
+    refetchInterval: live ? 3000 : false,
   })
   const content = artifact.content ?? file.data
   const source = api.artifactUrl(artifact.id)
