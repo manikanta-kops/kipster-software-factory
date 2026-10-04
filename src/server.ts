@@ -17,7 +17,7 @@ export interface FactoryOptions {
   readonly concurrency?: number
   readonly stepTimeoutMinutes?: number
   readonly agents?: EngineConfig['agents']
-  /** Disable only in API-only fixtures. */
+  /** Serve without executing tickets, for demo data and UI development. */
   readonly scheduler?: boolean
   readonly databaseUrl: string
   readonly port: number

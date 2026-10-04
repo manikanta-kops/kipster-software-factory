@@ -65,17 +65,25 @@ if (!instruction.missing)
                   {
                     kind: 'plan',
                     title: 'Approved plan',
-                    content: 'Acceptance: committed change file exists.',
+                    content: `Acceptance plan ${count + 1}: committed change file exists.`,
                   },
                 ]
-              : instruction.outcome === 'changes-needed'
+              : role === 'builder'
                 ? [
                     {
-                      kind: 'finding',
-                      title: 'Serious correction',
-                      content: 'Add a second change file.',
+                      kind: 'evidence',
+                      title: 'Verification',
+                      content: `Verification build ${count + 1}: checks passed.`,
                     },
                   ]
-                : [],
+                : instruction.outcome === 'changes-needed'
+                  ? [
+                      {
+                        kind: 'finding',
+                        title: 'Serious correction',
+                        content: 'Add a second change file.',
+                      },
+                    ]
+                  : [],
         }),
   )

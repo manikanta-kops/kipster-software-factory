@@ -107,13 +107,17 @@ export async function getTicket(
 /** Tickets, most recently changed first; only those in the given statuses when set. */
 export async function listTickets(
   database: Queryable,
-  filter: { readonly status?: readonly TicketStatus[] } = {},
+  filter: {
+    readonly status?: readonly TicketStatus[]
+    readonly cleanupPending?: boolean
+  } = {},
 ): Promise<Ticket[]> {
   const { rows } = await database.query<TicketRow>(
     `${TICKET_SELECT}
-     WHERE $1::text[] IS NULL OR t.status = ANY ($1)
+     WHERE ($1::text[] IS NULL OR t.status = ANY ($1))
+       AND (NOT $2::boolean OR t.worktree_cleaned_at IS NULL)
      ORDER BY t.updated_at DESC, t.id DESC`,
-    [filter.status ?? null],
+    [filter.status ?? null, filter.cleanupPending ?? false],
   )
   return rows.map(toTicket)
 }
@@ -1038,4 +1042,14 @@ function toArtifact(row: ArtifactRow): Artifact {
 
 function iso(date: Date | null): string | null {
   return date === null ? null : date.toISOString()
+}
+
+export async function markWorktreeCleaned(
+  database: Queryable,
+  ticketId: number,
+) {
+  await database.query(
+    "UPDATE tickets SET worktree_cleaned_at = now() WHERE id = $1 AND status IN ('done', 'cancelled')",
+    [ticketId],
+  )
 }

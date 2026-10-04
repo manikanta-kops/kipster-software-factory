@@ -1,6 +1,7 @@
 import { copyFile, mkdir, readFile, writeFile } from 'node:fs/promises'
 import { extname, join } from 'node:path'
 import type { EngineConfig } from '../config.ts'
+import { markRepositoryReady } from '../store/repositories.ts'
 import type { Database } from '../store/database.ts'
 import {
   addAttemptArtifacts,
@@ -30,7 +31,8 @@ export async function runAttempt(
   signal: AbortSignal,
 ): Promise<void> {
   const { database, home, config, workspaces, github, execute } = options
-  const { ticket, repository, step, attempt } = context
+  const { ticket, step, attempt } = context
+  let { repository } = context
   const detail = await getTicketDetail(database, ticket.number)
   if (!detail) throw new Error(`Missing ticket #${ticket.number}`)
   signal.throwIfAborted()
@@ -40,6 +42,11 @@ export async function runAttempt(
     await waitForPullRequestMerge(database, attempt.id)
     return
   }
+  const defaultBranch = await workspaces.prepareRepository(repository, signal)
+  if (defaultBranch !== repository.defaultBranch)
+    repository = await markRepositoryReady(database, repository.id, {
+      defaultBranch,
+    })
   const cwd = await workspaces.prepare(ticket, repository, signal)
   const git = (args: string[]) => run('git', args, { cwd, signal })
   const base = `origin/${repository.defaultBranch}`
@@ -133,9 +140,52 @@ export async function runAttempt(
       return
     }
     await git(['push', '--set-upstream', 'origin', ticket.branch])
+    const approval = detail.attempts.findLast(
+      (a) => a.waitingFor === 'human' && a.outcome === 'approved',
+    )
+    const plan = approval
+      ? detail.artifacts.findLast(
+          (a) => a.kind === 'plan' && a.attemptId < approval.id,
+        )
+      : undefined
+    const latest = [
+      ...new Map(
+        detail.attempts
+          .filter(
+            (a) =>
+              a.status === 'finished' && a.summary && a.waitingFor === null,
+          )
+          .map((a) => [a.stepId, a]),
+      ).values(),
+    ]
+    const successful = new Set(
+      latest
+        .filter((a) => a.outcome === 'done' || a.outcome === 'passed')
+        .map((a) => a.id),
+    )
+    const writers = new Set(
+      detail.workflow.steps
+        .filter(
+          (candidate) =>
+            candidate.kind === 'agent' && candidate.role === 'writer',
+        )
+        .map((candidate) => candidate.id),
+    )
+    const writerAttempts = new Set(
+      latest
+        .filter((candidate) => writers.has(candidate.stepId))
+        .map((candidate) => candidate.id),
+    )
     const descriptions = await Promise.all(
       detail.artifacts
-        .filter((a) => a.kind === 'plan' || a.kind === 'note')
+        .filter(
+          (a) =>
+            a.id === plan?.id ||
+            (successful.has(a.attemptId) &&
+              a.kind === 'evidence' &&
+              a.content !== null) ||
+            (a.kind === 'note' && writerAttempts.has(a.attemptId)),
+        )
         .map(
           async (a) =>
             `## ${a.title}\n\n${a.content ?? (await readFile(await artifactPath(home, a.path!), 'utf8'))}`,
@@ -143,10 +193,10 @@ export async function runAttempt(
     )
     const body = [
       ticket.body,
-      ...descriptions,
-      ...detail.attempts
-        .filter((a) => a.summary)
+      ...latest
+        .filter((a) => a.stepId !== 'plan')
         .map((a) => `## ${a.stepId}\n\n${a.summary}`),
+      ...descriptions,
     ].join('\n\n')
     const pr = await github.maintain({
       repository: repository.slug,

@@ -1,5 +1,5 @@
-import { access, mkdir, readFile, writeFile, rm } from 'node:fs/promises'
-import { join, resolve } from 'node:path'
+import { access, lstat, mkdir, readFile, writeFile, rm } from 'node:fs/promises'
+import { basename, join, resolve } from 'node:path'
 import type { Repository, Ticket } from '../domain/records.ts'
 import { run } from '../executors/process.ts'
 
@@ -28,8 +28,8 @@ export class Workspaces {
   async prepareRepository(
     repository: Repository,
     signal: AbortSignal,
-  ): Promise<void> {
-    await this.serial(repository.id, async () => {
+  ): Promise<string> {
+    return this.serial(repository.id, async () => {
       const root = join(this.home, 'repositories', String(repository.id))
       await mkdir(root, { recursive: true })
       if (
@@ -51,6 +51,12 @@ export class Workspaces {
       })
       if (origin !== repository.cloneUrl)
         throw new Error(`Repository cache origin changed: ${path}`)
+      const head = await run(
+        'git',
+        ['symbolic-ref', '--short', 'refs/remotes/origin/HEAD'],
+        { cwd: path, signal },
+      )
+      return head.replace(/^origin\//, '')
     })
   }
   async prepare(
@@ -107,12 +113,12 @@ export class Workspaces {
     ticket: Ticket,
     repository: Repository,
     signal: AbortSignal,
-  ): Promise<void> {
-    if (ticket.status !== 'done' && ticket.status !== 'cancelled') return
-    await this.serial(repository.id, async () => {
+  ): Promise<boolean> {
+    if (ticket.status !== 'done' && ticket.status !== 'cancelled') return false
+    return this.serial(repository.id, async () => {
       const root = join(this.home, 'worktrees', String(ticket.id))
       const path = this.path(ticket)
-      if (!(await exists(path))) return
+      if (!(await exists(path))) return true
       const owner = JSON.parse(await readFile(join(root, 'owner.json'), 'utf8'))
       if (
         owner.ticket !== ticket.id ||
@@ -120,20 +126,61 @@ export class Workspaces {
         owner.branch !== ticket.branch
       )
         throw new Error(`Refusing to remove unowned worktree ${path}`)
-      if (
-        await run(
-          'git',
-          ['status', '--porcelain', '--untracked-files=all', '--ignored'],
-          { cwd: path, signal },
+      const git = (args: string[]) => run('git', args, { cwd: path, signal })
+      if ((await git(['branch', '--show-current'])) !== ticket.branch)
+        return false
+      const metadata = await git(['rev-parse', '--absolute-git-dir'])
+      if (await exists(join(metadata, 'locked'))) return false
+      if (await git(['status', '--porcelain', '--untracked-files=all']))
+        return false
+      const ignored = await git([
+        'ls-files',
+        '--others',
+        '--ignored',
+        '--exclude-standard',
+        '--directory',
+        '-z',
+      ])
+      for (const entry of ignored.split('\0').filter(Boolean)) {
+        const relative = entry.replace(/\/$/, '')
+        if (
+          ![
+            'node_modules',
+            'dist',
+            'build',
+            'coverage',
+            'playwright-report',
+            'test-results',
+          ].includes(basename(relative))
         )
+          continue
+        const target = resolve(path, relative)
+        if (!target.startsWith(path + '/')) continue
+        const parts = relative.split('/')
+        let safe = true
+        for (let i = 1; i <= parts.length; i++) {
+          const stat = await lstat(join(path, ...parts.slice(0, i)))
+          if (!stat.isDirectory() || stat.isSymbolicLink()) safe = false
+        }
+        if (!safe || (await git(['ls-files', '--', relative]))) continue
+        await rm(target, { recursive: true })
+      }
+      if (
+        await git([
+          'status',
+          '--porcelain',
+          '--untracked-files=all',
+          '--ignored',
+        ])
       )
-        return
-      // Git itself refuses locked, dirty or unregistered worktrees. Keep the branch and evidence.
+        return false
+      // Git refuses locked, dirty or unregistered worktrees. Keep branches and evidence.
       await run('git', ['worktree', 'remove', path], {
         cwd: this.cache(repository),
         signal,
       })
       await rm(join(root, 'owner.json'))
+      return true
     })
   }
   private async ownership(path: string, owner: object) {

@@ -85,7 +85,15 @@ npm run check      # lint, format and type checks
 npm test           # unit and integration tests against a throwaway PostgreSQL
 npm run test:e2e   # browser tests against the built app
 npm run kf -- check [dir]   # validate a directory of workflow files
+npm run dev -- --no-scheduler # serve UI without running agents
 npm run seed:demo  # fill the dev database with tickets in every state
 ```
+
+Demo seeding requires an empty database with no running scheduler. Stop the
+normal dev server, seed, then use `npm run dev -- --no-scheduler` (or
+`kf serve --no-scheduler`). A database marked as demo refuses to start a
+scheduler, including after a restart. Keep real runs in a separate checkout's
+`.local/` database. Development workspaces and evidence also live under
+`.local/factory/`; override with `npm run dev -- --home <directory>`.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md). Licensed under [Apache-2.0](LICENSE).

@@ -16,6 +16,7 @@ Options:
   --home <dir>          Factory home with config.json (default: ~/.kipster-factory)
   --database-url <url>  Use this database instead of the one in config.json
   --port <number>       Port to serve on (default: ${DEFAULT_PORT})
+  --no-scheduler       Serve demo data or UI work without executing tickets
   --workflows <dir>     Workflow directory (default: built-in workflows)`
 
 async function main(argv: string[]): Promise<number> {
@@ -27,6 +28,7 @@ async function main(argv: string[]): Promise<number> {
       'database-url': { type: 'string' },
       port: { type: 'string' },
       workflows: { type: 'string' },
+      'no-scheduler': { type: 'boolean' },
       help: { type: 'boolean', short: 'h' },
     },
   })
@@ -87,6 +89,7 @@ async function main(argv: string[]): Promise<number> {
       ...(await settings()),
       workflows,
       webRoot: BUILT_WEB_APP,
+      scheduler: !values['no-scheduler'],
     })
     console.log(`Kipster Software Factory is running at ${factory.url}`)
     await new Promise<void>((resolve) => {

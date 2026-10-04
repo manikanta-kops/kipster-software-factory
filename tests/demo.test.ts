@@ -1,10 +1,18 @@
 import assert from 'node:assert/strict'
+import { spawn } from 'node:child_process'
+import { once } from 'node:events'
+import { createServer } from 'node:net'
 import { after, before, describe, test } from 'node:test'
 import { seedDemo } from '../scripts/demo-data.ts'
-import { listRepositories } from '../src/store/repositories.ts'
+import {
+  createRepository,
+  listRepositories,
+} from '../src/store/repositories.ts'
 import { getTicketDetail, listTickets } from '../src/store/tickets.ts'
 import { createDemoStore } from './helpers/demo.ts'
-import { builtInLibrary } from './helpers/store.ts'
+import { acquireSchedulerLock } from '../src/store/scheduler.ts'
+import { startFactory } from '../src/server.ts'
+import { builtInLibrary, createTestStore } from './helpers/store.ts'
 
 let demo: Awaited<ReturnType<typeof createDemoStore>>
 
@@ -81,4 +89,115 @@ describe('demo data', () => {
       /already has demo data/,
     )
   })
+})
+
+test('demo database refuses a scheduler before recovery or repository work', async () => {
+  await assert.rejects(
+    acquireSchedulerLock(demo.database, () => {}),
+    /Demo data.*--no-scheduler/,
+  )
+  assert.equal(
+    (await detail(demo.tickets.running)).attempts.at(-1)?.status,
+    'running',
+  )
+})
+
+test('seeding refuses an active scheduler and leaves the database empty', async (t) => {
+  const store = await createTestStore()
+  t.after(() => store.close())
+  const lock = await acquireSchedulerLock(store.database, () => {})
+  try {
+    await assert.rejects(
+      seedDemo(store.database, await builtInLibrary()),
+      /scheduler lock/,
+    )
+    assert.deepEqual(await listRepositories(store.database), [])
+  } finally {
+    lock.close()
+  }
+  await seedDemo(store.database, await builtInLibrary())
+  await assert.rejects(
+    acquireSchedulerLock(store.database, () => {}),
+    /Demo data/,
+  )
+})
+
+test('API-only factory serves demo data without advancing it', async () => {
+  const factory = await startFactory({
+    databaseUrl: demo.url,
+    port: 0,
+    scheduler: false,
+  })
+  await factory.close()
+  assert.equal(
+    (await detail(demo.tickets.running)).attempts.at(-1)?.status,
+    'running',
+  )
+})
+
+test('demo seeding refuses existing real repositories without marking their database as demo', async (t) => {
+  const store = await createTestStore()
+  t.after(() => store.close())
+  await createRepository(store.database, { slug: 'real/project' })
+  await assert.rejects(
+    seedDemo(store.database, await builtInLibrary()),
+    /empty database/,
+  )
+  const lock = await acquireSchedulerLock(store.database, () => {})
+  lock.close()
+  assert.equal((await listRepositories(store.database)).length, 1)
+})
+
+test('serve CLI accepts --no-scheduler and refuses demo scheduling by default', async () => {
+  const available = createServer()
+  available.listen(0, '127.0.0.1')
+  await once(available, 'listening')
+  const address = available.address()
+  assert.ok(address && typeof address !== 'string')
+  await new Promise<void>((resolve) => available.close(() => resolve()))
+  const args = [
+    'src/cli.ts',
+    'serve',
+    '--database-url',
+    demo.url,
+    '--port',
+    String(address.port),
+  ]
+  const refused = spawn(process.execPath, args)
+  let error = ''
+  refused.stderr.on('data', (data) => {
+    error += data
+  })
+  const [code] = await once(refused, 'exit')
+  assert.equal(code, 1)
+  assert.match(error, /Demo data.*--no-scheduler/)
+  const child = spawn(process.execPath, [...args, '--no-scheduler'])
+  const exited = once(child, 'exit')
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const timer = setTimeout(
+        () => reject(new Error('CLI did not serve')),
+        10_000,
+      )
+      child.stdout.on('data', (data) => {
+        if (String(data).includes('running at')) {
+          clearTimeout(timer)
+          resolve()
+        }
+      })
+      child.once('exit', () => {
+        clearTimeout(timer)
+        reject(new Error('CLI exited before serving'))
+      })
+    })
+    const response = await fetch(`http://127.0.0.1:${address.port}/api/tickets`)
+    assert.equal(response.status, 200)
+    assert.equal(
+      (await detail(demo.tickets.running)).attempts.at(-1)?.status,
+      'running',
+    )
+  } finally {
+    child.kill('SIGTERM')
+    await exited
+  }
 })

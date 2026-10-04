@@ -1,6 +1,7 @@
 // Starts a local development factory: a persistent PostgreSQL cluster under .local/,
 // the API with file watching, and the Vite dev server for the web app.
 import { type ChildProcess, spawn } from 'node:child_process'
+import { parseArgs } from 'node:util'
 import { join } from 'node:path'
 import { DEFAULT_PORT } from '../src/config.ts'
 import {
@@ -10,6 +11,13 @@ import {
   root,
 } from './dev-database.ts'
 import { startCluster, stopCluster } from './postgres.ts'
+
+const { values } = parseArgs({
+  options: {
+    'no-scheduler': { type: 'boolean' },
+    home: { type: 'string' },
+  },
+})
 
 startCluster(cluster)
 await ensureDevDatabase()
@@ -26,6 +34,9 @@ const children: ChildProcess[] = [
       devDatabaseUrl,
       '--port',
       String(DEFAULT_PORT),
+      ...(values['no-scheduler'] ? ['--no-scheduler'] : []),
+      '--home',
+      values.home ?? join(root, '.local', 'factory'),
     ],
     { cwd: root, stdio: 'inherit' },
   ),
