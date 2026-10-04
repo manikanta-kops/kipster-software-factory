@@ -44,7 +44,7 @@ export async function writePullRequest(
       commit: detail.attempts.find((at) => at.id === a.attemptId)?.headCommit,
       url: `${root}/api/artifacts/${a.id}`,
     }))
-  const instructions = `Only evidence for this exact commit is listed; if none, say that verification evidence is unavailable and link the timeline. CI is not yet checked: describe it as pending.\nHead commit: ${head}\nEvidence links: ${JSON.stringify(evidence)}\nTicket timeline: ${timeline}`
+  const instructions = `Only evidence for this exact commit is listed; if none, say that verification evidence is unavailable and link the timeline. CI is not yet checked: describe it as pending at the time of writing and point to the PR checks and ticket timeline for current status.\nHead commit: ${head}\nEvidence links: ${JSON.stringify(evidence)}\nTicket timeline: ${timeline}`
   const git = (args: string[]) => run('git', args, { cwd, signal })
   for (let retry = 1; retry <= 2; retry++) {
     const directory = join(
