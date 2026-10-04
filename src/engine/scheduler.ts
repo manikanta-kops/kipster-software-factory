@@ -76,7 +76,7 @@ export async function startScheduler(
   try {
     await interruptRunning(database)
   } catch (error) {
-    lock.close()
+    await lock.close()
     throw error
   }
 
@@ -272,7 +272,7 @@ export async function startScheduler(
         try {
           if (held) await interruptRunning(database)
         } finally {
-          lock.close()
+          await lock.close()
         }
       })())
     },

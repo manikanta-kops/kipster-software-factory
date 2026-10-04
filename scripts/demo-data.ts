@@ -50,7 +50,7 @@ export async function seedDemo(
   try {
     return await seedLocked(database, library, home)
   } finally {
-    lock.close()
+    await lock.close()
   }
 }
 

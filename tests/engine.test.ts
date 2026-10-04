@@ -415,7 +415,7 @@ test('startup recovers an abandoned running attempt and a second process cannot 
   })
   assert.match(result, /Another factory process/)
   assert.equal((await f.detail(ticket.number)).attempts[0]!.status, 'running')
-  lock.close()
+  await lock.close()
   await f.start()
   const detail = await until(
     () => f.detail(ticket.number),

@@ -93,10 +93,16 @@ describe('demo data', () => {
 })
 
 test('demo database refuses a scheduler before recovery or repository work', async () => {
-  await assert.rejects(
-    acquireSchedulerLock(demo.database, () => {}),
-    /Demo data.*--no-scheduler/,
-  )
+  for (let retry = 0; retry < 10; retry++) {
+    await assert.rejects(
+      acquireSchedulerLock(demo.database, () => {}, 'demo'),
+      /already has demo data/,
+    )
+    await assert.rejects(
+      acquireSchedulerLock(demo.database, () => {}),
+      /Demo data.*--no-scheduler/,
+    )
+  }
   assert.equal(
     (await detail(demo.tickets.running)).attempts.at(-1)?.status,
     'running',
@@ -114,7 +120,7 @@ test('seeding refuses an active scheduler and leaves the database empty', async 
     )
     assert.deepEqual(await listRepositories(store.database), [])
   } finally {
-    lock.close()
+    await lock.close()
   }
   await seedDemo(store.database, await builtInLibrary(), demo.home)
   await assert.rejects(
@@ -145,7 +151,7 @@ test('demo seeding refuses existing real repositories without marking their data
     /empty database/,
   )
   const lock = await acquireSchedulerLock(store.database, () => {})
-  lock.close()
+  await lock.close()
   assert.equal((await listRepositories(store.database)).length, 1)
 })
 
