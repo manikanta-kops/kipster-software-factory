@@ -551,6 +551,10 @@ describe('cancelling and waiting for a merge', () => {
       waitForMerge(quick, [attempt('merge', 'running')]),
       'needs-you',
     )
+    assert.equal(
+      waitForMerge(quick, [attempt('merge', 'running')], 'pull-request-checks'),
+      'running',
+    )
     rejects(
       () => waitForMerge(quick, [attempt('build', 'running')]),
       'conflict',

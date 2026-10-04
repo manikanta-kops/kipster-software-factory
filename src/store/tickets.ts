@@ -384,7 +384,7 @@ export async function waitForPullRequestMerge(
   return transaction(database, async (connection) => {
     const locked = await lockByAttempt(connection, attemptId)
     const attempt = openAttemptOf(locked, attemptId)
-    const status = waitForMerge(locked.workflow, locked.attempts)
+    const status = waitForMerge(locked.workflow, locked.attempts, waitingFor)
     const { rows } = await connection.query<AttemptRow>(
       `UPDATE attempts
        SET status = 'waiting', waiting_for = $2, waiting_since = now(), head_commit = COALESCE($3, head_commit)

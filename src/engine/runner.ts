@@ -1,4 +1,5 @@
 import { maintainPullRequest } from './pull-requests.ts'
+import { runProofAttempt } from './proof.ts'
 import { loadKit } from '../kit/kit.ts'
 import {
   startVerification,
@@ -144,6 +145,17 @@ async function executeAttempt(
     } finally {
       await instance?.stop()
     }
+    return
+  }
+  if (step.kind === 'agent' && ['tester', 'reproducer'].includes(step.role)) {
+    await runProofAttempt(
+      options,
+      { ...context, repository },
+      detail,
+      cwd,
+      diff,
+      signal,
+    )
     return
   }
   if (step.kind === 'agent') {

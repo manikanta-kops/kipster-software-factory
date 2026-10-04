@@ -10,6 +10,7 @@ import {
   completeAttempt,
   createTicket,
   markRunning,
+  getTicketDetail,
 } from '../../src/store/tickets.ts'
 import { createDemoStore } from '../helpers/demo.ts'
 import { builtInLibrary, builtInWorkflow } from '../helpers/store.ts'
@@ -38,9 +39,41 @@ const router = new Hono()
 router.post('/__test/fixtures', async (c) => {
   const fixture = await createDemoStore()
   const fixtureHome = fixture.home
+  const verdict = c.req.query('verdict')
+  if (verdict === 'changes-needed' || verdict === 'unobserved') {
+    const detail = await getTicketDetail(
+      fixture.database,
+      fixture.tickets.proofStale,
+    )
+    const attempt = detail!.attempts.at(-1)!
+    await completeAttempt(
+      fixture.database,
+      attempt.id,
+      {
+        outcome: verdict === 'changes-needed' ? 'changes-needed' : 'passed',
+        summary:
+          verdict === 'changes-needed'
+            ? 'The cart total does not update.'
+            : 'Legacy test passed without a commit observation.',
+        artifacts:
+          verdict === 'changes-needed'
+            ? [
+                {
+                  kind: 'finding',
+                  title: 'Cart total finding',
+                  content:
+                    '## Quantity change\n\n**Blocking:** changing quantity leaves the total unchanged.\n\n<script>window.unsafe = true</script>',
+                },
+              ]
+            : [],
+      },
+      verdict === 'changes-needed' ? { headCommit: 'b'.repeat(40) } : {},
+    )
+  }
   await writeFile(
     join(fixtureHome, 'planner.log'),
-    'Planner started\nPlan ready\n<script>unsafe()</script>\n',
+    'Planner started\nPlan ready\n<script>unsafe()</script>\n' +
+      'Verification output line\n'.repeat(80),
   )
   await writeFile(
     join(fixtureHome, 'plan.md'),

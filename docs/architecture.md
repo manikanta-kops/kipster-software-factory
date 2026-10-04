@@ -223,8 +223,9 @@ and notes, branch and diff statistics. Each role runs in a new CLI session.
 Planners supply acceptance scenarios and never commit; builders implement and
 commit; reviewers read the diff once, block only serious problems and leave
 minor notes in the summary. Writers provide PR prose as note artifacts.
-Non-authoring roles that change the worktree fail for human inspection; their
-changes are preserved rather than silently published.
+Planner, reviewer and writer changes to the ticket worktree fail for human
+inspection and are preserved. Tester and reproducer sessions instead use
+disposable checkouts, as described in Independent proof below.
 
 The factory writes the prompt to
 `steps/<ticket-id>/<attempt-id>/<try>/prompt.md`, outside the repository, and
@@ -384,3 +385,67 @@ home, and includes valid/invalid kits plus passed/current and stale feature
 verdicts without running an engine. `npm run dev` keeps the factory alive during
 source edits; explicit restart loads changes. `npm run dev -- --watch` opts into
 restarts. Web hot reload remains enabled in either mode.
+
+## Independent proof (Slice 2B)
+
+Tester and reproducer steps use `engine/proof.ts`, separate from ordinary agent
+execution. The factory resolves immutable object IDs after fetching the base,
+loads the trusted base commit's kit, README, feature maps and role additions,
+and starts the harness before invoking a fresh agent session. A tester runs in
+a disposable detached checkout of the ticket HEAD; a reproducer runs on the
+base branch HEAD. Neither uses the builder's worktree. Local edits and even
+accidental local commits disappear with the disposable clone, which has no
+remote; nothing copies them back to the ticket branch. This is isolation from
+the normal publication path, not an OS sandbox for an unrestricted agent.
+
+The prompt includes the exact commit, instance URL, database URL, evidence
+directory, verification documents and the approved plan's acceptance scenarios.
+All maps are supplied so a relevant entry point cannot be lost to heuristic
+selection. The agent drives the actual user surface first; state inspection may
+only corroborate that run. Skipped entry points, wrong surfaces, stale builds,
+inconclusive results and self-reports cannot pass. The factory validates
+nonempty evidence files in the current instance's evidence directory, excluding
+startup logs. A `changes-needed` result requires findings naming Scenario,
+Observed, Expected and an attached Evidence filename. These checks enforce the
+shape and provenance of evidence; judging whether it proves the scenario remains
+the independent agent's job.
+
+A reproducer returns `reproduced` or `not-reproduced`, with a `Reproduction steps`
+note containing exact actions, inputs, observations and evidence. The note is
+passed to later steps. `not-reproduced` follows the existing unrouted-outcome
+rule and asks the owner without starting a fix. A tester in a workflow containing
+a reproducer requires a successful reproduction, then starts **two** isolated
+instances: the freshly fetched base and the ticket HEAD. It repeats the same
+reproduction against both, requiring the failure on base and success on head,
+with separate evidence files and databases. If the base was independently fixed,
+the comparison cannot pass.
+
+The agent is raced against both instance lifetimes. Unexpected app exits abort
+the agent; success, execution failure, invalid results, timeout and cancellation
+all await agent termination and every instance's `stop()` in `finally`. Cleanup
+failures fail the attempt rather than report a pass. A malformed/evidence-free
+result gets one fresh session with fresh instances, never a contaminated retry.
+Evidence and process logs survive checkout removal, including failed/cancelled
+runs. Valid result file artifacts are also copied into step storage.
+
+`Attempt.headCommit` is pinned by the factory **before** proof execution: the
+base SHA for reproduction, the tested ticket SHA for a tester. Disposable agent
+commits cannot change that observation. A concurrent ticket HEAD change rejects
+the verdict. Successful tester summaries include `Verified at <full sha>` (and
+the base/head pair for bugs), which the existing PR description formatter carries
+through. `store/verdicts.ts:isLatestTesterVerdictCurrent(database, ticketId, sha)`
+returns true only when the latest tester execution, identified by role in the
+ticket's immutable workflow, finished with `passed` at exactly that SHA. Null,
+missing, pending, failed, interrupted and superseded verdicts cannot count. The
+caller must supply the live branch commit; base synchronization and routing back
+to test remain the PR-maintenance consumer's responsibility.
+
+`tests/proof.test.ts` runs the harness fixture HTTP application with real
+PostgreSQL and a fake agent that actually calls its checkout endpoint and saves
+responses. It covers the feature correction loop, bug comparison, owner asks,
+trusted instructions, discarded edits, stale verdicts and cleanup.
+`node scripts/with-test-database.ts node scripts/live-proof-check.ts` is the
+explicit opt-in check with the real default CLI. It runs independent reproducer
+and tester sessions against the HTTP fixture, with a deterministic fixture fix
+between them, retains local evidence, and never publishes a branch. It does not
+verify browser UI proof, Claude, GitHub publication or moving-base routing.

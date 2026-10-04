@@ -398,7 +398,10 @@ test('CI wait survives scheduler restart and releases its only execution slot', 
     await new Promise((resolve) => setTimeout(resolve, 25))
     other = (await getTicketDetail(f.store.database, f.ticket.number + 1))!
   }
-  assert.equal((await f.detail()).ticket.waiting?.for, 'pull-request-checks')
+  const waitingOnCi = (await f.detail()).ticket
+  assert.equal(waitingOnCi.waiting?.for, 'pull-request-checks')
+  // CI is the factory's wait, so the ticket stays out of Needs you.
+  assert.equal(waitingOnCi.status, 'running')
   assert.match(other.attempts[0]!.error!, /without a pull request/)
   f.setChecks({ state: 'passed', failures: [] })
   while ((await f.detail()).ticket.waiting?.for !== 'pull-request-merge') {

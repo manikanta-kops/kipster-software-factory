@@ -83,11 +83,18 @@ export function Repositories() {
               <p className="muted">
                 Default branch: {repository.defaultBranch}
               </p>
-              <p>
+              <p className={`kit-status ${repository.kit.status}`}>
                 Kit: {repository.kit.status}
-                {repository.kit.capabilities.length > 0 &&
-                  ` · ${repository.kit.capabilities.join(', ')}`}
               </p>
+              {repository.kit.capabilities.length > 0 && (
+                <div className="chips" aria-label="Kit capabilities">
+                  {repository.kit.capabilities.map((capability) => (
+                    <span className="chip" key={capability}>
+                      {capability}
+                    </span>
+                  ))}
+                </div>
+              )}
               {repository.kit.error && (
                 <p className="error">{repository.kit.error}</p>
               )}

@@ -293,6 +293,12 @@ test.describe('artifact files', () => {
       page.locator('pre').filter({ hasText: 'Planner started' }),
     ).toBeVisible()
     expect(fetched).toHaveLength(2)
+    const log = page.getByLabel('Planner log', { exact: true })
+    await log.focus()
+    await page.keyboard.press('ArrowDown')
+    await expect
+      .poll(() => log.evaluate((element) => element.scrollTop))
+      .toBeGreaterThan(0)
   })
 })
 
@@ -508,7 +514,7 @@ test('repositories show valid and invalid kits and gate workflows on capabilitie
     .locator('.repository-list li')
     .filter({ hasText: 'kipster/demo-shop' })
   await expect(valid).toContainText('Kit: valid')
-  await expect(valid).toContainText('setup, verify')
+  await expect(valid.locator('.chip')).toHaveText(['setup', 'verify'])
   const invalid = page
     .locator('.repository-list li')
     .filter({ hasText: 'kipster/invalid-kit' })
@@ -519,7 +525,7 @@ test('repositories show valid and invalid kits and gate workflows on capabilitie
     .getByLabel('Repository', { exact: true })
     .selectOption('kipster/invalid-kit')
   await expect(page.getByRole('radio', { name: /^feature / })).toBeDisabled()
-  await expect(page.getByText(/Missing capabilities:/).first()).toBeVisible()
+  await expect(page.getByText(/needs a verified kit/).first()).toBeVisible()
 })
 
 test('demo evidence endpoints provide decodable image and video with recorded verdict commits', async ({
