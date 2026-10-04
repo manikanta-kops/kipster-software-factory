@@ -39,7 +39,17 @@ The header reports when live updates are reconnecting.
 
 Markdown uses react-markdown and remark-gfm, skips raw HTML, and never injects
 HTML. Remote markdown images render their alt text rather than loading resources.
-File artifacts are requested only after expansion; logs render as plain text.
+Image evidence appears as inline thumbnails with a modal viewer (Escape closes and
+returns focus). Videos use native controls without autoplay. Media URLs respect
+the configured API base. Text files load only after expansion; logs render as
+scrollable, keyboard-focusable plain text. Other files have an explicit open link.
+
+The latest completed tester verdict is shown near the ticket header. Later
+recorded attempt commits that differ from its commit mark it stale; this is not a
+live Git ref check. Missing commits are explicitly unverified. Commit links use
+the repository clone URL to identify GitHub, rather than assuming every slug is
+hosted there. Repository kits show status, capabilities and validation errors;
+gated workflows offer one-click onboarding when the repository is ready.
 
 ## Browser verification
 

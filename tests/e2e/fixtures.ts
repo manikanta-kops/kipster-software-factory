@@ -9,11 +9,13 @@ interface FactoryFixture {
 export const test = base.extend<{
   factory: FactoryFixture
   withArtifacts: boolean
+  verdict: 'changes-needed' | 'unobserved' | 'default'
 }>({
   withArtifacts: [false, { option: true }],
-  factory: async ({ request, withArtifacts }, runTest) => {
+  verdict: ['default', { option: true }],
+  factory: async ({ request, withArtifacts, verdict }, runTest) => {
     const response = await request.post(
-      `/__test/fixtures?artifacts=${withArtifacts}`,
+      `/__test/fixtures?artifacts=${withArtifacts}&verdict=${verdict}`,
     )
     expect(response.ok()).toBeTruthy()
     const fixture = (await response.json()) as FactoryFixture

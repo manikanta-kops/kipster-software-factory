@@ -1071,3 +1071,117 @@ pre {
     transition: none !important;
   }
 }
+
+/* Proof stays with its run; the current verdict stays near the decision. */
+.verdict {
+  border-left: 3px solid var(--muted);
+  padding: 12px 16px;
+  margin: -8px 0 24px;
+  background: var(--soft);
+  border-radius: 0 8px 8px 0;
+}
+.verdict h2 {
+  font-size: 15px;
+}
+.verdict > p {
+  font-size: 13px;
+  margin-top: 6px;
+}
+.verdict.passed {
+  border-color: var(--ok);
+}
+.verdict.stale {
+  border-color: var(--loop);
+}
+.verdict.changes-needed {
+  border-color: var(--you);
+}
+.media-evidence {
+  margin: 16px 0 0;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+.media-evidence figcaption {
+  font-size: 14px;
+  margin-bottom: 10px;
+  overflow-wrap: anywhere;
+}
+.evidence-thumbnail {
+  display: block;
+  padding: 0;
+  max-width: 100%;
+  overflow: hidden;
+  cursor: zoom-in;
+}
+.evidence-thumbnail img {
+  display: block;
+  width: 280px;
+  max-width: 100%;
+  max-height: 200px;
+  object-fit: contain;
+}
+.media-evidence video {
+  display: block;
+  width: 100%;
+  max-width: 560px;
+  max-height: 360px;
+  border-radius: 8px;
+  background: #000;
+}
+.evidence-original {
+  display: inline-block;
+  margin-top: 8px;
+  color: var(--muted);
+  font-size: 12px;
+}
+.evidence-viewer {
+  width: min(1100px, calc(100% - 32px));
+  max-height: calc(100dvh - 32px);
+  padding: 20px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--text);
+}
+.evidence-viewer::backdrop {
+  background: rgb(0 0 0 / 70%);
+}
+.viewer-heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+.viewer-heading h2 {
+  overflow-wrap: anywhere;
+}
+.evidence-viewer img {
+  display: block;
+  width: 100%;
+  max-height: 70dvh;
+  object-fit: contain;
+}
+.kit-status.valid {
+  color: var(--ok);
+}
+.kit-status.invalid {
+  color: var(--you);
+}
+.onboard-shortcut {
+  margin-top: 16px;
+  padding: 16px;
+  border-left: 2px solid var(--loop);
+  background: var(--soft);
+  border-radius: 0 8px 8px 0;
+  font-size: 14px;
+}
+.onboard-shortcut button {
+  margin-top: 12px;
+}
+pre:focus-visible,
+video:focus-visible {
+  outline: 2px solid var(--ahead);
+  outline-offset: 4px;
+}

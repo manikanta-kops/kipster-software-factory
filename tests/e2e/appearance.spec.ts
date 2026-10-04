@@ -13,6 +13,16 @@ for (const colorScheme of ['light', 'dark'] as const) {
       )
       await page.emulateMedia({ colorScheme, reducedMotion: 'reduce' })
       const pages = [
+        {
+          name: 'proof',
+          route: `/tickets/${factory.tickets.proofPassed}`,
+          heading: 'Cart quantity changes are proven',
+        },
+        {
+          name: 'stale',
+          route: `/tickets/${factory.tickets.proofStale}`,
+          heading: 'Cart proof needs another run',
+        },
         { name: 'needs-you', route: '/', heading: 'Needs you' },
         { name: 'new-ticket', route: '/tickets/new', heading: 'New ticket' },
         {
@@ -50,8 +60,10 @@ for (const colorScheme of ['light', 'dark'] as const) {
         if (screen.name === 'new-ticket') {
           await page
             .getByLabel('Repository', { exact: true })
-            .selectOption('kipster/demo-shop')
-          await page.getByRole('radio', { name: /^quick-change / }).check()
+            .selectOption('kipster/invalid-kit')
+          await expect(
+            page.getByRole('button', { name: 'Start onboard-repo ticket' }),
+          ).toBeVisible()
         }
         await page.mouse.move(0, 0)
         await page.evaluate('window.scrollTo(0, 0)')
@@ -76,6 +88,66 @@ for (const colorScheme of ['light', 'dark'] as const) {
           path,
           contentType: 'image/png',
         })
+        if (screen.name === 'proof') {
+          const run = page.locator('.attempt-entry').filter({
+            has: page.getByRole('heading', {
+              name: 'test tester',
+              exact: true,
+            }),
+          })
+          await run
+            .getByText('Cart driving log (synthetic demo) log', { exact: true })
+            .click()
+          await expect(run.locator('pre')).toContainText(
+            'Observed: quantity 2; total €24.00',
+          )
+          await expect
+            .poll(() =>
+              run
+                .locator('video')
+                .evaluate(
+                  (element) =>
+                    (element as unknown as { readyState: number }).readyState,
+                ),
+            )
+            .toBeGreaterThanOrEqual(2)
+          const evidencePath = testInfo.outputPath(
+            `evidence-${size}-${colorScheme}.png`,
+          )
+          await run.screenshot({ path: evidencePath })
+          await testInfo.attach(`evidence-${size}-${colorScheme}`, {
+            path: evidencePath,
+            contentType: 'image/png',
+          })
+          await run
+            .getByRole('button', {
+              name: 'Enlarge Cart image (synthetic demo)',
+            })
+            .click()
+          const dialog = page.getByRole('dialog')
+          await expect(dialog).toBeVisible()
+          const bounds = await dialog.boundingBox()
+          const viewport = page.viewportSize()!
+          expect(bounds!.x).toBeGreaterThanOrEqual(0)
+          expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(viewport.width)
+          expect(bounds!.y + bounds!.height).toBeLessThanOrEqual(
+            viewport.height,
+          )
+          const viewerPath = testInfo.outputPath(
+            `image-viewer-${size}-${colorScheme}.png`,
+          )
+          await page.screenshot({ path: viewerPath })
+          await testInfo.attach(`image-viewer-${size}-${colorScheme}`, {
+            path: viewerPath,
+            contentType: 'image/png',
+          })
+          await page.keyboard.press('Escape')
+          expect(
+            await page.evaluate(
+              'document.documentElement.scrollWidth <= window.innerWidth',
+            ),
+          ).toBeTruthy()
+        }
         if (screen.name === 'ticket') {
           const panel = page.getByRole('region', {
             name: 'Review and approve the plan',

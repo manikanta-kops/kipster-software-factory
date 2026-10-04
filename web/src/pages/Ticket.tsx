@@ -16,10 +16,13 @@ import {
   PullRequest,
   Status,
 } from '../components/Shared.tsx'
-import { ticketQuery } from '../queries.ts'
+import { repositoriesQuery, ticketQuery } from '../queries.ts'
+import { ArtifactView } from '../components/ArtifactView.tsx'
+import { Commit, Verdict } from '../components/Verdict.tsx'
 
 export function TicketPage({ number }: { number: number }) {
   const query = useQuery(ticketQuery(number))
+  const repositories = useQuery(repositoriesQuery)
   if (query.isPending) return <p className="muted">Loading ticket…</p>
   if (query.isError) return <ErrorMessage error={query.error} />
   const { ticket, workflow } = query.data
@@ -41,6 +44,12 @@ export function TicketPage({ number }: { number: number }) {
           </div>
         </div>
       </header>
+      <Verdict
+        detail={query.data}
+        repository={repositories.data?.repositories.find(
+          (item) => item.id === ticket.repository.id,
+        )}
+      />
       {ticket.waiting && (
         <ActionPanel key={ticket.waiting.attemptId} detail={query.data} />
       )}
@@ -318,6 +327,10 @@ function AttemptEntry({
   detail: TicketResponse
   artifacts: readonly Artifact[]
 }) {
+  const repositories = useQuery(repositoriesQuery)
+  const repository = repositories.data?.repositories.find(
+    (item) => item.id === detail.ticket.repository.id,
+  )
   const step = detail.workflow.steps.find((item) => item.id === attempt.stepId)
   const resolution = detail.events.find(
     (event) =>
@@ -351,6 +364,12 @@ function AttemptEntry({
         <Status value={outcome} />
         <span>{attempt.executor ?? 'Unassigned'}</span>
         <span>{duration(attempt)}</span>
+        {attempt.headCommit && (
+          <span>
+            Commit{' '}
+            <Commit commit={attempt.headCommit} repository={repository} />
+          </span>
+        )}
       </div>
       {attempt.summary && <MarkdownBody>{attempt.summary}</MarkdownBody>}
       {attempt.error && <p className="error">{attempt.error}</p>}
@@ -386,49 +405,5 @@ function EventEntry({ event }: { event: FactoryEvent }) {
         <pre>{JSON.stringify(event.data, null, 2)}</pre>
       </details>
     </li>
-  )
-}
-function ArtifactView({
-  artifact,
-  defaultOpen = false,
-}: {
-  artifact: Artifact
-  defaultOpen?: boolean
-}) {
-  const [open, setOpen] = useState(defaultOpen)
-  const file = useQuery({
-    queryKey: ['artifact', artifact.id],
-    queryFn: ({ signal }) => api.artifact(artifact.id, signal),
-    enabled: open && artifact.content === null,
-    staleTime: Infinity,
-  })
-  const content = artifact.content ?? file.data
-  return (
-    <details
-      className="artifact"
-      open={open}
-      onToggle={(event) => setOpen(event.currentTarget.open)}
-    >
-      <summary>
-        {artifact.title}{' '}
-        {artifact.title.toLowerCase() !== artifact.kind && (
-          <span className="muted">{artifact.kind}</span>
-        )}
-      </summary>
-      {open && (
-        <>
-          <ErrorMessage error={file.error} />
-          {artifact.content === null && file.isPending && (
-            <p className="muted">Loading artifact…</p>
-          )}
-          {content !== undefined &&
-            (artifact.kind === 'log' ? (
-              <pre>{content}</pre>
-            ) : (
-              <MarkdownBody>{content}</MarkdownBody>
-            ))}
-        </>
-      )}
-    </details>
   )
 }
