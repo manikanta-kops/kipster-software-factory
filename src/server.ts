@@ -1,11 +1,12 @@
 import { fileURLToPath } from 'node:url'
 import { serve } from '@hono/node-server'
 import { createApp } from './api/app.ts'
-import { defaultHome } from './config.ts'
+import { engineConfig, type EngineConfig, defaultHome } from './config.ts'
 import { BUILT_IN_WORKFLOWS, loadLibrary } from './library/library.ts'
 import { openDatabase } from './store/database.ts'
 import { listenForEvents } from './store/events.ts'
 import { migrate } from './store/migrate.ts'
+import { startScheduler } from './engine/scheduler.ts'
 import { recordWorkflowVersions } from './store/workflows.ts'
 
 export const BUILT_WEB_APP = fileURLToPath(
@@ -13,6 +14,11 @@ export const BUILT_WEB_APP = fileURLToPath(
 )
 
 export interface FactoryOptions {
+  readonly concurrency?: number
+  readonly stepTimeoutMinutes?: number
+  readonly agents?: EngineConfig['agents']
+  /** Disable only in API-only fixtures. */
+  readonly scheduler?: boolean
   readonly databaseUrl: string
   readonly port: number
   readonly host?: string
@@ -47,7 +53,21 @@ export async function startFactory(
   }
 
   const events = listenForEvents(database)
-  await events.ready
+  let scheduler: Awaited<ReturnType<typeof startScheduler>> | undefined
+  try {
+    await events.ready
+    if (options.scheduler !== false)
+      scheduler = await startScheduler({
+        database,
+        events,
+        home: options.home ?? defaultHome(),
+        config: engineConfig.parse(options),
+      })
+  } catch (error) {
+    await events.close()
+    await database.end()
+    throw error
+  }
   const app = createApp({
     database,
     library: loaded.library,
@@ -67,11 +87,17 @@ export async function startFactory(
       )
       listening.once('error', reject)
     },
-  )
+  ).catch(async (error) => {
+    await scheduler?.close()
+    await events.close()
+    await database.end()
+    throw error
+  })
 
   return {
     url: `http://${host}:${options.port}`,
     async close() {
+      await scheduler?.close()
       await events.close()
       await new Promise<void>((resolve, reject) => {
         server.close((error) => (error ? reject(error) : resolve()))
