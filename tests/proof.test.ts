@@ -255,7 +255,8 @@ for (const mode of ['failure', 'timeout', 'cancel', 'crash'] as const) {
         onError: (error) => errors.push(error),
       })
       try {
-        const end = Date.now() + 15000
+        // Generous under parallel load; the step's own 6 s timeout is what's tested.
+        const end = Date.now() + 60_000
         while (true) {
           const invocation = f.invocations.at(-1)!
           try {
@@ -384,7 +385,7 @@ test('base must still fail: an already-fixed base cannot produce a passing bug v
   await cleaned(f)
 })
 
-test('the existing PR formatter includes the factory-pinned Verified at line', async (t) => {
+test('the PR description includes the factory-pinned Verified at line', async (t) => {
   const f = await fixture(t, {
     workflow: 'feature',
     script: {
@@ -402,6 +403,7 @@ test('the existing PR formatter includes the factory-pinned Verified at line', a
     body = input.body
     return { url: 'https://github.com/fixture/proof/pull/1', state: 'OPEN' }
   }
+  f.options.github.checks = async () => ({ state: 'none', failures: [] })
   await f.next('maintain-pr')
   assert.match(body, new RegExp(`Verified at ${built.headCommit}`))
   await cleaned(f)

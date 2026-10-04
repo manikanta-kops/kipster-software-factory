@@ -69,3 +69,192 @@ test('GitHub adapter reuses merged and closed PRs so merge polling resolves them
     assert.equal(pr.state, state)
   }
 })
+
+test('checks use the pushed SHA, paginate, honor required checks and fetch a bounded failed-job log', async () => {
+  const calls: (readonly string[])[] = []
+  let page = 0
+  const head = 'a'.repeat(40)
+  const github = createGitHub(async (_command, args) => {
+    calls.push(args)
+    if (args[0] === 'run')
+      return 'x'.repeat(3000) + '\nType mismatch at app.ts:12'
+    if (args.includes('--slurp')) return '[[]]'
+    assert.ok(args.includes(`sha=${head}`))
+    page++
+    return JSON.stringify({
+      data: {
+        repository: {
+          pullRequest: {
+            headRefOid: head,
+            baseRefName: 'main',
+            baseRef: {
+              branchProtectionRule: { requiredStatusCheckContexts: ['build'] },
+            },
+          },
+          object: {
+            statusCheckRollup: {
+              contexts: {
+                pageInfo: { hasNextPage: page === 1, endCursor: 'next' },
+                nodes:
+                  page === 1
+                    ? [
+                        {
+                          kind: 'CheckRun',
+                          name: 'optional',
+                          isRequired: false,
+                          status: 'COMPLETED',
+                          conclusion: 'FAILURE',
+                        },
+                      ]
+                    : [
+                        {
+                          kind: 'CheckRun',
+                          name: 'build',
+                          isRequired: true,
+                          status: 'COMPLETED',
+                          conclusion: 'FAILURE',
+                          databaseId: 123,
+                          detailsUrl:
+                            'https://github.com/acme/repo/actions/runs/42/job/123',
+                        },
+                      ],
+              },
+            },
+          },
+        },
+      },
+    })
+  })
+  const checks = await github.checks(
+    'acme/repo',
+    'https://github.com/acme/repo/pull/1',
+    head,
+    new AbortController().signal,
+  )
+  assert.equal(checks.state, 'failed')
+  assert.deepEqual(
+    checks.failures.map((f) => f.name),
+    ['build'],
+  )
+  assert.equal(checks.failures[0]!.excerpt.length, 2000)
+  assert.match(checks.failures[0]!.excerpt, /Type mismatch/)
+  assert.ok(calls.some((args) => args.includes('cursor=next')))
+  assert.ok(
+    calls.some((args) => args.includes('--log-failed') && args.includes('123')),
+  )
+})
+
+for (const state of [
+  'pending',
+  'passed',
+  'none',
+  'head-changed',
+  'missing-required',
+  'ruleset-required',
+] as const) {
+  test(`GitHub check adapter: ${state}`, async () => {
+    const head = 'a'.repeat(40)
+    const github = createGitHub(async (_command, args) => {
+      if (args.includes('--slurp'))
+        return state === 'ruleset-required'
+          ? '[[{"type":"required_status_checks","parameters":{"required_status_checks":[{"context":"build"}]}}]]'
+          : '[[]]'
+      return JSON.stringify({
+        data: {
+          repository: {
+            pullRequest: {
+              headRefOid: state === 'head-changed' ? 'b'.repeat(40) : head,
+              baseRefName: 'main',
+              baseRef: {
+                branchProtectionRule: {
+                  requiredStatusCheckContexts:
+                    state === 'missing-required' ? ['build'] : [],
+                },
+              },
+            },
+            object: {
+              statusCheckRollup: {
+                contexts: {
+                  pageInfo: { hasNextPage: false },
+                  nodes: ['pending', 'passed'].includes(state)
+                    ? [
+                        {
+                          kind: 'StatusContext',
+                          context: 'build',
+                          isRequired: true,
+                          state: state === 'passed' ? 'SUCCESS' : 'PENDING',
+                        },
+                      ]
+                    : [],
+                },
+              },
+            },
+          },
+        },
+      })
+    })
+    const checks = await github.checks(
+      'acme/repo',
+      'https://github.com/acme/repo/pull/1',
+      head,
+      new AbortController().signal,
+    )
+    assert.equal(
+      checks.state,
+      ['missing-required', 'ruleset-required'].includes(state)
+        ? 'pending'
+        : state,
+    )
+  })
+}
+
+test('feedback includes change requests, owner and inline comments; ignores factory, bots, outsiders and superseded reviews', async () => {
+  const make = (id: number, login: string, body: string, extra = {}) => ({
+    id,
+    user: { login, type: 'User' },
+    body,
+    html_url: `https://github.com/comment/${id}`,
+    created_at: '2026-10-04T10:00:00Z',
+    submitted_at: '2026-10-04T10:00:00Z',
+    ...extra,
+  })
+  const github = createGitHub(async (_command, args) => {
+    if (args.includes('user')) return 'operator'
+    assert.ok(args.includes('--paginate'))
+    const path = args.at(-1)!
+    if (path.endsWith('/reviews'))
+      return JSON.stringify([
+        [
+          make(1, 'reviewer', 'Fix this', { state: 'CHANGES_REQUESTED' }),
+          make(2, 'superseded', 'Old request', { state: 'CHANGES_REQUESTED' }),
+        ],
+        [
+          make(3, 'superseded', 'Approved now', { state: 'APPROVED' }),
+          make(4, 'acme', 'Owner review note', { state: 'COMMENTED' }),
+        ],
+      ])
+    if (path.includes('/issues/'))
+      return JSON.stringify([
+        [
+          make(5, 'acme', 'Owner note'),
+          make(6, 'operator', 'Operator note'),
+          make(7, 'acme', 'Generated <!-- kipster-factory -->'),
+          make(8, 'someone', 'Unrelated'),
+          make(9, 'acme', 'Bot', { user: { login: 'acme', type: 'Bot' } }),
+        ],
+      ])
+    return JSON.stringify([
+      [make(10, 'acme', 'Inline correction', { path: 'app.ts', line: 12 })],
+    ])
+  })
+  const feedback = await github.feedback(
+    'acme/repo',
+    'https://github.com/acme/repo/pull/1',
+    new AbortController().signal,
+  )
+  assert.deepEqual(
+    feedback.map((f) => f.id),
+    ['review:1', 'review:4', 'comment:5', 'comment:6', 'inline:10'],
+  )
+  assert.match(feedback.at(-1)!.body, /app.ts:12/)
+})

@@ -124,6 +124,12 @@ export async function proofFixture(
       inspect: async () => {
         throw new Error('No GitHub in proof fixture')
       },
+      checks: async () => {
+        throw new Error('No GitHub in proof fixture')
+      },
+      feedback: async () => {
+        throw new Error('No GitHub in proof fixture')
+      },
     },
   }
   const detail = async () =>

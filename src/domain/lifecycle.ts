@@ -97,12 +97,16 @@ export type Resolution =
   | { readonly action: 'cancel' }
 
 export function ticketStatus(
-  latest: Pick<AttemptState, 'status' | 'next'>,
+  latest: Pick<AttemptState, 'status' | 'next'> & {
+    readonly waitingFor?: WaitingFor | null
+  },
 ): TicketStatus {
   if (latest.next?.to === 'finish') return 'done'
   if (latest.next?.to === 'cancel') return 'cancelled'
   if (latest.status === 'pending') return 'queued'
   if (latest.status === 'running') return 'running'
+  // Waiting for CI is the factory's job, not the owner's.
+  if (latest.waitingFor === 'pull-request-checks') return 'running'
   return 'needs-you'
 }
 
@@ -309,6 +313,8 @@ export function afterCancel(history: readonly AttemptState[]): Transition {
 export function waitForMerge(
   workflow: Workflow,
   history: readonly AttemptState[],
+  waitingFor:
+    'pull-request-merge' | 'pull-request-checks' = 'pull-request-merge',
 ): TicketStatus {
   const attempt = openAttempt(history)
   if (stepOf(workflow, attempt.stepId).kind !== 'system') {
@@ -323,7 +329,7 @@ export function waitForMerge(
       `Step "${attempt.stepId}" is ${attempt.status}, not running`,
     )
   }
-  return ticketStatus({ status: 'waiting', next: null })
+  return ticketStatus({ status: 'waiting', next: null, waitingFor })
 }
 
 /** A claimed pending attempt starts running. */
@@ -469,6 +475,7 @@ function isRunning(attempt: AttemptState): boolean {
   return (
     attempt.status === 'running' ||
     (attempt.status === 'waiting' &&
-      attempt.waitingFor === 'pull-request-merge')
+      (attempt.waitingFor === 'pull-request-merge' ||
+        attempt.waitingFor === 'pull-request-checks'))
   )
 }

@@ -63,8 +63,8 @@ scripts/        Development and test PostgreSQL clusters.
 tests/          Unit and integration tests (node:test) and browser tests (Playwright).
 ```
 
-Later slices extend these modules with CI/checks and add `decider/` (typed decisions). They are part of the factory,
-not plugins.
+Slice 3 extends the GitHub interface with CI/checks and feedback. Later slices
+add `decider/` (typed decisions). These are part of the factory, not plugins.
 
 ## Data flow
 
@@ -97,7 +97,8 @@ it, with its artifacts and events, in one transaction.
 - An outcome routed to `ask`, a failed attempt, or a second interruption in a
   row opens a `waiting` ask at that step. You retry it, move to any step, or
   cancel, optionally with a note.
-- A merge step can wait for its pull request to be merged, then complete.
+- CI and merge steps park while waiting for GitHub; neither holds an executor
+  slot. CI completion resumes routing; merge also watches for owner feedback.
 - Limits count finished runs of a step; interrupted attempts and asks do not
   count. An interrupted attempt is retried once automatically.
 - The ticket's status comes from its latest attempt: queued, running,
@@ -126,8 +127,9 @@ factory to recover. Only `store/` contains SQL. No API response shapes changed.
 Startup calls `interruptRunning`: abandoned claims are released, and running
 attempts follow the lifecycle's retry-once interruption rule. The scheduler
 claims up to `concurrency` attempts across tickets, wakes on the events NOTIFY,
-and polls every 15 seconds as a fallback. Merge-waiting attempts consume no
-executor slot; their PR states are checked about once a minute. Cancellation
+and polls every 15 seconds as a fallback. CI- and merge-waiting attempts consume no
+executor slot; their GitHub states are checked about once a minute. Both waits
+survive a restart. CI has an immediate first snapshot and a persisted timeout. Cancellation
 notifications abort the running step independently of slow cloning or GitHub
 requests. Shutdown stops claiming, terminates active process groups, waits for
 exit and records interruptions before releasing the lock. A restart resumes
@@ -206,7 +208,8 @@ only ignored directories named `node_modules`, `dist`, `build`, `coverage`,
 `playwright-report` or `test-results`, after checking ownership, branch, locks,
 tracked content and symlinks. All other ignored files retain the worktree.
 The database records successful removal (or an already absent worktree), so
-subsequent passes and restarts skip it. The cache and `steps/` evidence are retained. This slice does not synchronize branches with a moving base or run CI. Kit
+subsequent passes and restarts skip it. The cache and `steps/` evidence are retained. `maintain-pr` synchronizes branches
+with the fetched base and watches CI (Slice 3). Kit
 capabilities are refreshed from committed default-branch blobs after each cache
 fetch; workflows needing missing capabilities remain gated by the store.
 
@@ -255,18 +258,76 @@ parsed for routing. Logs survive failures and cancellation.
 
 ### System actions and verification
 
-`maintain-pr` requires a commit ahead of the base; otherwise it reports
-`needs-decision`. It pushes the ticket branch, then calls the small `github/`
-interface backed by `gh`. It looks up the repository's existing PR for the branch
-(including closed and merged PRs), updates an open PR's title/body or creates one
-if none exists. The title is the ticket title; the body combines the ticket, approved plan,
-latest finished step summaries, successful verification evidence and writer
-notes. Superseded plans, prior review rounds and operational human notes stay
-in the ticket timeline. The URL is persisted before reporting
-`ready`, making retry after a partial publication idempotent. `merge` parks the
-attempt as `pull-request-merge`; polling reports `merged` or `rejected` when the
-owner merges or closes it. The factory never invokes `gh pr merge`. Other system
-actions explicitly fail to a human in this slice.
+`maintain-pr` requires a clean worktree. Workspace preparation fetches origin;
+the action pins and merges `origin/<defaultBranch>` into the ticket branch.
+It never rebases or force-pushes. A conflict is aborted and reports `conflict`
+with a finding listing the files for the builder. After a clean merge, a prior
+tester execution must be a passing verdict for the exact resulting HEAD;
+otherwise `base-moved` routes back to testing. This check also catches a restart
+after the merge committed but before its outcome was recorded. Workflows without
+a tester can still publish. A branch with no commits ahead asks the owner.
+
+Before publishing a new head, `engine/pr-writer.ts` runs the writer in a fresh
+session using the writer's configured CLI and kit instructions. Its one inline
+note explains the change and why, links current-commit evidence in the factory,
+optionally includes a small Mermaid diagram, identifies `Verified at <sha>`, and
+states `Merge danger:` with a one-way/two-way door and blast radius. Output is
+limited to 4,000 characters and must link evidence (or the ticket when none is
+available). CI is still pending at this point; the prose must not claim it passed.
+The factory caches the description by ticket and head, records the note and run
+log, and rejects writer worktree edits. Invalid output gets one fresh retry.
+Full plans, logs and prior review rounds remain in the factory timeline.
+
+The action pushes normally, creates or updates the branch PR through `gh`, and
+persists its URL. Existing closed/merged PRs are reused. It parks as
+`pull-request-checks`, recording the pushed commit and waiting timestamp, and
+immediately takes one check snapshot. Pending checks are subsequently polled
+without an executor slot. The GitHub adapter queries the exact SHA via `gh api`,
+paginates checks, and checks branch protection/rulesets for required checks not
+yet reported. Required checks must pass (GitHub also accepts neutral/skipped
+runs). Without required checks, all reported checks are considered; no checks
+continues immediately. A changed local/remote head asks the owner rather than
+accepting another commit's green CI. Failed checks report `ci-failed` with names,
+links and at most 2,000 characters of log per check. Actions logs come from
+`gh run view --job --log-failed`; other providers use their supplied summary/text,
+and unavailable logs are explicitly labelled. API errors leave the wait intact;
+the deadline still applies.
+
+Configure `maintain-pr` through `with`, for example:
+
+```yaml
+with:
+  ciTimeoutMinutes: 60
+  factoryUrl: https://factory.example.com
+```
+
+The timeout defaults to 60 minutes and reports `needs-decision` to the owner.
+The link origin defaults to `http://localhost:4600`; set `factoryUrl` to the
+owner-accessible factory address for a remote installation. Migration 005 adds
+the CI waiting value and the description cache. No step fields are added.
+
+`merge` parks as `pull-request-merge`. Polling reports `merged` or `rejected`
+when the owner merges or closes it. For an open PR it also reads paginated reviews,
+issue comments and inline review comments via `gh`. A current change-requesting
+review from a human, or a new owner comment, reports `changes-needed`; feedback
+becomes comment artifacts with source links for the builder. The owner is the
+repository owner, a commenter with OWNER association, or the authenticated factory
+operator (including organization repositories). Bots and factory-marked content
+(`<!-- kipster-factory -->`) are ignored; author identity alone cannot distinguish
+a human from the factory using the same CLI login. Comment artifacts carry source
+IDs so retries/restarts and later merge waits do not replay consumed feedback.
+Superseded/dismissed change requests are ignored. The factory never invokes
+`gh pr merge`. Other system actions explicitly fail to a human in this slice.
+
+`tests/pull-requests.test.ts` uses real PostgreSQL, local bare remotes, a fake
+writer and a stub GitHub interface to cover clean/conflicting merges, stale
+verdicts, CI outcomes/timeouts, restart and executor-slot release, writer caching
+and feedback deduplication. `tests/github.test.ts` checks pagination, required
+checks, bounded log excerpts and feedback filtering. These do not prove live
+GitHub publication, CI propagation timing, provider permissions or feedback
+round trips; those still need a factory-floor run. A read-only adapter smoke check
+on an existing merged GitHub PR returned passed checks and read its feedback
+endpoints successfully; it did not exercise those transitions.
 
 `tests/engine.test.ts` uses a scripted executable, real PostgreSQL and local bare
 Git repositories, with GitHub calls substituted behind the interface. It covers
@@ -316,8 +377,8 @@ sandbox CSP. Ticket responses resolve legacy file media types too. Inline
 artifacts are text/markdown. Attempt commits are supplied by the factory at
 completion, independently of agent JSON; legacy/unobserved commits remain null.
 Consumers must compare verdict commits to the current branch, never infer
-freshness from a summary or a null commit. Live ref checking/retest routing is
-reserved for Slice 3.
+freshness from a summary or a null commit. Slice 3 checks verdict freshness against the synchronized branch HEAD before
+publication and routes stale verdicts back to testing.
 
 `seed:demo` generates synthetic image, WebM and log files inside the selected
 home, and includes valid/invalid kits plus passed/current and stale feature

@@ -172,14 +172,17 @@ export async function getArtifact(
   return rows[0] ? toArtifact(rows[0]) : null
 }
 
-/** Attempts parked until their pull request merges, for the engine to watch. */
+/** Parked GitHub waits for the engine to watch. */
 export async function listWaitingForMerge(
   database: Queryable,
+  waitingFor:
+    'pull-request-merge' | 'pull-request-checks' = 'pull-request-merge',
 ): Promise<AttemptContext[]> {
   const { rows } = await database.query<AttemptRow>(
     `SELECT * FROM attempts
-     WHERE status = 'waiting' AND waiting_for = 'pull-request-merge'
+     WHERE status = 'waiting' AND waiting_for = $1
      ORDER BY id`,
+    [waitingFor],
   )
   return Promise.all(rows.map((row) => loadContext(database, toAttempt(row))))
 }
@@ -370,20 +373,23 @@ export async function completeAttempt(
   })
 }
 
-/** A running system attempt waits until its pull request is merged; complete it then. */
+/** Park a system attempt for GitHub; completion uses the usual outcome routing. */
 export async function waitForPullRequestMerge(
   database: Database,
   attemptId: number,
+  waitingFor:
+    'pull-request-merge' | 'pull-request-checks' = 'pull-request-merge',
+  headCommit: string | null = null,
 ): Promise<Attempt> {
   return transaction(database, async (connection) => {
     const locked = await lockByAttempt(connection, attemptId)
     const attempt = openAttemptOf(locked, attemptId)
-    const status = waitForMerge(locked.workflow, locked.attempts)
+    const status = waitForMerge(locked.workflow, locked.attempts, waitingFor)
     const { rows } = await connection.query<AttemptRow>(
       `UPDATE attempts
-       SET status = 'waiting', waiting_for = 'pull-request-merge', waiting_since = now()
+       SET status = 'waiting', waiting_for = $2, waiting_since = now(), head_commit = COALESCE($3, head_commit)
        WHERE id = $1 RETURNING *`,
-      [attemptId],
+      [attemptId, waitingFor, headCommit],
     )
     const events: NewEvent[] = [
       {
@@ -392,7 +398,7 @@ export async function waitForPullRequestMerge(
         data: {
           attemptId,
           stepId: attempt.stepId,
-          waitingFor: 'pull-request-merge',
+          waitingFor,
         },
       },
     ]

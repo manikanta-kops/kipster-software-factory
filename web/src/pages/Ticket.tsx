@@ -50,7 +50,7 @@ export function TicketPage({ number }: { number: number }) {
           (item) => item.id === ticket.repository.id,
         )}
       />
-      {ticket.waiting && (
+      {ticket.waiting && ticket.waiting.for !== 'pull-request-checks' && (
         <ActionPanel key={ticket.waiting.attemptId} detail={query.data} />
       )}
       <nav className="step-track" aria-label="Ticket workflow">
