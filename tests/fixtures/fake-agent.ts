@@ -19,6 +19,12 @@ const script = JSON.parse(await readFile(scriptFile, 'utf8')) as Record<
     wait?: boolean
     commit?: boolean
     descendant?: boolean
+    proof?: boolean
+    fixed?: boolean
+    edit?: boolean
+    crash?: boolean
+    noEvidence?: boolean
+    proseOnly?: boolean
   }[]
 >
 const counter = join(stateRoot, `${role}.count`)
@@ -36,7 +42,14 @@ if (instruction.descendant) {
   })
   await writeFile(join(directory, 'descendant.pid'), String(child.pid))
 }
+if (instruction.proof) {
+  const { driveProof } = await import('./proof-agent.ts')
+  await driveProof({ instruction, prompt, directory })
+  process.exit(0)
+}
 if (instruction.wait) await new Promise(() => setInterval(() => {}, 1000))
+if (instruction.fixed !== undefined)
+  await writeFile('behaviour.txt', instruction.fixed ? 'fixed' : 'broken')
 if (instruction.commit) {
   await writeFile(`change-${count}.txt`, `implemented change ${count}\n`)
   execFileSync('git', ['add', '.'])
@@ -70,7 +83,7 @@ if (!instruction.missing)
                   {
                     kind: 'plan',
                     title: 'Approved plan',
-                    content: `Acceptance plan ${count + 1}: committed change file exists.`,
+                    content: `Acceptance plan ${count + 1}: POST /checkout with an empty JSON body returns HTTP 200 and Order placed.`,
                   },
                 ]
               : role === 'builder'
