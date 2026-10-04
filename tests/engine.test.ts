@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { execFileSync, spawn } from 'node:child_process'
 import {
   symlink,
+  rename,
   mkdtemp,
   mkdir,
   writeFile,
@@ -678,5 +679,46 @@ test('registration discovers a non-main default branch and retries repair old re
   assert.equal(
     (await getRepository(f.store.database, f.repository.slug))?.defaultBranch,
     'next',
+  )
+})
+
+test('cleanup never follows a replaced worktree root symlink', async (t) => {
+  const f = await setup(t)
+  await markRepositoryReady(f.store.database, f.repository.id)
+  const ticket = await f.ticket()
+  const workspaces = new Workspaces(f.home)
+  const signal = new AbortController().signal
+  const cwd = await workspaces.prepare(ticket, f.repository, signal)
+  await writeFile(join(cwd, '.gitignore'), 'dist/\n')
+  await run('git', ['add', '.gitignore'], { cwd })
+  await run(
+    'git',
+    [
+      '-c',
+      'user.name=Fixture',
+      '-c',
+      'user.email=fixture@example.test',
+      'commit',
+      '-m',
+      'Ignore output',
+    ],
+    { cwd },
+  )
+  await mkdir(join(cwd, 'dist'))
+  await writeFile(join(cwd, 'dist', 'keep'), 'external output')
+  const moved = join(f.root, 'moved-worktree')
+  await rename(cwd, moved)
+  await symlink(moved, cwd)
+  assert.equal(
+    await workspaces.cleanup(
+      { ...ticket, status: 'cancelled' },
+      f.repository,
+      signal,
+    ),
+    false,
+  )
+  assert.equal(
+    await readFile(join(moved, 'dist', 'keep'), 'utf8'),
+    'external output',
   )
 })

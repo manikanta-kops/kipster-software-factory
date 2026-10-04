@@ -1,4 +1,5 @@
 // A separate supervisor survives a factory crash long enough to kill the agent group.
+import { killProcessGroup } from './process-group.ts'
 import { spawn } from 'node:child_process'
 const [command, ...args] = process.argv.slice(2)
 if (!command || !process.send)
@@ -10,13 +11,7 @@ const child = spawn(command, args, {
 process.stdin.pipe(child.stdin)
 child.stdin.on('error', () => {})
 function kill() {
-  if (child.pid) {
-    try {
-      process.kill(-child.pid, 'SIGKILL')
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'ESRCH') throw error
-    }
-  }
+  if (child.pid) killProcessGroup(child.pid)
 }
 process.on('disconnect', kill)
 process.on('message', kill)

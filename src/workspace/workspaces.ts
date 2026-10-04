@@ -119,6 +119,11 @@ export class Workspaces {
       const root = join(this.home, 'worktrees', String(ticket.id))
       const path = this.path(ticket)
       if (!(await exists(path))) return true
+      if (
+        (await lstat(root)).isSymbolicLink() ||
+        (await lstat(path)).isSymbolicLink()
+      )
+        return false
       const owner = JSON.parse(await readFile(join(root, 'owner.json'), 'utf8'))
       if (
         owner.ticket !== ticket.id ||

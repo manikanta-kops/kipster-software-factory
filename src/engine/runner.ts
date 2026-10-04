@@ -183,7 +183,7 @@ export async function runAttempt(
             a.id === plan?.id ||
             (successful.has(a.attemptId) &&
               a.kind === 'evidence' &&
-              a.content !== null) ||
+              (a.content !== null || /\.(md|txt)$/i.test(a.path ?? ''))) ||
             (a.kind === 'note' && writerAttempts.has(a.attemptId)),
         )
         .map(

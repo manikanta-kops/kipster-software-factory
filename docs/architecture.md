@@ -134,8 +134,9 @@ through the existing lifecycle, never through a saved agent conversation.
 `executors/process.ts` launches commands through a small Node supervisor. Each
 command has its own POSIX process group. A timeout, cancellation or shutdown
 kills the entire group. IPC disconnect also kills it if the factory crashes
-(including SIGKILL); descendants are terminated when the leader exits. The
-supervisor is not a sandbox. Agents use the owner's CLI logins, environment,
+(including SIGKILL); descendants are terminated when the leader exits. If a group kill reports `EPERM`, the supervisor checks the OS process table:
+only a group with no live members counts as already stopped. A permission
+failure with live members still fails the attempt. The supervisor is not a sandbox. Agents use the owner's CLI logins, environment,
 configuration and unrestricted tools on the Mac. Role instructions reserve
 pushes and GitHub mutations for system steps.
 

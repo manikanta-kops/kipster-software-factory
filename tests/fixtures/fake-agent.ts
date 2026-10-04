@@ -50,6 +50,11 @@ if (instruction.commit) {
     `Build ${count}`,
   ])
 }
+if (role === 'builder')
+  await writeFile(
+    join(directory, 'verification.md'),
+    `Verification build ${count + 1}: checks passed.`,
+  )
 if (!instruction.missing)
   await writeFile(
     join(directory, 'result.json'),
@@ -73,7 +78,7 @@ if (!instruction.missing)
                     {
                       kind: 'evidence',
                       title: 'Verification',
-                      content: `Verification build ${count + 1}: checks passed.`,
+                      path: join(directory, 'verification.md'),
                     },
                   ]
                 : instruction.outcome === 'changes-needed'
