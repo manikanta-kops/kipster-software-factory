@@ -22,19 +22,28 @@ web-only ticket operations, a requested plan revision, independent review and
 an opened pull request, plus crash recovery, a real decision and cancellation
 cleanup.
 
-## Slice 2: Proof
+## Slice 2: Proof (done)
 
 Read the repository kit. The tester drives an isolated instance and stores
 evidence (screenshots, recordings, logs) shown on the ticket. Verdicts are tied
 to a commit. The `onboard-repo` workflow writes and proves the test bed's kit.
-The Slice 1 run reinforces explicit dependency setup, isolated ports/databases,
-readable evidence linked to a commit and clearer runtime/cleanup status.
+The onboarder formats all generated files, including hidden kit files, and
+runs the repository's checks before reporting completion.
 
-## Slice 3: Ready to merge
+Proven with real agents on factory-floor: kit setup, checks and readiness;
+station completion counts with screenshots, recordings, traces and timed
+observations; and an Orders navigation bug reproduced on base and independently
+proved failing on base and passing on the fix. Evidence remains on the ticket,
+with live agent logs and seekable recordings. A commit change invalidates the
+verdict. Live application/database-process restart was not exercised; the
+approved persistence check recreated the engine and connection against real
+PostgreSQL. These are distinct claims in the evidence and PR description.
 
-The system-action path is implemented and covered locally. `maintain-pr` fetches
-and merges the default branch without rewriting history, aborts conflicts with
-file findings, and reports `base-moved` when the latest tester verdict no longer
+## Slice 3: Ready to merge (done)
+
+`maintain-pr` fetches and merges the default branch without rewriting history,
+aborts conflicts with file findings, and reports `base-moved` when the latest
+tester verdict no longer
 covers the resulting commit. A fresh writer session creates a short description
 per head with evidence links, `Verified at <sha>`, an optional Mermaid diagram,
 and a Merge danger line explaining reversibility and blast radius.
@@ -45,20 +54,42 @@ to the builder, no checks continue immediately, and `with.ciTimeoutMinutes`
 (default 60) bounds waiting with an owner decision. `with.factoryUrl` sets the
 public evidence-link origin. While merge waits, current change requests and new
 owner comments become deduplicated comment artifacts and `changes-needed`.
-The owner still performs every merge.
+Base advancement during either CI or owner-merge waiting queues another
+scheduled maintenance attempt and refreshes proof before republishing. The
+owner still performs every merge.
 
-Local coverage uses PostgreSQL, bare Git remotes, stubbed GitHub and the fake
-writer. This slice is not yet proven end to end on the factory-floor: a live
-GitHub run must exercise base movement/retest, CI pending/failure/log retrieval,
-owner feedback/rebuild, and merge/close. The independent tester execution and
-web presentation work are separate changes; this PR adds the additive
-`pull-request-checks` waiting value for the web to display.
+Proven live on factory-floor with required GitHub CI and real writer sessions:
+an unrelated README merge advanced protected `next`, triggering synchronization
+and fresh proof; a PR review comment reached the builder and produced a tested
+keyboard regression; a later bug merge advanced the base while feature CI was
+waiting, exposing and validating recovery from an obsolete merge wait. The
+factory detected owner merges and refreshed the repository's verify capability
+after the kit landed. CI waits also survived a deliberate safe server restart.
+The [acceptance report](https://github.com/manikanta-kops/kipster-software-factory/pull/10)
+records ticket timelines, evidence, fixes and limitations. Failure/log retrieval,
+timeouts, conflicts and PR closure have automated coverage using real PostgreSQL
+and Git remotes with controlled GitHub/writer boundaries; an artificial floor CI
+failure was not injected during acceptance.
 
 ## Slice 4: Decisions and merging
 
 Typed decisions with confidence bands, logged so overrides can tune thresholds.
 Merge policy with path rules and decisions; automatic merges for what the policy
 allows; a post-merge check that opens a bug ticket when something breaks.
+
+The live acceptance run adds concrete requirements:
+
+- Gate merging on the current head and base, required CI, current proof and no
+  outstanding feedback or build work. An older green PR head remains visible
+  while the factory rebuilds.
+- Make decisions distinguish independent proof, repository checks and approved
+  unverified scenarios. Show current CI status separately from the writer's
+  historical description.
+- Give evidence a curated scenario index, an expandable archive and durable,
+  shareable URLs with a retention policy; the local default needs the running
+  factory instance.
+- Bound recovery from repeated base changes. Keep explicit human control for
+  kit, CI and migration changes when defining auto-merge policy.
 
 ## Slice 5: Larger work
 
