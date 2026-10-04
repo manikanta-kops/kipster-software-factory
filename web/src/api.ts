@@ -69,6 +69,7 @@ export const api = {
     post<TicketResponse>(`/tickets/${number}/decision`, body),
   resolve: (number: number, body: ResolveRequest) =>
     post<TicketResponse>(`/tickets/${number}/resolve`, body),
+  artifactUrl: (id: number) => url(`/artifacts/${id}`),
   artifact: async (id: number, signal: AbortSignal) =>
     (await response(`/artifacts/${id}`, { signal })).text(),
   events(
