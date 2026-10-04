@@ -10,12 +10,26 @@ export async function acquireSchedulerLock(
 ) {
   const connection = await database.connect()
   connection.on('error', lost)
+  let ownsLock = false
+  let closing: Promise<void> | undefined
+  const close = () =>
+    (closing ??= (async () => {
+      try {
+        if (ownsLock)
+          await connection.query('SELECT pg_advisory_unlock($1)', [
+            SCHEDULER_LOCK,
+          ])
+      } finally {
+        connection.release(true)
+      }
+    })())
   try {
     const { rows } = await connection.query<{ locked: boolean }>(
       'SELECT pg_try_advisory_lock($1) AS locked',
       [SCHEDULER_LOCK],
     )
-    if (!rows[0]?.locked)
+    ownsLock = rows[0]?.locked ?? false
+    if (!ownsLock)
       throw new Error(
         'Another factory process holds the scheduler lock for this database; refusing to start scheduler.',
       )
@@ -37,12 +51,8 @@ export async function acquireSchedulerLock(
       await connection.query('UPDATE factory_mode SET demo = true')
     }
   } catch (error) {
-    connection.release(true)
+    await close().catch(() => {})
     throw error
   }
-  return {
-    close() {
-      connection.release(true)
-    },
-  }
+  return { close }
 }

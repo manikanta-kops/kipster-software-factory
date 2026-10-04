@@ -249,6 +249,27 @@ test('quick-change: approval, two builds, review loop, PR, merge wait and termin
     ),
     /Build 1/,
   )
+  const source = join(f.root, 'source')
+  await mkdir(join(source, '.kipster'))
+  await writeFile(
+    join(source, '.kipster/kit.yml'),
+    'version: 1\nsetup: echo ready\ncheck: echo checked\n',
+  )
+  await run('git', ['add', '.'], { cwd: source })
+  await run(
+    'git',
+    [
+      '-c',
+      'user.name=Fixture',
+      '-c',
+      'user.email=fixture@example.test',
+      'commit',
+      '-m',
+      'Merged default-branch kit',
+    ],
+    { cwd: source },
+  )
+  await run('git', ['push', f.bare, 'main'], { cwd: source })
   f.setState('MERGED')
   await until(
     () => f.detail(ticket.number),
@@ -257,6 +278,10 @@ test('quick-change: approval, two builds, review loop, PR, merge wait and termin
   await until(
     () => exists(new Workspaces(f.home).path(ticket)),
     (value) => !value,
+  )
+  assert.deepEqual(
+    (await getRepository(f.store.database, f.repository.slug))!.kit,
+    { status: 'valid', error: null, capabilities: ['setup'] },
   )
   assert.deepEqual(f.errors, [])
 })
@@ -276,6 +301,7 @@ test('invalid, missing and wrong-role results retry once then ask, preserving lo
         (d) => d.ticket.waiting?.for === 'ask',
       )
       assert.equal(f.invocations.length, 2)
+      assert.match(stopped.attempts[0]!.headCommit!, /^[0-9a-f]{40}$/)
       assert.match(stopped.attempts[0]!.error!, /result.json after two runs/)
       assert.equal(stopped.artifacts.filter((a) => a.kind === 'log').length, 2)
     })
@@ -315,6 +341,7 @@ test('timeout kills agent and its child process and asks the human', async (t) =
     (d) => d.ticket.waiting?.for === 'ask',
   )
   assert.match(detail.attempts[0]!.error!, /timed out/)
+  assert.match(detail.attempts[0]!.headCommit!, /^[0-9a-f]{40}$/)
   await assertDead(join(f.invocations[0]!, 'pid'))
   await assertDead(join(f.invocations[0]!, 'descendant.pid'))
 })
@@ -388,7 +415,7 @@ test('startup recovers an abandoned running attempt and a second process cannot 
   })
   assert.match(result, /Another factory process/)
   assert.equal((await f.detail(ticket.number)).attempts[0]!.status, 'running')
-  lock.close()
+  await lock.close()
   await f.start()
   const detail = await until(
     () => f.detail(ticket.number),
@@ -722,3 +749,106 @@ test('cleanup never follows a replaced worktree root symlink', async (t) => {
     'external output',
   )
 })
+
+for (const failure of [false, true]) {
+  test(`verify-kit ${failure ? 'failed routes to write-kit with stage finding' : 'passed reaches approval at exact ticket commit'}`, async (t) => {
+    const f = await setup(t)
+    const workspaces = new Workspaces(f.home)
+    const signal = new AbortController().signal
+    await workspaces.prepareRepository(f.repository, signal)
+    const repository = await markRepositoryReady(
+      f.store.database,
+      f.repository.id,
+    )
+    const ticket = await createTicket(f.store.database, {
+      repository: repository.slug,
+      title: 'Onboard fixture',
+      workflow: await builtInWorkflow('onboard-repo'),
+    })
+    const cwd = await workspaces.prepare(ticket, repository, signal)
+    await mkdir(join(cwd, '.kipster/verify/features'), { recursive: true })
+    await writeFile(
+      join(cwd, 'app.ts'),
+      await readFile(
+        new URL('./fixtures/verification-app.ts', import.meta.url),
+      ),
+    )
+    await writeFile(
+      join(cwd, '.kipster/kit.yml'),
+      `version: 1\nsetup: echo setup-stage\ncheck: ${failure ? 'echo broken-gate; exit 6' : 'echo check-stage'}\nverify:\n  start: ${process.execPath} app.ts {port} {databaseUrl}\n  ready: http://127.0.0.1:{port}/health\n  ports: 1\n  database: none\n  timeoutSeconds: 5\n`,
+    )
+    await writeFile(
+      join(cwd, '.kipster/verify/README.md'),
+      'Use the provided URL; capture evidence under evidenceDir.',
+    )
+    await writeFile(
+      join(cwd, '.kipster/verify/features/health.md'),
+      '## Sub-features\nHealth\n## How to get to it (user point of view)\nOpen health\n## Driving it\n| User action | Exact command | Observable result |\n| --- | --- | --- |\n| Open | curl "$APP_URL/health" | HTTP 200 |\n## Gotchas\nNone\n',
+    )
+    await run('git', ['add', '.'], { cwd })
+    await run(
+      'git',
+      [
+        '-c',
+        'user.name=Fixture',
+        '-c',
+        'user.email=fixture@example.test',
+        'commit',
+        '-m',
+        'Candidate kit',
+      ],
+      { cwd },
+    )
+    const commit = await run('git', ['rev-parse', 'HEAD'], { cwd })
+    const { completeAttempt } = await import('../src/store/tickets.ts')
+    const { runAttempt } = await import('../src/engine/runner.ts')
+    for (let round = 0; round < (failure ? 3 : 1); round++) {
+      const [write] = await claimAttempts(f.store.database, 1)
+      assert.equal(write?.step.id, 'write-kit')
+      await markRunning(f.store.database, write.attempt.id, 'codex')
+      await completeAttempt(
+        f.store.database,
+        write.attempt.id,
+        { outcome: 'done', summary: 'Candidate committed', artifacts: [] },
+        { headCommit: commit },
+      )
+      const [verify] = await claimAttempts(f.store.database, 1)
+      assert.equal(verify?.step.id, 'verify-kit')
+      await markRunning(f.store.database, verify.attempt.id, 'system')
+      await runAttempt(
+        {
+          database: f.store.database,
+          home: f.home,
+          workspaces,
+          config: engineConfig.parse({}),
+          execute: f.execute,
+          github: f.github,
+        },
+        verify,
+        signal,
+      )
+      const detail = await f.detail(ticket.number)
+      const attempt = detail.attempts.find((a) => a.id === verify.attempt.id)!
+      assert.equal(attempt.outcome, failure ? 'failed' : 'passed')
+      assert.equal(attempt.headCommit, commit)
+      const logs = detail.artifacts.filter(
+        (a) => a.attemptId === attempt.id && a.kind === 'log',
+      )
+      assert.equal(logs.length, failure ? 2 : 3)
+      assert.ok(logs.every((a) => a.mediaType === 'text/plain'))
+      if (failure) {
+        const finding = detail.artifacts.findLast((a) => a.kind === 'finding')!
+        assert.match(finding.content!, /check.*failed/)
+        assert.match(finding.content!, /broken-gate/)
+        if (round < 2) assert.equal(detail.ticket.currentStep, 'write-kit')
+        else assert.equal(detail.ticket.waiting?.askReason, 'limit')
+      } else assert.equal(detail.ticket.waiting?.stepId, 'approve-kit')
+    }
+    assert.deepEqual(
+      (await getRepository(f.store.database, repository.slug))!.capabilities,
+      [],
+    )
+    assert.equal(await run('git', ['status', '--porcelain'], { cwd }), '')
+    assert.equal(await run('git', ['rev-parse', 'HEAD'], { cwd }), commit)
+  })
+}

@@ -55,6 +55,9 @@ export async function buildPrompt(input: {
   )
   return [
     base,
+    ...(step.role === 'onboarder'
+      ? [await readFile(new URL('../../docs/kit.md', import.meta.url), 'utf8')]
+      : []),
     step.instructions ?? '',
     kit,
     `All agents have full tool access. Follow these role rules: only system actions push branches, open/update pull requests or merge. Never do those actions yourself. Use a fresh session; do not resume an earlier conversation.`,

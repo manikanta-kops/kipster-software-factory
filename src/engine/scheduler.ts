@@ -1,3 +1,4 @@
+import { run as runProcess } from '../executors/process.ts'
 import { engineConfig, type EngineConfig } from '../config.ts'
 import { executeAgent, type AgentExecutor } from '../executors/cli.ts'
 import { github as realGitHub, type GitHub } from '../github/github.ts'
@@ -41,7 +42,11 @@ export async function startScheduler(
 ): Promise<{ close(): Promise<void> }> {
   const { database, events } = options
   const config = engineConfig.parse(options.config ?? {})
-  const workspaces = new Workspaces(options.home)
+  const workspaces = new Workspaces(
+    options.home,
+    (repository, defaultBranch, kit) =>
+      markRepositoryReady(database, repository.id, { defaultBranch, kit }),
+  )
   const github = options.github ?? realGitHub
   const report =
     options.onError ?? ((error: unknown) => console.error('Scheduler:', error))
@@ -71,7 +76,7 @@ export async function startScheduler(
   try {
     await interruptRunning(database)
   } catch (error) {
-    lock.close()
+    await lock.close()
     throw error
   }
 
@@ -154,12 +159,28 @@ export async function startScheduler(
             context.ticket.pullRequestUrl,
             AbortSignal.any([lifetime.signal, AbortSignal.timeout(30_000)]),
           )
-          if (pr.state !== 'OPEN')
-            await completeAttempt(database, context.attempt.id, {
-              outcome: pr.state === 'MERGED' ? 'merged' : 'rejected',
-              summary: `Pull request ${pr.state.toLowerCase()}: ${pr.url}`,
-              artifacts: [],
-            })
+          if (pr.state !== 'OPEN') {
+            const signal = AbortSignal.any([
+              lifetime.signal,
+              AbortSignal.timeout(30_000),
+            ])
+            if (pr.state === 'MERGED')
+              await workspaces.prepareRepository(context.repository, signal)
+            const headCommit = await runProcess('git', ['rev-parse', 'HEAD'], {
+              cwd: workspaces.path(context.ticket),
+              signal,
+            }).catch(() => null)
+            await completeAttempt(
+              database,
+              context.attempt.id,
+              {
+                outcome: pr.state === 'MERGED' ? 'merged' : 'rejected',
+                summary: `Pull request ${pr.state.toLowerCase()}: ${pr.url}`,
+                artifacts: [],
+              },
+              headCommit ? { headCommit } : {},
+            )
+          }
         } catch (error) {
           if (!stopped) report(error)
         }
@@ -251,7 +272,7 @@ export async function startScheduler(
         try {
           if (held) await interruptRunning(database)
         } finally {
-          lock.close()
+          await lock.close()
         }
       })())
     },

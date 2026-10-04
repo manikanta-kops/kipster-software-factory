@@ -14,7 +14,7 @@
 | **Decision**   | A fast typed judgement (a choice with probabilities and a confidence) used where input is unstructured.       |
 
 Roles: planner, builder, tester, reproducer, reviewer, writer, onboarder.
-Actions: decide, maintain-pr, merge, split, wait-children.
+Actions: decide, verify-kit, maintain-pr, merge, split, wait-children.
 The catalog in `src/domain/catalog.ts` is the single list of each.
 
 ## Principles the design enforces
@@ -48,6 +48,9 @@ src/
   api/          HTTP API (Hono) and the response contract shared with the web app.
   engine/       Scheduler, context packets, step execution and system actions.
   executors/    Fresh Codex/Claude CLI sessions and process-group supervision.
+  kit/          Zod kit validation and committed default-branch capability discovery.
+  verification/ Disposable exact-commit instances, ports, databases and retained logs.
+  artifacts/    Content-based media detection for evidence.
   workspace/    Repository caches, ticket worktrees and ownership-aware cleanup.
   github/       Small gh-backed PR interface.
   roles/        Base instructions for each catalog role.
@@ -60,8 +63,7 @@ scripts/        Development and test PostgreSQL clusters.
 tests/          Unit and integration tests (node:test) and browser tests (Playwright).
 ```
 
-Later slices extend these modules with CI/checks and add `kit/` (repository
-capabilities) and `decider/` (typed decisions). They are part of the factory,
+Later slices extend these modules with CI/checks and add `decider/` (typed decisions). They are part of the factory,
 not plugins.
 
 ## Data flow
@@ -109,7 +111,7 @@ Events, and a client that reconnects with Last-Event-ID misses nothing.
 A repository is cloned once into the factory home and kept: setup, caches and
 secrets persist. Each ticket gets its own worktree and branch for its lifetime.
 Each verification gets a disposable checkout of the exact commit, its own
-database copy and ports, and is thrown away afterwards; only the evidence is
+empty PostgreSQL database (when requested) and ports, and is thrown away afterwards; only the evidence is
 kept. Other repositories a ticket reads are cached read-only.
 
 ## Step engine (Slice 1)
@@ -204,9 +206,9 @@ only ignored directories named `node_modules`, `dist`, `build`, `coverage`,
 `playwright-report` or `test-results`, after checking ownership, branch, locks,
 tracked content and symlinks. All other ignored files retain the worktree.
 The database records successful removal (or an already absent worktree), so
-subsequent passes and restarts skip it. The cache and `steps/` evidence are retained. This slice
-does not synchronize branches with a moving base, run CI or provision kit
-capabilities; workflows needing those capabilities remain gated by the store.
+subsequent passes and restarts skip it. The cache and `steps/` evidence are retained. This slice does not synchronize branches with a moving base or run CI. Kit
+capabilities are refreshed from committed default-branch blobs after each cache
+fetch; workflows needing missing capabilities remain gated by the store.
 
 ### Prompt and result contract
 
@@ -274,3 +276,50 @@ smoke check using the real default CLI: it clones the source into a temporary
 home, removes its remote, runs planner and builder, validates both results and
 checks the local commit. It retains evidence and never pushes. Real GitHub
 publication/merge and Claude execution are not exercised by that smoke check.
+
+## Proof foundation (Slice 2A)
+
+The complete kit, harness and consumer contract is in [docs/kit.md](kit.md).
+`.kipster/kit.yml` declares version 1, optional setup, deterministic check, and an
+optional verify block (start, ready, ports, database, timeoutSeconds). Verification
+README and structured feature maps are validated alongside the block. Optional
+roles/<role>.md prompt additions continue unchanged. The onboarder receives the
+kit guide in its prompt. The cache fetch refreshes the default branch, kit status
+and capabilities together; an invalid kit clears capabilities with a diagnostic.
+
+`verification/startVerification` (implemented in `verification/harness.ts`) creates
+an isolated detached clone of the exact commit inside factory home, runs setup,
+optionally check, reserves ports, creates a fresh database on the factory's own
+PostgreSQL server when requested, starts a supervised process group and polls a
+local readiness URL for 2xx. Agents never own instance startup or shutdown.
+Callers receive URL, ports, nullable databaseUrl, checkout, retained evidenceDir,
+log artifact inputs, an exited promise and an idempotent stop(). Stop terminates
+that group, drops its generated database and removes the disposable clone.
+Failures name their stage and retain available logs; SIGKILL process cleanup is
+supervised but orphaned database/checkout recovery is deferred.
+
+`verify-kit` runs the ticket HEAD's candidate kit with check enabled, stops it,
+and reports passed/failed with logs and a stage finding on failure. It cannot
+change default-branch capabilities. Onboarding is write-kit → verify-kit →
+approve-kit → maintain-pr → merge, with failed verification routed back to
+write-kit up to three runs. Human approval remains required. Feature-map semantic
+proof belongs to the independent tester; boot readiness alone does not prove it.
+
+Migration 004 adds `Artifact.mediaType`, `Attempt.headCommit`, and repository kit
+status/error (capabilities reuse the existing column). The API adds
+`Repository.kit: {status, error, capabilities}` and retains the old capabilities
+alias. File signatures detect image/video types; text is inert Markdown/plain
+text/JSON, unknown binary is application/octet-stream. The artifact endpoint
+uses the detected content type with the existing path containment, nosniff and
+sandbox CSP. Ticket responses resolve legacy file media types too. Inline
+artifacts are text/markdown. Attempt commits are supplied by the factory at
+completion, independently of agent JSON; legacy/unobserved commits remain null.
+Consumers must compare verdict commits to the current branch, never infer
+freshness from a summary or a null commit. Live ref checking/retest routing is
+reserved for Slice 3.
+
+`seed:demo` generates synthetic image, WebM and log files inside the selected
+home, and includes valid/invalid kits plus passed/current and stale feature
+verdicts without running an engine. `npm run dev` keeps the factory alive during
+source edits; explicit restart loads changes. `npm run dev -- --watch` opts into
+restarts. Web hot reload remains enabled in either mode.

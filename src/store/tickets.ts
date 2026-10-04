@@ -1,3 +1,5 @@
+import { isAbsolute } from 'node:path'
+import { detectMediaType } from '../artifacts/media-type.ts'
 // Tickets and their attempts and artifacts. Every write locks the ticket row, asks the
 // pure lifecycle what happens, applies the answer and records events in one transaction.
 import { FactoryError } from '../domain/errors.ts'
@@ -338,8 +340,14 @@ export async function completeAttempt(
   database: Database,
   attemptId: number,
   result: unknown,
+  completion: { readonly headCommit?: string } = {},
 ): Promise<Moved> {
   const parsed = parseStepResult(result)
+  if (
+    completion.headCommit !== undefined &&
+    !/^[0-9a-f]{40}([0-9a-f]{24})?$/.test(completion.headCommit)
+  )
+    throw new Error('Invalid commit object ID')
   return transaction(database, async (connection) => {
     const locked = await lockByAttempt(connection, attemptId)
     openAttemptOf(locked, attemptId)
@@ -356,7 +364,7 @@ export async function completeAttempt(
       connection,
       locked,
       transition,
-      { summary: parsed.summary },
+      { summary: parsed.summary, ...completion },
       events,
     )
   })
@@ -714,6 +722,7 @@ async function apply(
     readonly summary?: string | null
     readonly error?: string
     readonly executor?: string
+    readonly headCommit?: string
   },
   events: NewEvent[],
 ): Promise<Moved> {
@@ -722,7 +731,8 @@ async function apply(
   const { rows } = await connection.query<AttemptRow>(
     `UPDATE attempts
      SET status = $2, outcome = $3, next = $4, summary = coalesce($5, summary),
-         error = $6, executor = coalesce($7, executor), finished_at = now()
+         error = $6, executor = coalesce($7, executor), finished_at = now(),
+         head_commit = coalesce($8, head_commit)
      WHERE id = $1
      RETURNING *`,
     [
@@ -733,6 +743,7 @@ async function apply(
       closing.summary ?? null,
       closing.error ?? null,
       closing.executor ?? null,
+      closing.headCommit ?? null,
     ],
   )
   const closed = toAttempt(rows[0] as AttemptRow)
@@ -839,9 +850,20 @@ async function insertArtifacts(
   events: NewEvent[],
 ): Promise<void> {
   for (const artifact of artifacts) {
+    let mediaType =
+      artifact.content !== undefined
+        ? 'text/markdown'
+        : 'application/octet-stream'
+    if (artifact.path && isAbsolute(artifact.path)) {
+      try {
+        mediaType = await detectMediaType(artifact.path)
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+      }
+    }
     const { rows } = await connection.query<{ id: number }>(
-      `INSERT INTO artifacts (ticket_id, attempt_id, kind, title, content, path)
-       VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
+      `INSERT INTO artifacts (ticket_id, attempt_id, kind, title, content, path, media_type)
+       VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id`,
       [
         ticketId,
         attemptId,
@@ -849,6 +871,7 @@ async function insertArtifacts(
         artifact.title,
         artifact.content ?? null,
         artifact.path ?? null,
+        mediaType,
       ],
     )
     events.push({
@@ -987,6 +1010,7 @@ interface AttemptRow {
   claimed_at: Date | null
   started_at: Date | null
   waiting_since: Date | null
+  head_commit: string | null
   finished_at: Date | null
 }
 
@@ -1007,6 +1031,7 @@ function toAttempt(row: AttemptRow): Attempt {
     claimedAt: iso(row.claimed_at),
     startedAt: iso(row.started_at),
     waitingSince: iso(row.waiting_since),
+    headCommit: row.head_commit,
     finishedAt: iso(row.finished_at),
   }
 }
@@ -1015,6 +1040,7 @@ const ARTIFACT_SELECT = `
   SELECT a.*, at.step_id FROM artifacts a JOIN attempts at ON at.id = a.attempt_id`
 
 interface ArtifactRow {
+  media_type: string
   id: number
   ticket_id: number
   attempt_id: number
@@ -1028,6 +1054,7 @@ interface ArtifactRow {
 
 function toArtifact(row: ArtifactRow): Artifact {
   return {
+    mediaType: row.media_type,
     id: row.id,
     ticketId: row.ticket_id,
     attemptId: row.attempt_id,
@@ -1051,5 +1078,19 @@ export async function markWorktreeCleaned(
   await database.query(
     "UPDATE tickets SET worktree_cleaned_at = now() WHERE id = $1 AND status IN ('done', 'cancelled')",
     [ticketId],
+  )
+}
+
+/** A factory observation after execution, including failures/cancellation with a readable checkout. */
+export async function recordAttemptHeadCommit(
+  database: Queryable,
+  attemptId: number,
+  headCommit: string,
+): Promise<void> {
+  if (!/^[0-9a-f]{40}([0-9a-f]{24})?$/.test(headCommit))
+    throw new Error('Invalid commit object ID')
+  await database.query(
+    'UPDATE attempts SET head_commit = $2 WHERE id = $1 AND head_commit IS NULL',
+    [attemptId, headCommit],
   )
 }

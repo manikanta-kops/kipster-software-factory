@@ -1,3 +1,9 @@
+import { loadKit } from '../kit/kit.ts'
+import {
+  startVerification,
+  VerificationError,
+  verificationFinding,
+} from '../verification/harness.ts'
 import { copyFile, mkdir, readFile, writeFile } from 'node:fs/promises'
 import { extname, join } from 'node:path'
 import type { EngineConfig } from '../config.ts'
@@ -7,6 +13,7 @@ import {
   addAttemptArtifacts,
   completeAttempt,
   getTicketDetail,
+  recordAttemptHeadCommit,
   setPullRequestUrl,
   waitForPullRequestMerge,
   type AttemptContext,
@@ -26,6 +33,24 @@ export interface RunnerOptions {
   execute: AgentExecutor
 }
 export async function runAttempt(
+  options: RunnerOptions,
+  context: AttemptContext,
+  signal: AbortSignal,
+): Promise<void> {
+  try {
+    await executeAttempt(options, context, signal)
+  } catch (error) {
+    // Execution has stopped; keep a commit observation even when its result failed.
+    const head = await run('git', ['rev-parse', 'HEAD'], {
+      cwd: options.workspaces.path(context.ticket),
+      signal: AbortSignal.timeout(5000),
+    }).catch(() => null)
+    if (head)
+      await recordAttemptHeadCommit(options.database, context.attempt.id, head)
+    throw error
+  }
+}
+async function executeAttempt(
   options: RunnerOptions,
   context: AttemptContext,
   signal: AbortSignal,
@@ -51,6 +76,76 @@ export async function runAttempt(
   const git = (args: string[]) => run('git', args, { cwd, signal })
   const base = `origin/${repository.defaultBranch}`
   const diff = await git(['diff', '--stat', `${base}...HEAD`])
+  if (step.kind === 'system' && step.action === 'verify-kit') {
+    const headCommit = await git(['rev-parse', 'HEAD'])
+    let instance: Awaited<ReturnType<typeof startVerification>> | undefined
+    try {
+      const loaded = await loadKit(cwd, headCommit, signal)
+      if (!loaded.kit?.verify)
+        throw new VerificationError(
+          'kit',
+          loaded.state.error ?? 'Missing verify kit',
+          [],
+          '',
+        )
+      instance = await startVerification({
+        home,
+        repository: cwd,
+        commit: headCommit,
+        kit: loaded.kit,
+        database,
+        signal,
+        check: true,
+      })
+      await instance.stop()
+      await completeAttempt(
+        database,
+        attempt.id,
+        {
+          outcome: 'passed',
+          summary: 'Kit setup, check, start, readiness and cleanup passed.',
+          artifacts: instance.logs,
+        },
+        { headCommit },
+      )
+    } catch (error) {
+      if (signal.aborted) {
+        const logs =
+          error instanceof VerificationError
+            ? error.logs
+            : (instance?.logs ?? [])
+        await addAttemptArtifacts(database, attempt.id, [
+          ...logs,
+          ...(error instanceof VerificationError
+            ? [await verificationFinding(error)]
+            : []),
+        ])
+        signal.throwIfAborted()
+      }
+      const failure =
+        error instanceof VerificationError
+          ? error
+          : new VerificationError(
+              'kit',
+              error,
+              instance?.logs ?? [],
+              instance?.evidenceDir ?? '',
+            )
+      await completeAttempt(
+        database,
+        attempt.id,
+        {
+          outcome: 'failed',
+          summary: failure.message,
+          artifacts: [...failure.logs, await verificationFinding(failure)],
+        },
+        { headCommit },
+      )
+    } finally {
+      await instance?.stop()
+    }
+    return
+  }
   if (step.kind === 'agent') {
     const selected = config.agents.roles[step.role] ?? config.agents.default
     const before = await git(['rev-parse', 'HEAD'])
@@ -127,16 +222,26 @@ export async function runAttempt(
           return { ...artifact, path }
         }),
       )
-      await completeAttempt(database, attempt.id, { ...result, artifacts })
+      await completeAttempt(
+        database,
+        attempt.id,
+        { ...result, artifacts },
+        { headCommit: await git(['rev-parse', 'HEAD']) },
+      )
       return
     }
   } else if (step.kind === 'system' && step.action === 'maintain-pr') {
     if (Number(await git(['rev-list', '--count', `${base}..HEAD`])) === 0) {
-      await completeAttempt(database, attempt.id, {
-        outcome: 'needs-decision',
-        summary: 'The ticket branch has no commits to publish.',
-        artifacts: [],
-      })
+      await completeAttempt(
+        database,
+        attempt.id,
+        {
+          outcome: 'needs-decision',
+          summary: 'The ticket branch has no commits to publish.',
+          artifacts: [],
+        },
+        { headCommit: await git(['rev-parse', 'HEAD']) },
+      )
       return
     }
     await git(['push', '--set-upstream', 'origin', ticket.branch])
@@ -209,10 +314,15 @@ export async function runAttempt(
     })
     signal.throwIfAborted()
     await setPullRequestUrl(database, ticket.id, pr.url)
-    await completeAttempt(database, attempt.id, {
-      outcome: 'ready',
-      summary: `Pull request: ${pr.url}`,
-      artifacts: [],
-    })
+    await completeAttempt(
+      database,
+      attempt.id,
+      {
+        outcome: 'ready',
+        summary: `Pull request: ${pr.url}`,
+        artifacts: [],
+      },
+      { headCommit: await git(['rev-parse', 'HEAD']) },
+    )
   } else throw new Error(`Step ${step.id} is not supported in this slice`)
 }

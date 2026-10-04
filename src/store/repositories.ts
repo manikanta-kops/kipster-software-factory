@@ -1,5 +1,9 @@
 import { FactoryError } from '../domain/errors.ts'
-import type { Repository, RepositoryStatus } from '../domain/records.ts'
+import type {
+  Repository,
+  RepositoryStatus,
+  RepositoryKit,
+} from '../domain/records.ts'
 import { type Database, type Queryable, transaction } from './database.ts'
 import { recordEvents } from './events.ts'
 
@@ -19,6 +23,8 @@ interface RepositoryRow {
   default_branch: string
   status: RepositoryStatus
   last_error: string | null
+  kit_status: RepositoryKit['status']
+  kit_error: string | null
   capabilities: string[]
   created_at: Date
   updated_at: Date
@@ -33,6 +39,11 @@ function toRepository(row: RepositoryRow): Repository {
     status: row.status,
     lastError: row.last_error,
     capabilities: row.capabilities,
+    kit: {
+      status: row.kit_status,
+      error: row.kit_error,
+      capabilities: row.capabilities,
+    },
     createdAt: row.created_at.toISOString(),
     updatedAt: row.updated_at.toISOString(),
   }
@@ -104,6 +115,7 @@ export async function markRepositoryReady(
   update: {
     readonly defaultBranch?: string
     readonly capabilities?: readonly string[]
+    readonly kit?: RepositoryKit
   } = {},
 ): Promise<Repository> {
   return transaction(database, async (connection) => {
@@ -111,10 +123,18 @@ export async function markRepositoryReady(
       `UPDATE repositories
        SET status = 'ready', last_error = NULL, updated_at = now(),
            default_branch = coalesce($2, default_branch),
-           capabilities = coalesce($3, capabilities)
+           capabilities = coalesce($3, capabilities),
+           kit_status = coalesce($4, kit_status),
+           kit_error = CASE WHEN $4::text IS NULL THEN kit_error ELSE $5 END
        WHERE id = $1
        RETURNING *`,
-      [id, update.defaultBranch ?? null, update.capabilities ?? null],
+      [
+        id,
+        update.defaultBranch ?? null,
+        update.kit?.capabilities ?? update.capabilities ?? null,
+        update.kit?.status ?? null,
+        update.kit?.error ?? null,
+      ],
     )
     const row = found(rows[0], id)
     await recordEvents(connection, [

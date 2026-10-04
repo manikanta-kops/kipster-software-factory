@@ -5,6 +5,13 @@ steps:
     kind: agent
     role: onboarder
 
+  - id: verify-kit
+    kind: system
+    action: verify-kit
+    limit: 3
+    routes:
+      failed: write-kit
+
   - id: approve-kit
     kind: human
     routes:

@@ -79,6 +79,12 @@ export const EVENT_KINDS = [
 ] as const
 export type EventKind = (typeof EVENT_KINDS)[number]
 
+export interface RepositoryKit {
+  readonly status: 'missing' | 'valid' | 'invalid'
+  readonly error: string | null
+  readonly capabilities: readonly string[]
+}
+
 export interface Repository {
   readonly id: number
   /** `owner/name` */
@@ -87,8 +93,9 @@ export interface Repository {
   readonly defaultBranch: string
   readonly status: RepositoryStatus
   readonly lastError: string | null
-  /** What the repository's kit provides. Empty until kits arrive in Slice 2. */
+  /** Compatibility alias of kit.capabilities. */
   readonly capabilities: readonly string[]
+  readonly kit: RepositoryKit
   readonly createdAt: string
   readonly updatedAt: string
 }
@@ -146,10 +153,13 @@ export interface Attempt {
   readonly claimedAt: string | null
   readonly startedAt: string | null
   readonly waitingSince: string | null
+  /** Exact branch commit at completion; null when no commit was observed. */
+  readonly headCommit: string | null
   readonly finishedAt: string | null
 }
 
 export interface Artifact {
+  readonly mediaType: string
   readonly id: number
   readonly ticketId: number
   readonly attemptId: number

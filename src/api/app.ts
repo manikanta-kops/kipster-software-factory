@@ -23,7 +23,7 @@ import {
   listTickets,
   resolveAsk,
 } from '../store/tickets.ts'
-import { openArtifactFile } from './artifact-files.ts'
+import { openArtifactFile, inspectArtifactFile } from './artifact-files.ts'
 import type {
   ErrorResponse,
   HealthResponse,
@@ -272,7 +272,13 @@ export function createApp({
         })),
       },
       attempts,
-      artifacts: detail.artifacts,
+      artifacts: await Promise.all(
+        detail.artifacts.map(async (artifact) => {
+          if (!artifact.path) return artifact
+          const file = await inspectArtifactFile(home, artifact.path)
+          return file.ok ? { ...artifact, mediaType: file.type } : artifact
+        }),
+      ),
       events: detail.events,
     }
   }

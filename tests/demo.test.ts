@@ -35,6 +35,7 @@ describe('demo data', () => {
       repositories.map((repository) => [repository.slug, repository.status]),
       [
         ['kipster/demo-shop', 'ready'],
+        ['kipster/invalid-kit', 'ready'],
         ['kipster/legacy-api', 'failed'],
         ['kipster/website', 'pending'],
       ],
@@ -57,7 +58,7 @@ describe('demo data', () => {
       assert.equal(ticket.status, status, `#${number}`)
       assert.equal(ticket.waiting?.for ?? null, waitingFor, `#${number}`)
     }
-    assert.equal((await listTickets(demo.database)).length, 7)
+    assert.equal((await listTickets(demo.database)).length, 9)
   })
 
   test('the plan waiting for approval is a markdown artifact', async () => {
@@ -92,10 +93,16 @@ describe('demo data', () => {
 })
 
 test('demo database refuses a scheduler before recovery or repository work', async () => {
-  await assert.rejects(
-    acquireSchedulerLock(demo.database, () => {}),
-    /Demo data.*--no-scheduler/,
-  )
+  for (let retry = 0; retry < 10; retry++) {
+    await assert.rejects(
+      acquireSchedulerLock(demo.database, () => {}, 'demo'),
+      /already has demo data/,
+    )
+    await assert.rejects(
+      acquireSchedulerLock(demo.database, () => {}),
+      /Demo data.*--no-scheduler/,
+    )
+  }
   assert.equal(
     (await detail(demo.tickets.running)).attempts.at(-1)?.status,
     'running',
@@ -108,14 +115,14 @@ test('seeding refuses an active scheduler and leaves the database empty', async 
   const lock = await acquireSchedulerLock(store.database, () => {})
   try {
     await assert.rejects(
-      seedDemo(store.database, await builtInLibrary()),
+      seedDemo(store.database, await builtInLibrary(), demo.home),
       /scheduler lock/,
     )
     assert.deepEqual(await listRepositories(store.database), [])
   } finally {
-    lock.close()
+    await lock.close()
   }
-  await seedDemo(store.database, await builtInLibrary())
+  await seedDemo(store.database, await builtInLibrary(), demo.home)
   await assert.rejects(
     acquireSchedulerLock(store.database, () => {}),
     /Demo data/,
@@ -140,11 +147,11 @@ test('demo seeding refuses existing real repositories without marking their data
   t.after(() => store.close())
   await createRepository(store.database, { slug: 'real/project' })
   await assert.rejects(
-    seedDemo(store.database, await builtInLibrary()),
+    seedDemo(store.database, await builtInLibrary(), demo.home),
     /empty database/,
   )
   const lock = await acquireSchedulerLock(store.database, () => {})
-  lock.close()
+  await lock.close()
   assert.equal((await listRepositories(store.database)).length, 1)
 })
 
@@ -199,5 +206,35 @@ test('serve CLI accepts --no-scheduler and refuses demo scheduling by default', 
   } finally {
     child.kill('SIGTERM')
     await exited
+  }
+})
+
+test('demo includes valid/invalid kits and current/stale feature verdicts with playable media files', async () => {
+  const repositories = await listRepositories(demo.database)
+  assert.equal(
+    repositories.find((r) => r.slug === 'kipster/demo-shop')!.kit.status,
+    'valid',
+  )
+  assert.equal(
+    repositories.find((r) => r.slug === 'kipster/invalid-kit')!.kit.status,
+    'invalid',
+  )
+  for (const [number, stale] of [
+    [demo.tickets.proofPassed, false],
+    [demo.tickets.proofStale, true],
+  ] as const) {
+    const proof = await detail(number)
+    assert.equal(proof.ticket.workflow.name, 'feature')
+    const verdict = proof.attempts.find(
+      (a) => a.stepId === 'test' && a.outcome === 'passed',
+    )!
+    const latest = proof.attempts.findLast((a) => a.headCommit !== null)!
+    assert.equal(verdict.headCommit !== latest.headCommit, stale)
+    assert.deepEqual(
+      proof.artifacts
+        .filter((a) => a.attemptId === verdict.id)
+        .map((a) => a.mediaType),
+      ['image/png', 'video/webm', 'text/plain'],
+    )
   }
 })

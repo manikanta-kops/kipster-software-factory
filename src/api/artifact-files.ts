@@ -1,6 +1,7 @@
+import { detectMediaType } from '../artifacts/media-type.ts'
 import { createReadStream } from 'node:fs'
 import { realpath, stat } from 'node:fs/promises'
-import { extname, isAbsolute, relative, resolve, sep } from 'node:path'
+import { isAbsolute, relative, resolve, sep } from 'node:path'
 import { Readable } from 'node:stream'
 
 export type ArtifactFile =
@@ -12,27 +13,14 @@ export type ArtifactFile =
     }
   | { readonly ok: false; readonly reason: 'outside-home' | 'missing' }
 
-// HTML and anything unknown are sent as plain text or bytes so the browser never runs them.
-const TYPES: Readonly<Record<string, string>> = {
-  '.png': 'image/png',
-  '.jpg': 'image/jpeg',
-  '.jpeg': 'image/jpeg',
-  '.gif': 'image/gif',
-  '.webp': 'image/webp',
-  '.webm': 'video/webm',
-  '.mp4': 'video/mp4',
-  '.md': 'text/markdown; charset=utf-8',
-  '.txt': 'text/plain; charset=utf-8',
-  '.log': 'text/plain; charset=utf-8',
-  '.json': 'application/json',
-  '.html': 'text/plain; charset=utf-8',
-}
-
 /** Opens an artifact file only if it lies inside the factory home, after resolving symlinks. */
-export async function openArtifactFile(
+export async function inspectArtifactFile(
   home: string,
   path: string,
-): Promise<ArtifactFile> {
+): Promise<
+  | { ok: true; path: string; type: string; size: number }
+  | { ok: false; reason: 'outside-home' | 'missing' }
+> {
   const root = resolve(home)
   if (!inside(root, resolve(root, path))) {
     return { ok: false, reason: 'outside-home' }
@@ -50,8 +38,8 @@ export async function openArtifactFile(
   if (!info.isFile()) return { ok: false, reason: 'missing' }
   return {
     ok: true,
-    body: Readable.toWeb(createReadStream(real)) as ReadableStream<Uint8Array>,
-    type: TYPES[extname(real).toLowerCase()] ?? 'application/octet-stream',
+    path: real,
+    type: await detectMediaType(real),
     size: info.size,
   }
 }
@@ -64,4 +52,22 @@ function inside(root: string, target: string): boolean {
     !path.startsWith(`..${sep}`) &&
     !isAbsolute(path)
   )
+}
+
+export async function openArtifactFile(
+  home: string,
+  path: string,
+): Promise<ArtifactFile> {
+  const file = await inspectArtifactFile(home, path)
+  if (!file.ok) return file
+  return {
+    ok: true,
+    body: Readable.toWeb(
+      createReadStream(file.path),
+    ) as ReadableStream<Uint8Array>,
+    type: file.type.startsWith('text/')
+      ? `${file.type}; charset=utf-8`
+      : file.type,
+    size: file.size,
+  }
 }
