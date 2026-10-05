@@ -56,3 +56,8 @@ export const statusFilter = z
   .string()
   .transform((value) => value.split(',').filter((part) => part !== ''))
   .pipe(z.array(z.enum(TICKET_STATUSES)).min(1))
+
+export const optionRequest = z.strictObject({
+  attemptId,
+  option: z.string().min(1).max(200),
+})

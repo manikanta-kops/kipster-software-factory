@@ -1,7 +1,7 @@
 // The ticket lifecycle: given a ticket's attempts and what just happened, decide how the
 // open attempt closes and which attempt opens next. The store applies the answer.
 import { z } from 'zod'
-import { LIMIT } from './catalog.ts'
+import { decideParams, LIMIT } from './catalog.ts'
 import { FactoryError } from './errors.ts'
 import {
   ARTIFACT_KINDS,
@@ -217,6 +217,46 @@ export function afterDecision(
   }
   const step = stepOf(workflow, attempt.stepId)
   return route(workflow, history, step, decision.choice, comment)
+}
+
+/** Typed owner answers complete the same system step and use its option routes. */
+export function afterTypedDecision(
+  workflow: Workflow,
+  history: readonly AttemptState[],
+  choice: string,
+): Transition {
+  const attempt = openAttempt(history)
+  const step = stepOf(workflow, attempt.stepId)
+  if (
+    attempt.status !== 'waiting' ||
+    attempt.waitingFor !== 'decision' ||
+    step.kind !== 'system' ||
+    step.action !== 'decide'
+  )
+    throw new FactoryError(
+      'conflict',
+      'This step is not waiting for a typed decision',
+    )
+  if (!Object.hasOwn(decideParams.parse(step.with).options, choice))
+    throw new FactoryError('invalid', 'Choose one of the decision options')
+  return route(workflow, history, step, choice, `Owner chose ${choice}`)
+}
+export function waitForDecision(
+  workflow: Workflow,
+  history: readonly AttemptState[],
+): TicketStatus {
+  const attempt = openAttempt(history)
+  const step = stepOf(workflow, attempt.stepId)
+  if (
+    attempt.status !== 'running' ||
+    step.kind !== 'system' ||
+    step.action !== 'decide'
+  )
+    throw new FactoryError(
+      'conflict',
+      'Only a running decide step can wait for an owner answer',
+    )
+  return 'needs-you'
 }
 
 /** You answered an ask: retry the step, move to another step, or cancel the ticket. */

@@ -1,3 +1,4 @@
+import { listDecisions, decisionCounts } from '../store/decisions.ts'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { serveStatic } from '@hono/node-server/serve-static'
@@ -18,6 +19,7 @@ import {
   cancelTicket,
   createTicket,
   decide,
+  decideOption,
   getArtifact,
   getTicketDetail,
   listTickets,
@@ -26,6 +28,7 @@ import {
 import { openArtifactFile, inspectArtifactFile } from './artifact-files.ts'
 import type {
   ErrorResponse,
+  DecisionsResponse,
   HealthResponse,
   RepositoriesResponse,
   RepositoryResponse,
@@ -40,6 +43,7 @@ import {
   createRepositoryRequest,
   createTicketRequest,
   decisionRequest,
+  optionRequest,
   resolveRequest,
   statusFilter,
 } from './requests.ts'
@@ -138,6 +142,19 @@ export function createApp({
         : { defaultBranch: input.defaultBranch }),
     })
     return c.json<RepositoryResponse>({ repository }, 201)
+  })
+
+  app.get('/api/decisions', async (c) =>
+    c.json<DecisionsResponse>({
+      decisions: await listDecisions(database),
+      steps: await decisionCounts(database),
+    }),
+  )
+  app.post('/api/tickets/:number{[0-9]+}/option', async (c) => {
+    const number = ticketNumber(c)
+    const input = await body(c, optionRequest)
+    await decideOption(database, { ticketNumber: number, ...input })
+    return c.json<TicketResponse>(await ticketResponse(number))
   })
 
   app.get('/api/tickets', async (c) => {
@@ -285,6 +302,7 @@ export function createApp({
         })),
       },
       attempts,
+      decisions: await listDecisions(database, detail.ticket.id),
       artifacts: await Promise.all(
         detail.artifacts.map(async (artifact) => {
           if (!artifact.path) return artifact

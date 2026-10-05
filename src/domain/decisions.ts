@@ -49,6 +49,7 @@ export interface DecisionRecord extends DecisionInput {
   readonly stepId: string
   readonly workflow: string
   readonly workflowVersion: string
+  readonly pending: boolean
   readonly finalOption: string | null
   readonly decidedBy: 'model' | 'owner' | null
   readonly overridden: boolean

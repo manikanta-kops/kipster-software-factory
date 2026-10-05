@@ -30,6 +30,7 @@ export type OpenStatus = (typeof OPEN_STATUSES)[number]
 
 export const WAITING_FOR = [
   'human',
+  'decision',
   'ask',
   'pull-request-merge',
   'pull-request-checks',
