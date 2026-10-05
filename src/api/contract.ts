@@ -62,10 +62,22 @@ export interface WorkflowSummary {
   readonly version: string
   readonly description: string
   readonly steps: readonly StepSummary[]
+  /** `file` workflows load from the factory's workflow directory; `upload` ones were added through the API. */
+  readonly origin: 'file' | 'upload'
 }
 
 export interface WorkflowsResponse {
   readonly workflows: readonly WorkflowSummary[]
+}
+
+// POST /api/workflows
+export interface UploadWorkflowRequest {
+  /** The workflow file's YAML text. */
+  readonly source: string
+}
+
+export interface WorkflowResponse {
+  readonly workflow: WorkflowSummary
 }
 
 /** Every 4xx and 5xx response. */

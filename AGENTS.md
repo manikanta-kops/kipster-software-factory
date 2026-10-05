@@ -29,6 +29,8 @@ Read [the architecture](docs/architecture.md) before changing behaviour and
 - Test against real PostgreSQL, never a mock. Use the browser tests for UI
   behaviour.
 - Comments explain only a non-obvious why. Prefer clear names.
+- Changes to workflows, the catalog, routing or how an action behaves must
+  update `skills/kipster-workflows/SKILL.md`. See its `AGENTS.md`.
 
 ## Before finishing
 

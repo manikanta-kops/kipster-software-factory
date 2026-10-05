@@ -18,13 +18,14 @@ import { createTestDatabase } from './database.ts'
 
 let library: Library | undefined
 
-export async function builtInLibrary(): Promise<Library> {
+/** A fresh copy each call, so uploads in one app never reach another. */
+export async function builtInLibrary(): Promise<Map<string, LibraryEntry>> {
   if (!library) {
     const loaded = await loadLibrary(BUILT_IN_WORKFLOWS)
     if (!loaded.ok) throw new Error(loaded.errors.join('\n'))
     library = loaded.library
   }
-  return library
+  return new Map(library)
 }
 
 export async function builtInWorkflow(name: string): Promise<LibraryEntry> {
