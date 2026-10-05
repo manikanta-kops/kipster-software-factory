@@ -102,7 +102,6 @@ async function fixture(t: TestContext, tester = false, timeout = 60) {
           needs: [],
           with: {
             ciTimeoutMinutes: timeout,
-            factoryUrl: 'https://factory.example.test',
           },
           routes: {},
         },
@@ -146,7 +145,16 @@ async function fixture(t: TestContext, tester = false, timeout = 60) {
       return { url: 'https://github.com/fixture/repo/pull/1', state: 'OPEN' }
     },
     async inspect() {
-      return { url: 'https://github.com/fixture/repo/pull/1', state: 'OPEN' }
+      return {
+        url: 'https://github.com/fixture/repo/pull/1',
+        state: 'OPEN',
+        isDraft: false,
+        baseRefName: 'main',
+        mergeable: 'MERGEABLE',
+        headRefOid: await run('git', ['rev-parse', ticket.branch], {
+          cwd: bare,
+        }),
+      }
     },
     async checks(_repo, _url, checkedHead) {
       checkedHeads.push(checkedHead)
@@ -258,7 +266,7 @@ test('maintain-pr merges base without rewriting branch, invokes writer and links
   assert.match(f.bodies[0]!, new RegExp(`Verified at ${head}`))
   assert.ok(
     f.bodies[0]!.includes(
-      `https://factory.example.test/#/tickets/${f.ticket.number}`,
+      `Evidence on ticket #${f.ticket.number} in the factory`,
     ),
   )
   assert.ok(f.bodies[0]!.length < 4100)
@@ -573,7 +581,11 @@ test('changed head while waiting cannot use the original commit’s green checks
   const d = await f.detail()
   assert.equal(d.attempts[0]!.outcome, 'needs-decision')
   assert.match(d.ticket.waiting!.summary!, /branch changed/)
-  assert.equal(f.checkedHeads.length, 1)
+  assert.equal(f.checkedHeads.length, 2)
+  assert.ok(
+    f.checkedHeads.every((head) => head === f.head),
+    'CI snapshot stays pinned to the published head',
+  )
 })
 
 test('writer invalid output retries in a fresh session before publication', async (t) => {
@@ -589,4 +601,239 @@ test('writer invalid output retries in a fresh session before publication', asyn
     (await f.detail()).artifacts.filter((a) => a.kind === 'log').length,
     2,
   )
+})
+
+test('maintenance replaces a cached description containing local evidence links', async (t) => {
+  const { getPullRequestDescription, savePullRequestDescription } =
+    await import('../src/store/pull-requests.ts')
+  const f = await fixture(t)
+  await savePullRequestDescription(
+    f.store.database,
+    f.ticket.id,
+    f.head,
+    `Verified at ${f.head}\nEvidence on ticket #${f.ticket.number} in the factory\nMerge danger: two-way door\n[Evidence](http://localhost:4600/api/artifacts/1)`,
+  )
+  await f.publish()
+  assert.equal(f.writers(), 1)
+  assert.equal(f.bodies.length, 1)
+  assert.doesNotMatch(f.bodies[0]!, /localhost|127\.0\.0\.1/)
+  assert.equal(
+    await getPullRequestDescription(f.store.database, f.ticket.id, f.head),
+    f.bodies[0]!.split('\n\n<!--')[0],
+  )
+})
+
+test('gate is evaluated during CI and merge waits, with checks separate from historical writer text', async (t) => {
+  const { getMergeGate } = await import('../src/store/merge-gates.ts')
+  const { refreshMergeGate } = await import('../src/engine/merge-gate.ts')
+  const f = await fixture(t, true)
+  f.setChecks({
+    state: 'pending',
+    failures: [],
+    checks: [
+      {
+        name: 'build',
+        state: 'pending',
+        required: true,
+        url: 'https://github.com/check',
+      },
+    ],
+  })
+  await f.publish()
+  let snapshot = (await getMergeGate(f.store.database, f.ticket.id))!
+  assert.equal(snapshot.latest.ready, false)
+  assert.equal(snapshot.latest.facts.head, f.head)
+  assert.equal(snapshot.latest.facts.checks[0]!.state, 'pending')
+  f.setChecks({
+    state: 'passed',
+    failures: [],
+    checks: [
+      {
+        name: 'build',
+        state: 'passed',
+        required: true,
+        url: 'https://github.com/check',
+      },
+    ],
+  })
+  await f.poll()
+  const context = await f.next()
+  await runAttempt(f.options, context, signal)
+  const [waiting] = await listWaitingForMerge(f.store.database)
+  await refreshMergeGate(f.options, waiting!, signal)
+  snapshot = (await getMergeGate(f.store.database, f.ticket.id))!
+  assert.equal(snapshot.latest.ready, true)
+  assert.equal(snapshot.lastGreen!.facts.head, f.head)
+  assert.match(f.bodies[0]!, /CI pending at publication/)
+  assert.doesNotMatch(
+    f.bodies[0]!,
+    /localhost|factory\.example|\/api\/artifacts|\/Users\//,
+  )
+})
+
+test('open feedback and current consumed change requests both block; behind base preserves earlier green head while rebuilding', async (t) => {
+  const { getMergeGate } = await import('../src/store/merge-gates.ts')
+  const { refreshMergeGate } = await import('../src/engine/merge-gate.ts')
+  const { addAttemptArtifacts } = await import('../src/store/tickets.ts')
+  const f = await fixture(t, true)
+  f.setChecks({ state: 'passed', failures: [] })
+  await f.publish()
+  await runAttempt(f.options, await f.next(), signal)
+  const [waiting] = await listWaitingForMerge(f.store.database)
+  f.setFeedback([
+    {
+      id: 'review:50',
+      author: 'owner',
+      url: 'https://github.com/review/50',
+      body: 'Fix this',
+      changeRequest: true,
+      createdAt: new Date().toISOString(),
+    },
+  ])
+  await addAttemptArtifacts(f.store.database, waiting!.attempt.id, [
+    {
+      kind: 'comment',
+      title: 'Consumed review',
+      content: '<!-- github-feedback:review:50 -->',
+    },
+  ])
+  const review = await refreshMergeGate(f.options, waiting!, signal)
+  assert.match(review.gate.blockers.join(), /feedback/)
+  f.setFeedback([
+    {
+      id: 'comment:51',
+      author: 'owner',
+      url: 'https://github.com/comment/51',
+      body: 'Also fix this',
+      createdAt: new Date().toISOString(),
+    },
+  ])
+  assert.match(
+    (await refreshMergeGate(f.options, waiting!, signal)).gate.blockers.join(),
+    /feedback/,
+  )
+  f.setFeedback([])
+  await f.advanceBase()
+  assert.match(
+    (await refreshMergeGate(f.options, waiting!, signal)).gate.blockers.join(),
+    /Behind base/,
+  )
+  await pollPullRequestBase(f.options, waiting!, signal)
+  const snapshot = (await getMergeGate(f.store.database, f.ticket.id))!
+  assert.equal(snapshot.lastGreen!.facts.head, f.head)
+  assert.equal((await f.detail()).ticket.status, 'queued')
+  await f.publish()
+  assert.equal((await f.detail()).attempts.at(-2)!.outcome, 'base-moved')
+})
+
+for (const path of [
+  '.kipster/kit.yml',
+  '.github/workflows/ci.yml',
+  'db/migrations/001.sql',
+  'custom/001.sql',
+]) {
+  test(`trusted path rules need the owner for ${path}`, async (t) => {
+    const { refreshMergeGate } = await import('../src/engine/merge-gate.ts')
+    const f = await fixture(t)
+    await mkdir(join(f.source, '.kipster'), { recursive: true })
+    await f.commit(
+      f.source,
+      '.kipster/kit.yml',
+      'version: 1\ncheck: true\nmerge:\n  migrations: [custom/*.sql]\n'.replace(
+        'check: true',
+        'check: "true"',
+      ),
+    )
+    await run('git', ['push', f.bare, 'main'], { cwd: f.source })
+    await mkdir(join(f.cwd, path.substring(0, path.lastIndexOf('/'))), {
+      recursive: true,
+    })
+    await f.commit(
+      f.cwd,
+      path,
+      path === '.kipster/kit.yml'
+        ? 'version: 1\ncheck: "true"\nmerge:\n  migrations: []\n'
+        : 'changed',
+    )
+    // Avoid a same-file kit merge conflict; bring the trusted baseline into this branch first.
+    if (path === '.kipster/kit.yml') {
+      await run('git', ['fetch', 'origin'], { cwd: f.cwd })
+      await run(
+        'git',
+        [
+          '-c',
+          'user.name=Fixture',
+          '-c',
+          'user.email=fixture@example.test',
+          'merge',
+          '-s',
+          'ours',
+          '--no-edit',
+          'origin/main',
+        ],
+        { cwd: f.cwd },
+      )
+    }
+    await f.publish()
+    const [waiting] = await listWaitingForMerge(
+      f.store.database,
+      'pull-request-checks',
+    )
+    const { gate } = await refreshMergeGate(f.options, waiting!, signal)
+    assert.ok(gate.paths.some((p) => p.path === path))
+    assert.match(
+      gate.needsOwner.join(),
+      new RegExp(path.replaceAll('.', '\\.')),
+    )
+    assert.deepEqual(
+      gate.facts.migrationGlobs,
+      ['custom/*.sql'],
+      'ticket kit cannot replace trusted rules',
+    )
+  })
+}
+
+for (const suffix of [
+  '[proof](http://factory.lan:4600/#/tickets/1)',
+  '[proof](/api/artifacts/1)',
+]) {
+  test(`writer rejects local evidence links: ${suffix}`, async (t) => {
+    const f = await fixture(t)
+    const execute = f.options.execute
+    f.options.execute = async (invocation) => {
+      await execute(invocation)
+      const path = join(invocation.directory, 'result.json')
+      const result = JSON.parse(await readFile(path, 'utf8'))
+      result.artifacts[0].content += `\n${suffix}`
+      await writeFile(path, JSON.stringify(result))
+    }
+    await assert.rejects(f.publish(), /description requires/)
+    assert.equal(f.writers(), 2)
+    assert.equal(f.bodies.length, 0)
+  })
+}
+
+test('writer contract rejects local links but allows ordinary routes and public URLs', async () => {
+  const { validDescription } = await import('../src/engine/pr-writer.ts')
+  const head = 'a'.repeat(40)
+  const body = (extra: string) =>
+    `Verified at ${head}\nEvidence on ticket #3 in the factory\nMerge danger: two-way door, small blast radius.\n${extra}`
+  for (const allowed of [
+    'Adds GET /api/users/:id',
+    'Serves GET /api/artifacts/:id',
+    'An admin opens /users/42',
+    '[source](https://github.com/o/r/blob/x/src/pages/home/index.tsx)',
+    '[docs](https://docs.typesafe.ai/api)',
+  ])
+    assert.ok(validDescription(body(allowed), head, 3, []), allowed)
+  for (const rejected of [
+    '[proof](http://factory.lan:4600/#/tickets/1)',
+    '[proof](/api/artifacts/1)',
+    '[shot](./shot.png)',
+    'Logs in /Users/someone/.kipster-factory/steps',
+    'Saved under `~/.kipster-factory`',
+    'http://localhost:4600',
+    'https://studio.example.ts.net/',
+  ])
+    assert.ok(!validDescription(body(rejected), head, 3, []), rejected)
 })

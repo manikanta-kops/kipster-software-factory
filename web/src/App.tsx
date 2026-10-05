@@ -22,7 +22,7 @@ export function App() {
         : `${path.split('/').filter(Boolean).join(' / ')} · Kipster`
     main.current?.focus()
   }, [path])
-  const ticket = /^\/tickets\/(\d+)$/.exec(path)
+  const ticket = /^\/tickets\/(\d+)(?:\/evidence\/(\d+))?$/.exec(path)
   const onWorkflows = path.startsWith('/workflows')
   return (
     <div className="shell">
@@ -91,7 +91,11 @@ export function App() {
         ) : path === '/tickets/new' ? (
           <NewTicket />
         ) : ticket ? (
-          <TicketPage key={ticket[1]} number={Number(ticket[1])} />
+          <TicketPage
+            key={ticket[1]}
+            number={Number(ticket[1])}
+            {...(ticket[2] ? { evidenceId: Number(ticket[2]) } : {})}
+          />
         ) : path === '/repositories' ? (
           <Repositories />
         ) : path === '/decisions' ? (

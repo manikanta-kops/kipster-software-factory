@@ -118,6 +118,7 @@ async function main(argv: string[]): Promise<number> {
       databaseUrl: config.databaseUrl,
       port: port ?? config.port,
       allowedOrigins: config.allowedOrigins,
+      evidenceRetentionDays: config.evidenceRetentionDays,
       concurrency: config.concurrency,
       stepTimeoutMinutes: config.stepTimeoutMinutes,
       agents: config.agents,

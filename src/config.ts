@@ -24,6 +24,7 @@ export const agentConfig = z.strictObject({
   model: z.string().min(1).optional(),
 })
 export const engineConfig = z.object({
+  evidenceRetentionDays: z.int().positive().default(30),
   concurrency: z.int().positive().default(2),
   stepTimeoutMinutes: z.number().positive().default(60),
   agents: z

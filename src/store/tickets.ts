@@ -1,3 +1,5 @@
+import { retainArtifact } from '../artifacts/storage.ts'
+import { artifactHome } from './database.ts'
 import type { DecisionInput } from '../domain/decisions.ts'
 import { insertDecision, finishDecision } from './decisions.ts'
 import { isAbsolute } from 'node:path'
@@ -348,7 +350,10 @@ export async function completeAttempt(
   database: Database,
   attemptId: number,
   result: unknown,
-  completion: { readonly headCommit?: string } = {},
+  completion: {
+    readonly headCommit?: string
+    readonly reproductionAttemptId?: number
+  } = {},
 ): Promise<Moved> {
   const parsed = parseStepResult(result)
   if (
@@ -735,6 +740,7 @@ export async function addAttemptArtifacts(
   database: Database,
   attemptId: number,
   artifacts: readonly ArtifactInput[],
+  observation: { readonly commit?: string } = {},
 ): Promise<void> {
   const parsed = parseStepResult({
     outcome: 'evidence',
@@ -750,6 +756,7 @@ export async function addAttemptArtifacts(
       attemptId,
       parsed.artifacts,
       events,
+      observation.commit,
     )
     await recordEvents(connection, events)
   })
@@ -847,6 +854,7 @@ async function apply(
     readonly error?: string
     readonly executor?: string
     readonly headCommit?: string
+    readonly reproductionAttemptId?: number
   },
   events: NewEvent[],
 ): Promise<Moved> {
@@ -856,7 +864,7 @@ async function apply(
     `UPDATE attempts
      SET status = $2, outcome = $3, next = $4, summary = coalesce($5, summary),
          error = $6, executor = coalesce($7, executor), finished_at = now(),
-         head_commit = coalesce($8, head_commit)
+         head_commit = coalesce($8, head_commit), reproduction_attempt_id = coalesce($9, reproduction_attempt_id)
      WHERE id = $1
      RETURNING *`,
     [
@@ -868,6 +876,7 @@ async function apply(
       closing.error ?? null,
       closing.executor ?? null,
       closing.headCommit ?? null,
+      closing.reproductionAttemptId ?? null,
     ],
   )
   const closed = toAttempt(rows[0] as AttemptRow)
@@ -972,8 +981,11 @@ async function insertArtifacts(
   attemptId: number,
   artifacts: readonly ArtifactInput[],
   events: NewEvent[],
+  observedCommit?: string,
 ): Promise<void> {
-  for (const artifact of artifacts) {
+  for (const input of artifacts) {
+    const home = artifactHome(connection)
+    const artifact = home ? await retainArtifact(home, ticketId, input) : input
     let mediaType =
       artifact.content !== undefined
         ? 'text/markdown'
@@ -986,8 +998,8 @@ async function insertArtifacts(
       }
     }
     const { rows } = await connection.query<{ id: number }>(
-      `INSERT INTO artifacts (ticket_id, attempt_id, kind, title, content, path, media_type)
-       VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id`,
+      `INSERT INTO artifacts (ticket_id, attempt_id, kind, title, content, path, media_type, scenario, scenario_result, observed_commit)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING id`,
       [
         ticketId,
         attemptId,
@@ -996,6 +1008,9 @@ async function insertArtifacts(
         artifact.content ?? null,
         artifact.path ?? null,
         mediaType,
+        artifact.scenario ?? null,
+        artifact.scenarioResult ?? null,
+        observedCommit ?? null,
       ],
     )
     events.push({
@@ -1135,6 +1150,7 @@ interface AttemptRow {
   started_at: Date | null
   waiting_since: Date | null
   head_commit: string | null
+  reproduction_attempt_id: number | null
   finished_at: Date | null
 }
 
@@ -1156,6 +1172,7 @@ function toAttempt(row: AttemptRow): Attempt {
     startedAt: iso(row.started_at),
     waitingSince: iso(row.waiting_since),
     headCommit: row.head_commit,
+    reproductionAttemptId: row.reproduction_attempt_id,
     finishedAt: iso(row.finished_at),
   }
 }
@@ -1164,6 +1181,11 @@ const ARTIFACT_SELECT = `
   SELECT a.*, at.step_id FROM artifacts a JOIN attempts at ON at.id = a.attempt_id`
 
 interface ArtifactRow {
+  observed_commit: string | null
+  scenario_result: Exclude<Artifact['scenarioResult'], undefined>
+  scenario: string | null
+  pruned_at: Date | null
+  retention_days: number | null
   media_type: string
   id: number
   ticket_id: number
@@ -1179,6 +1201,11 @@ interface ArtifactRow {
 function toArtifact(row: ArtifactRow): Artifact {
   return {
     mediaType: row.media_type,
+    observedCommit: row.observed_commit,
+    scenario: row.scenario,
+    scenarioResult: row.scenario_result,
+    prunedAt: iso(row.pruned_at),
+    retentionDays: row.retention_days,
     id: row.id,
     ticketId: row.ticket_id,
     attemptId: row.attempt_id,

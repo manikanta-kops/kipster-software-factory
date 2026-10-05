@@ -67,6 +67,25 @@ export const kitSchema = z.strictObject({
   setup: command.optional(),
   check: command,
   verify: verifySchema.optional(),
+  merge: z
+    .strictObject({
+      migrations: z
+        .array(
+          z
+            .string()
+            .trim()
+            .min(1)
+            .max(500)
+            .refine(
+              (glob) =>
+                !glob.startsWith('/') &&
+                !glob.split('/').includes('..') &&
+                !/[!{}\\]/.test(glob),
+            ),
+        )
+        .optional(),
+    })
+    .optional(),
 })
 export type Kit = z.infer<typeof kitSchema>
 export type Verify = z.infer<typeof verifySchema>

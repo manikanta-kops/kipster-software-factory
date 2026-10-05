@@ -1,3 +1,7 @@
+import { invalidateMergeGate } from '../store/merge-gates.ts'
+import { pruneEvidence, adoptEvidence } from '../store/evidence.ts'
+import { refreshMergeGate } from './merge-gate.ts'
+import { setArtifactHome } from '../store/database.ts'
 import {
   pollPullRequestChecks,
   pollPullRequestBase,
@@ -46,6 +50,7 @@ export async function startScheduler(
   options: SchedulerOptions,
 ): Promise<{ close(): Promise<void> }> {
   const { database, events } = options
+  setArtifactHome(database, options.home)
   const config = engineConfig.parse(options.config ?? {})
   const workspaces = new Workspaces(
     options.home,
@@ -76,6 +81,8 @@ export async function startScheduler(
   let ticking: Promise<void> | undefined
   let requested = false
   let nextMergePoll = 0
+  let nextPrune = 0
+  let pruning: Promise<unknown> | undefined
   const lock = await acquireSchedulerLock(database, (error) => {
     report(
       new Error(
@@ -152,6 +159,17 @@ export async function startScheduler(
   async function tick() {
     await checkCancellations()
     if (stopped) return
+    if (!pruning && Date.now() >= nextPrune) {
+      nextPrune = Date.now() + 60 * 60_000
+      pruning = adoptEvidence(database, options.home)
+        .then(() =>
+          pruneEvidence(database, options.home, config.evidenceRetentionDays),
+        )
+        .catch(report)
+        .finally(() => {
+          pruning = undefined
+        })
+    }
     const capacity = config.concurrency - active.size
     if (capacity > 0) {
       for (const context of await claimAttempts(database, capacity)) {
@@ -176,7 +194,10 @@ export async function startScheduler(
             AbortSignal.any([lifetime.signal, AbortSignal.timeout(30_000)]),
           )
         } catch (error) {
-          if (!stopped) report(error)
+          if (!stopped) {
+            await invalidateMergeGate(database, context.ticket.id, error)
+            report(error)
+          }
         }
       }
       for (const context of await listWaitingForMerge(database)) {
@@ -188,6 +209,18 @@ export async function startScheduler(
             context.ticket.pullRequestUrl,
             AbortSignal.any([lifetime.signal, AbortSignal.timeout(30_000)]),
           )
+          try {
+            await refreshMergeGate(
+              runnerOptions,
+              context,
+              AbortSignal.any([lifetime.signal, AbortSignal.timeout(30_000)]),
+              { pr },
+            )
+          } catch (error) {
+            await invalidateMergeGate(database, context.ticket.id, error)
+            if (pr.state === 'OPEN') throw error
+            report(error)
+          }
           if (pr.state === 'OPEN') {
             const feedback = await pollPullRequestFeedback(
               runnerOptions,
@@ -223,7 +256,10 @@ export async function startScheduler(
             )
           }
         } catch (error) {
-          if (!stopped) report(error)
+          if (!stopped) {
+            await invalidateMergeGate(database, context.ticket.id, error)
+            report(error)
+          }
         }
       }
     }
@@ -309,6 +345,7 @@ export async function startScheduler(
           item.controller.abort(new Error('Factory shutting down'))
         await ticking
         await checking
+        await pruning
         await Promise.all([...active.values()].map((item) => item.done))
         try {
           if (held) await interruptRunning(database)

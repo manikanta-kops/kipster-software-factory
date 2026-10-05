@@ -3,6 +3,12 @@ import { inspectFeedback, type PullRequestFeedback } from './feedback.ts'
 import { run } from '../executors/process.ts'
 
 export interface PullRequest {
+  headRefOid?: string
+  baseRefOid?: string
+  baseRefName?: string
+  isDraft?: boolean
+  mergeable?: 'MERGEABLE' | 'CONFLICTING' | 'UNKNOWN'
+  behind?: number
   url: string
   state: 'OPEN' | 'MERGED' | 'CLOSED'
 }
@@ -104,13 +110,47 @@ export function createGitHub(command: typeof run = run): GitHub {
       return { url, state: 'OPEN' }
     },
     async inspect(repository, url, signal) {
-      return JSON.parse(
+      const pr = JSON.parse(
         await command(
           'gh',
-          ['pr', 'view', url, '--repo', repository, '--json', 'url,state'],
+          [
+            'pr',
+            'view',
+            url,
+            '--repo',
+            repository,
+            '--json',
+            'url,state,headRefOid,baseRefOid,baseRefName,isDraft,mergeable',
+          ],
           { signal },
         ),
       ) as PullRequest
+      if (pr.baseRefName) {
+        pr.baseRefOid = await command(
+          'gh',
+          [
+            'api',
+            `repos/${repository}/git/ref/heads/${encodeURIComponent(pr.baseRefName)}`,
+            '--jq',
+            '.object.sha',
+          ],
+          { signal },
+        )
+      }
+      if (pr.baseRefOid && pr.headRefOid) {
+        const comparison = JSON.parse(
+          await command(
+            'gh',
+            [
+              'api',
+              `repos/${repository}/compare/${pr.headRefOid}...${pr.baseRefOid}`,
+            ],
+            { signal },
+          ),
+        ) as { ahead_by: number }
+        pr.behind = comparison.ahead_by
+      }
+      return pr
     },
   }
 }

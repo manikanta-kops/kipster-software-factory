@@ -22,10 +22,7 @@ async function fixture(
 }
 async function cleaned(f: Awaited<ReturnType<typeof proofFixture>>) {
   const entries = await readdir(join(f.home, 'verification'))
-  assert.ok(
-    entries.every((name) => name.startsWith('evidence-')),
-    entries.join(', '),
-  )
+  assert.ok(entries.length === 0, entries.join(', '))
   const { rows } = await f.store.database.query<{ datname: string }>(
     'SELECT datname FROM pg_database',
   )
@@ -184,6 +181,7 @@ test('bug reproduced on base → fixed → tester proves failing base and passin
   const passed = await f.next('test')
   assert.equal(passed.outcome, 'passed')
   assert.equal(passed.headCommit, fixed.headCommit)
+  assert.equal(passed.reproductionAttemptId, reproduced.id)
   assert.match(passed.summary!, new RegExp(`base ${f.base}`))
   const invocation = f.invocations.at(-1)!
   const instances = proofContext(invocation.prompt).instances
@@ -203,6 +201,31 @@ test('bug reproduced on base → fixed → tester proves failing base and passin
     [500, 200],
   )
   const artifacts = (await f.detail()).artifacts
+  assert.equal(
+    artifacts.find(
+      (a) => a.attemptId === passed.id && a.title === 'base checkout response',
+    )!.observedCommit,
+    f.base,
+  )
+  assert.equal(
+    artifacts.find(
+      (a) => a.attemptId === passed.id && a.title === 'head checkout response',
+    )!.observedCommit,
+    fixed.headCommit,
+  )
+  const { scenarioIndex } = await import('../src/domain/evidence.ts')
+  const index = scenarioIndex(
+    artifacts,
+    (await f.detail()).attempts,
+    new Map([
+      ['test', 'tester'],
+      ['reproduce', 'reproducer'],
+    ]),
+    fixed.headCommit!,
+  )
+  assert.equal(index.find((s) => s.role === 'tester')!.commit, fixed.headCommit)
+  assert.equal(index.find((s) => s.role === 'tester')!.current, true)
+
   assert.equal(
     artifacts.filter(
       (a) => a.attemptId === reproduced.id && a.title === 'Reproduction steps',
@@ -421,6 +444,15 @@ test('the PR description includes the factory-pinned Verified at line', async (t
     return { url: 'https://github.com/fixture/proof/pull/1', state: 'OPEN' }
   }
   f.options.github.checks = async () => ({ state: 'none', failures: [] })
+  f.options.github.inspect = async () => ({
+    url: 'https://github.com/fixture/proof/pull/1',
+    state: 'OPEN',
+    headRefOid: built.headCommit!,
+    isDraft: false,
+    baseRefName: 'main',
+    mergeable: 'MERGEABLE',
+  })
+  f.options.github.feedback = async () => []
   await f.next('maintain-pr')
   assert.match(body, new RegExp(`Verified at ${built.headCommit}`))
   await cleaned(f)
@@ -479,4 +511,42 @@ test('a branch commit during proof rejects the verdict without changing its reco
     false,
   )
   await cleaned(f)
+})
+
+test('bug merge gate requires the exact tester-confirmed reproduction at the current PR head', async (t) => {
+  const f = await fixture(t, {
+    script: {
+      reproducer: [{ proof: true }],
+      builder: [{ commit: true, fixed: true }],
+      tester: [{ proof: true }],
+    },
+  })
+  const reproduced = await f.next('reproduce')
+  await f.next('fix')
+  const tested = await f.next('test')
+  const url = 'https://github.com/fixture/proof/pull/1'
+  f.options.github.maintain = async () => ({ url, state: 'OPEN' })
+  f.options.github.inspect = async () => ({
+    url,
+    state: 'OPEN',
+    headRefOid: tested.headCommit!,
+    baseRefName: 'main',
+    isDraft: false,
+    mergeable: 'MERGEABLE',
+  })
+  f.options.github.checks = async () => ({ state: 'passed', failures: [] })
+  f.options.github.feedback = async () => []
+  await f.next('maintain-pr')
+  const { getMergeGate } = await import('../src/store/merge-gates.ts')
+  const gate = (await getMergeGate(f.store.database, f.ticket.id))!.latest
+  assert.equal(gate.ready, true)
+  assert.equal(gate.facts.reproducer!.commit, tested.headCommit)
+  assert.equal(
+    (await f.detail()).attempts.find((a) => a.id === reproduced.id)!.headCommit,
+    f.base,
+  )
+  const index = (await f.detail()).artifacts.find(
+    (a) => a.attemptId === tested.id && a.title === 'head checkout response',
+  )!
+  assert.equal(index.observedCommit, tested.headCommit)
 })

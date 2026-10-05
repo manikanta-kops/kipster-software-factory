@@ -25,6 +25,9 @@ import {
 export const MAX_ARTIFACT_CONTENT = 1_000_000
 
 export interface ArtifactInput {
+  readonly scenarioResult?:
+    'passed' | 'failed' | 'unverified' | 'reproduced' | undefined
+  readonly scenario?: string | undefined
   readonly kind: ArtifactKind
   readonly title: string
   /** Markdown. Give exactly one of content and path. */
@@ -42,6 +45,10 @@ export interface StepResult {
 
 export const artifactInputSchema = z
   .strictObject({
+    scenarioResult: z
+      .enum(['passed', 'failed', 'unverified', 'reproduced'])
+      .optional(),
+    scenario: z.string().trim().min(1).max(200).optional(),
     kind: z.enum(ARTIFACT_KINDS),
     title: z.string().trim().min(1).max(200),
     content: z.string().max(MAX_ARTIFACT_CONTENT).optional(),

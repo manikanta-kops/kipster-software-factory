@@ -1,3 +1,5 @@
+import { newEvidenceFile } from '../artifacts/storage.ts'
+import { scenarioIndex } from '../domain/evidence.ts'
 import { mkdir, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { RunnerOptions } from './runner.ts'
@@ -22,29 +24,34 @@ export async function writePullRequest(
 ): Promise<string> {
   const { database, home, config, execute } = options
   const { ticket, attempt, repository, step } = context
-  const cached = await getPullRequestDescription(database, ticket.id, head)
-  if (cached) return cached
   const detail = (await getTicketDetail(database, ticket.number))!
-  const factoryUrl =
-    step.kind === 'system' ? step.with['factoryUrl'] : undefined
-  const root =
-    typeof factoryUrl === 'string'
-      ? factoryUrl.replace(/\/$/, '')
-      : 'http://localhost:4600'
-  const timeline = `${root}/#/tickets/${ticket.number}`
-  const evidence = detail.artifacts
-    .filter(
-      (a) =>
-        a.kind === 'evidence' &&
-        detail.attempts.find((at) => at.id === a.attemptId)?.headCommit ===
-          head,
-    )
-    .map((a) => ({
-      title: a.title,
-      commit: detail.attempts.find((at) => at.id === a.attemptId)?.headCommit,
-      url: `${root}/api/artifacts/${a.id}`,
-    }))
-  const instructions = `Only evidence for this exact commit is listed; if none, say that verification evidence is unavailable and link the timeline. CI is not yet checked: describe it as pending at the time of writing and point to the PR checks and ticket timeline for current status.\nHead commit: ${head}\nEvidence links: ${JSON.stringify(evidence)}\nTicket timeline: ${timeline}`
+  const evidence = detail.artifacts.filter(
+    (a) =>
+      a.kind === 'evidence' &&
+      (a.observedCommit ??
+        detail.attempts.find((at) => at.id === a.attemptId)?.headCommit) ===
+        head,
+  )
+  const scenarios = scenarioIndex(
+    evidence,
+    detail.attempts,
+    new Map(
+      detail.workflow.steps
+        .filter((s) => s.kind === 'agent')
+        .map((s) => [s.id, s.role]),
+    ),
+    head,
+  )
+  const cached = await getPullRequestDescription(database, ticket.id, head)
+  if (cached && validDescription(cached, head, ticket.number, scenarios))
+    return cached
+  const instructions = `Head commit: ${head}
+Ticket number: ${ticket.number}
+Independent proof scenarios: ${JSON.stringify(scenarios)}
+Workflow has tester: ${detail.workflow.steps.some((s) => s.kind === 'agent' && s.role === 'tester')}
+Current evidence: ${JSON.stringify(evidence.map((a) => ({ title: a.title, scenario: a.scenario, result: a.scenarioResult, content: a.content })))}
+Only evidence at this exact commit counts. If the workflow has no tester, state that it is an untested workflow; builder evidence is not independent proof. Describe what each labelled scenario proved; unlabelled evidence has no scenario index. Distinguish independent tester/reproducer proof from repository checks. Do not claim any scenario was approved without proof. CI is pending at publication; the live ticket panel and GitHub checks report current status. Include exactly "Evidence on ticket #${ticket.number} in the factory". Do not include local URLs, file paths or factory links. No hosted attachments are configured.`
+  let rejection = ''
   const git = (args: string[]) => run('git', args, { cwd, signal })
   for (let retry = 1; retry <= 2; retry++) {
     const directory = join(
@@ -62,7 +69,9 @@ export async function writePullRequest(
         role: 'writer',
         needs: [],
         routes: {},
-        instructions,
+        instructions: rejection
+          ? `${instructions}\n\nYour previous description was rejected: ${rejection}`
+          : instructions,
       },
       detail,
       cwd,
@@ -75,7 +84,7 @@ export async function writePullRequest(
       ]),
     })
     await writeFile(join(directory, 'prompt.md'), prompt)
-    const log = join(directory, 'agent.log')
+    const log = await newEvidenceFile(home, ticket.id)
     await writeFile(log, '')
     await addAttemptArtifacts(database, attempt.id, [
       { kind: 'log', title: `writer run ${retry}`, path: log },
@@ -105,24 +114,40 @@ export async function writePullRequest(
       if (notes.length !== 1)
         throw new Error('Writer must provide one inline description note')
       const body = notes[0]!.content!.trim()
-      if (
-        body.length > 4000 ||
-        !body.includes(`Verified at ${head}`) ||
-        !(evidence.length
-          ? evidence.some((e) => body.includes(e.url))
-          : body.includes(timeline)) ||
-        !/Merge danger:.*(?:one-way door|two-way door)/i.test(body)
-      )
+      if (!validDescription(body, head, ticket.number, scenarios))
         throw new Error(
-          'Writer description requires <= 4,000 characters, a factory evidence link, Verified at current SHA and Merge danger with door classification',
+          'Writer description requires <= 4,000 characters, a factory ticket reference without local links, Verified at current SHA and Merge danger with door classification',
         )
       await addAttemptArtifacts(database, attempt.id, notes)
       await savePullRequestDescription(database, ticket.id, head, body)
       return body
     } catch (error) {
       await writeFile(join(directory, 'result-error.txt'), String(error))
+      rejection = error instanceof Error ? error.message : String(error)
       if (retry === 2) throw error
     }
   }
   throw new Error('Writer did not produce a description')
+}
+
+export function validDescription(
+  body: string,
+  head: string,
+  ticketNumber: number,
+  scenarios: readonly { scenario: string }[],
+): boolean {
+  return (
+    body.length <= 4000 &&
+    body.includes(`Verified at ${head}`) &&
+    scenarios.every((s) => body.includes(s.scenario)) &&
+    body.includes(`Evidence on ticket #${ticketNumber} in the factory`) &&
+    !/\]\((?:\/|#|\.)/.test(body) &&
+    !/(?:https?:\/\/(?:localhost|127\.0\.0\.1|\[::1\]|[^/\s]*\.ts\.net)|file:\/\/|https?:\/\/\S*\/(?:#\/tickets|api\/artifacts)\/)/i.test(
+      body,
+    ) &&
+    !/(?:^|[\s(`'"])(?:~|\/(?:Users|home|private|var\/folders|tmp))\//.test(
+      body,
+    ) &&
+    /Merge danger:.*(?:one-way door|two-way door)/i.test(body)
+  )
 }

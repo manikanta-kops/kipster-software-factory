@@ -2,6 +2,7 @@ import type { run } from '../executors/process.ts'
 
 export const FACTORY_MARKER = '<!-- kipster-factory -->'
 export interface PullRequestFeedback {
+  changeRequest?: boolean
   id: string
   url: string
   author: string
@@ -67,6 +68,7 @@ export async function inspectFeedback(
   const requestedReviews = new Set(requesting.map((r) => r.id))
   const convert = (entry: Entry, kind: string): PullRequestFeedback => ({
     id: `${kind}:${entry.id}`,
+    changeRequest: entry.state === 'CHANGES_REQUESTED',
     url: entry.html_url,
     author: entry.user!.login,
     body: `${entry.path ? `${entry.path}${entry.line ? `:${entry.line}` : ''}\n\n` : ''}${entry.body || 'Changes requested; see the review on GitHub.'}`,

@@ -146,3 +146,23 @@ test('fetch refreshes capabilities from default-branch committed kit, including 
   assert.equal((await refresh()).kit.status, 'missing')
   assert.equal((await loadKit(source, git(['rev-parse', 'HEAD']))).kit, null)
 })
+
+test('optional merge migration globs are additive and validated', () => {
+  assert.deepEqual(
+    parseKit(
+      'version: 1\ncheck: "true"\nmerge:\n  migrations: [changes/*.sql, "**/updates/**"]\n',
+    ).merge,
+    { migrations: ['changes/*.sql', '**/updates/**'] },
+  )
+  for (const glob of [
+    '/outside/**',
+    '../outside/**',
+    '!migrations/**',
+    '{a,b}/**',
+  ])
+    assert.throws(() =>
+      parseKit(
+        `version: 1\ncheck: "true"\nmerge:\n  migrations: ["${glob}"]\n`,
+      ),
+    )
+})

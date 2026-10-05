@@ -91,7 +91,7 @@ if (!instruction.missing)
                     {
                       kind: 'note',
                       title: 'PR description',
-                      content: `This change implements the requested behavior.\n\nEvidence: [factory](${JSON.parse(/Evidence links: (.+)/.exec(prompt)?.[1] ?? '[]')[0]?.url ?? /Ticket timeline: (\S+)/.exec(prompt)?.[1] ?? 'http://localhost:4600'}).\n\nVerified at ${/Head commit: ([a-f0-9]+)/.exec(prompt)?.[1]}\n\nMerge danger: two-way door; revert the commit. Blast radius: this repository.`,
+                      content: `This change implements the requested behavior.\n\nEvidence on ticket #${/Ticket number: (\d+)/.exec(prompt)?.[1]} in the factory. Independent proof: ${/Workflow has tester: true/.test(prompt) ? 'tester scenario evidence' : 'untested workflow'}. ${(JSON.parse(/Independent proof scenarios: (.+)/.exec(prompt)?.[1] ?? '[]') as { scenario: string; result: string }[]).map((s) => `${s.scenario}: ${s.result}`).join('; ')} Repository checks: CI pending at publication.\n\nVerified at ${/Head commit: ([a-f0-9]+)/.exec(prompt)?.[1]}\n\nMerge danger: two-way door; revert the commit. Blast radius: this repository.`,
                     },
                   ]
                 : role === 'builder'

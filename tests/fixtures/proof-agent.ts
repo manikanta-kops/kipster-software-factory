@@ -35,6 +35,8 @@ export async function driveProof({
 }) {
   const context = proofContext(prompt)
   const artifacts: {
+    scenario?: string
+    scenarioResult?: string
     kind: string
     title: string
     path?: string
@@ -65,6 +67,13 @@ export async function driveProof({
           ? { kind: 'evidence', title: 'Claim', content: 'I tested it' }
           : {
               kind: 'evidence',
+              scenario: 'Place order',
+              scenarioResult:
+                response.status === (instance.surface === 'base' ? 500 : 200)
+                  ? instance.surface === 'base'
+                    ? 'reproduced'
+                    : 'passed'
+                  : 'failed',
               title: `${instance.surface} checkout response`,
               path,
             },

@@ -210,7 +210,7 @@ only ignored directories named `node_modules`, `dist`, `build`, `coverage`,
 `playwright-report` or `test-results`, after checking ownership, branch, locks,
 tracked content and symlinks. All other ignored files retain the worktree.
 The database records successful removal (or an already absent worktree), so
-subsequent passes and restarts skip it. The cache and `steps/` evidence are retained. `maintain-pr` synchronizes branches
+subsequent passes and restarts skip it. The cache and step metadata are retained; recorded files are owned by the per-ticket evidence store. `maintain-pr` synchronizes branches
 with the fetched base and watches CI (Slice 3). Kit
 capabilities are refreshed from committed default-branch blobs after each cache
 fetch; workflows needing missing capabilities remain gated by the store.
@@ -251,8 +251,7 @@ All three keys are required. Outcomes must belong to the role's catalog contract
 or be `needs-decision`. Summary is nonempty. Artifacts use the existing lifecycle
 schema: kind (`plan`, `comment`, `finding`, `evidence`, `log`, `note`), title, and
 exactly one of Markdown `content` or a `path` to an existing file under the
-factory home. Symlink escapes are rejected. File artifacts are copied into the
-step directory before completion so worktree cleanup cannot erase evidence.
+factory home. Symlink escapes are rejected. File artifacts are copied into `evidence/<ticket-id>/` before recording, so scratch and worktree cleanup cannot erase evidence.
 A successful planner must include a plan artifact. Missing or invalid results
 get one fresh CLI retry in a separate directory; a second invalid result fails
 the attempt and opens a human ask. Timeouts fail immediately. Chat text is never
@@ -271,12 +270,11 @@ a tester can still publish. A branch with no commits ahead asks the owner.
 
 Before publishing a new head, `engine/pr-writer.ts` runs the writer in a fresh
 session using the writer's configured CLI and kit instructions. Its one inline
-note explains the change and why, links current-commit evidence in the factory,
+note explains the change and why, describes current-commit scenario evidence in the factory,
 optionally includes a small Mermaid diagram, identifies `Verified at <sha>`, and
 states `Merge danger:` with a one-way/two-way door and blast radius. Output is
-limited to 4,000 characters and must link evidence (or the ticket when none is
-available). CI is still pending at this point; the prose describes its status at
-writing and links current checks rather than making a lasting status claim.
+limited to 4,000 characters and names the factory ticket; it contains no local evidence links. CI is still pending at this point; the prose describes its status at
+writing and directs readers to current checks rather than making a lasting status claim.
 The factory caches the description by ticket and head, records the note and run
 log, and rejects writer worktree edits. Invalid output gets one fresh retry.
 Full plans, logs and prior review rounds remain in the factory timeline.
@@ -310,12 +308,10 @@ Configure `maintain-pr` through `with`, for example:
 ```yaml
 with:
   ciTimeoutMinutes: 60
-  factoryUrl: https://factory.example.com
 ```
 
 The timeout defaults to 60 minutes and reports `needs-decision` to the owner.
-The link origin defaults to `http://localhost:4600`; set `factoryUrl` to the
-owner-accessible factory address for a remote installation. Migration 005 adds
+Evidence stays on the ticket until hosted attachments are configured in a later slice. The `factoryUrl` parameter has been removed. Migration 005 adds
 the CI waiting value and the description cache. No step fields are added.
 
 `merge` parks as `pull-request-merge`. Polling reports `merged` or `rejected`
@@ -439,7 +435,7 @@ all await agent termination and every instance's `stop()` in `finally`. Cleanup
 failures fail the attempt rather than report a pass. A malformed/evidence-free
 result gets one fresh session with fresh instances, never a contaminated retry.
 Evidence and process logs survive checkout removal, including failed/cancelled
-runs. Valid result file artifacts are also copied into step storage.
+runs. Valid result files, including reproduction notes, are copied into the per-ticket evidence store before scratch directories are removed.
 
 `Attempt.headCommit` is pinned by the factory **before** proof execution: the
 base SHA for reproduction, the tested ticket SHA for a tester. Disposable agent
@@ -518,3 +514,61 @@ but do not appear as needing an answer. Ticket responses add `decisions`; the
 option endpoint is separate from the existing human approval endpoint. The
 Decisions page lists the latest 100 outcomes with all-time counts grouped by
 workflow version and step so different threshold configurations are not mixed.
+
+## Merge gate (Slice 4, Wave 1)
+
+`domain/merge-gate.ts` evaluates facts without I/O. Readiness requires a passing
+latest independent tester at the PR head, the current reproduction comparison
+for bug workflows, no base commits missing from that head, green required CI (or
+explicitly no checks), no unconsumed owner feedback or current change request,
+no queued/running work, and an open, non-draft, conflict-free PR. Unknown facts
+and failed observations block. Untested workflows always need the owner. Hard
+path rules are separate from readiness: the kit, CI and migrations always need
+human review. Custom migration globs only add rules and are loaded from the
+fetched default-branch kit. Rename/deletion paths are included. Missing kits use
+defaults; invalid trusted kits block.
+
+Existing CI/merge polling stores the latest evaluation and last ready head in
+`merge_gates`, without an executor slot. The API adds `mergeGate`; it overlays
+new queued/running work and later commit observations to prevent cached green
+facts from hiding a rebuild. GitHub errors invalidate readiness while terminal
+PR detection can still finish a ticket. The UI separates per-check CI facts from
+the writer's historical description. A previous green head remains visible.
+Readiness does not grant automatic merging; the owner still merges every PR.
+
+A reproducer's original verdict remains at its base commit. A successful bug
+tester records `reproductionAttemptId` identifying the reproduction it repeated
+on both current base and ticket head. The gate uses that comparison's tester
+commit as the reproduction's confirmed head, never relabels the original base
+verdict, and rejects a different/newer reproduction or tester. Independent proof,
+repository checks and approved unverified scenarios remain distinct facts. This
+slice has no structured approval data; the UI and writer say it is unavailable.
+
+## Durable evidence (Slice 4, Wave 1)
+
+Recorded file artifacts are copied to `home/evidence/<ticket-id>/<unique-file>`
+before their rows are committed. Sources and destinations are contained in home
+with symlink resolution. Engine/harness logs are written directly to their owned
+stable files so live logs remain live. Proof records each file's actual base/head
+`observedCommit` separately from the attempt verdict; agents cannot provide this
+field. After process shutdown and successful retention, proof scratch directories
+are removed. Legacy completed files are adopted in bounded background batches;
+original legacy files are preserved when their ownership is uncertain.
+
+Result artifacts add optional `scenario` and `scenarioResult` labels. The pure
+scenario index chooses one key screenshot, recording or text item per independent
+role/scenario from the latest attempt, preferring the requested head. Unlabelled
+files remain in the archive. The API adds `evidenceIndex`; stable same-origin
+routes `#/tickets/<number>/evidence/<artifact-id>` open items. Older attempts,
+additional media and logs are behind the archive. No installation URL or Tailscale
+integration is required. PR descriptions state `Verified at <sha>`, scenario
+observations and `Evidence on ticket #<n> in the factory`, with no local links.
+
+`config.json` adds `evidenceRetentionDays` (positive integer, default 30).
+An hourly bounded scheduler background task prunes finished/cancelled ticket logs
+and archive evidence after that many days from completion. It retains curated
+items at the final commit, never prunes unfinished tickets, and keeps artifact
+rows with `prunedAt`/`retentionDays`. The API returns 410 and the UI says “removed
+after N days.” Shared retained files and paths outside owned per-ticket storage
+are protected. Notes, plans and step metadata remain. Migration 007 adds these
+fields, the comparison link, retention bookkeeping and gate snapshots.

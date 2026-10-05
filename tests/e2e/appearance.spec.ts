@@ -119,7 +119,8 @@ for (const colorScheme of ['light', 'dark'] as const) {
             path: evidencePath,
             contentType: 'image/png',
           })
-          await run
+          await page
+            .getByRole('region', { name: 'Scenario evidence' })
             .getByRole('button', {
               name: 'Enlarge Cart image (synthetic demo)',
             })

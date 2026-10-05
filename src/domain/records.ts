@@ -80,6 +80,8 @@ export const EVENT_KINDS = [
   'attempt.failed',
   'attempt.interrupted',
   'artifact.added',
+  'artifact.pruned',
+  'merge-gate.updated',
   'decision.made',
   'ask.resolved',
 ] as const
@@ -139,6 +141,7 @@ export interface Ticket {
 
 /** One run of one step. */
 export interface Attempt {
+  readonly reproductionAttemptId?: number | null
   readonly id: number
   readonly ticketId: number
   readonly stepId: string
@@ -165,6 +168,13 @@ export interface Attempt {
 }
 
 export interface Artifact {
+  /** Factory-observed proof surface commit; agents cannot set it in result.json. */
+  readonly observedCommit?: string | null
+  readonly scenarioResult?:
+    'passed' | 'failed' | 'unverified' | 'reproduced' | null
+  readonly scenario?: string | null
+  readonly prunedAt?: string | null
+  readonly retentionDays?: number | null
   readonly mediaType: string
   readonly id: number
   readonly ticketId: number

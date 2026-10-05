@@ -536,6 +536,8 @@ describe('cancel', () => {
 
 describe('artifacts', () => {
   let artifactIds: Record<string, number>
+  let outsideArtifactHome: string
+  after(() => rm(outsideArtifactHome, { recursive: true, force: true }))
 
   before(async () => {
     await mkdir(join(home, 'evidence'), { recursive: true })
@@ -548,6 +550,7 @@ describe('artifacts', () => {
       '<script>alert(1)</script>',
     )
     const outside = await mkdtemp(join(tmpdir(), 'ksf-outside-'))
+    outsideArtifactHome = outside
     await writeFile(join(outside, 'secret.txt'), 'secret')
     await symlink(
       join(outside, 'secret.txt'),
@@ -563,11 +566,19 @@ describe('artifacts', () => {
         title: 'Page',
         path: join(home, 'evidence', 'page.html'),
       },
-      { kind: 'log', title: 'Escape', path: '../../etc/hosts' },
-      { kind: 'log', title: 'Absolute', path: '/etc/hosts' },
-      { kind: 'log', title: 'Symlink', path: 'evidence/link.txt' },
-      { kind: 'log', title: 'Missing', path: 'evidence/missing.log' },
     ])
+    // Legacy unsafe/missing rows exercise serving safety; new ingestion rejects them.
+    const attempt = (await ticket(created.number)).attempts[0]!
+    for (const [title, path] of [
+      ['Escape', '../../etc/hosts'],
+      ['Absolute', '/etc/hosts'],
+      ['Symlink', 'evidence/link.txt'],
+      ['Missing', 'evidence/missing.log'],
+    ])
+      await database.query(
+        `INSERT INTO artifacts (ticket_id, attempt_id, kind, title, path) VALUES ($1, $2, 'log', $3, $4)`,
+        [created.id, attempt.id, title, path],
+      )
     const { artifacts } = await ticket(created.number)
     artifactIds = Object.fromEntries(
       artifacts.map((artifact) => [artifact.title, artifact.id]),

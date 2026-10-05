@@ -1,3 +1,5 @@
+import type { GateSnapshot } from '../domain/merge-gate.ts'
+import type { ScenarioEvidence } from '../domain/evidence.ts'
 import type { DecisionRecord, DecisionStepCounts } from '../domain/decisions.ts'
 export type { DecisionRecord } from '../domain/decisions.ts'
 // Response shapes shared by the server and the web app. Change by addition only.
@@ -122,6 +124,8 @@ export interface TicketWorkflowSummary {
 
 // GET /api/tickets/:number, and the answer to every ticket action
 export interface TicketResponse {
+  readonly mergeGate?: GateSnapshot | null
+  readonly evidenceIndex?: readonly ScenarioEvidence[]
   readonly decisions?: readonly DecisionRecord[]
   readonly ticket: Ticket
   readonly workflow: TicketWorkflowSummary

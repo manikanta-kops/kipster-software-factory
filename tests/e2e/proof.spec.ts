@@ -98,9 +98,11 @@ test('evidence belongs to its test run, media uses the configured API, and logs 
     has: page.getByRole('heading', { name: 'test tester', exact: true }),
   })
   await expect(run.locator('.attempt-meta')).toContainText('Commit aaaaaaa')
-  const thumbnail = run.getByRole('button', {
-    name: 'Enlarge Cart image (synthetic demo)',
-  })
+  const thumbnail = page
+    .getByRole('region', { name: 'Scenario evidence' })
+    .getByRole('button', {
+      name: 'Enlarge Cart image (synthetic demo)',
+    })
   await expect(thumbnail).toBeVisible()
   await thumbnail.focus()
   await page.keyboard.press('Enter')
