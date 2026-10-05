@@ -373,6 +373,18 @@ test('agent prompts use default-branch role instructions and context index, neve
   }
   assert.ok(role('reviewer').every((p) => p.includes('TRUSTED REVIEWER RULE')))
   assert.ok(role('builder').every((p) => !p.includes('TRUSTED REVIEWER RULE')))
+  const builtinInstructions = (name: string) =>
+    role(name).map((prompt) => prompt.split('Repository context index')[0]!)
+  for (const prompt of builtinInstructions('builder')) {
+    assert.match(prompt, /forbidden paths/)
+    assert.match(prompt, /leave it untouched/)
+    assert.match(prompt, /conflict prevents completing[\s\S]*needs-decision/)
+  }
+  for (const prompt of builtinInstructions('reviewer'))
+    assert.match(
+      prompt,
+      /explicitly forbidden paths[\s\S]*serious scope[\s\S]*changes-needed/,
+    )
   assert.deepEqual(f.errors, [])
 })
 

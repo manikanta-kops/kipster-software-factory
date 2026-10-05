@@ -93,6 +93,11 @@ Any other key is an error. Step ids `finish`, `cancel` and `ask` are reserved.
 
 Role notes:
 
+- Ticket and approved-plan scope also govern linked documentation. Builders
+  leave explicitly forbidden paths untouched and note inaccurate documents;
+  if the conflict prevents the requested change, they report `needs-decision`.
+  Reviewers report `changes-needed` for forbidden-path edits. An `ownerReview`
+  flag does not authorize expanded scope.
 - `tester` and `reproducer` start the app from the repository kit. Always give
   them `needs: [verify]`. Without it the file validates, but tickets on
   repositories without a verify kit fail at that step instead of being refused
