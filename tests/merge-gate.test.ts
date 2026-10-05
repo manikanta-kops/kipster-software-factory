@@ -173,3 +173,14 @@ test('additive custom migration globs cannot weaken defaults and show exact file
     [],
   )
 })
+
+test('fact-fetch failures and a different base block cached readiness', () => {
+  assert.match(
+    gate({ observationError: 'GitHub unavailable' }).blockers.join(),
+    /unavailable/,
+  )
+  assert.match(
+    gate({ baseBranchMatches: false }).blockers.join(),
+    /different base/,
+  )
+})

@@ -1,3 +1,4 @@
+import { refreshMergeGate, freshFeedback } from './merge-gate.ts'
 import { actions } from '../domain/catalog.ts'
 import type { ArtifactInput } from '../domain/lifecycle.ts'
 import { run } from '../executors/process.ts'
@@ -194,6 +195,7 @@ export async function pollPullRequestChecks(
     signal,
   })
   if (localHead !== head) {
+    await refreshMergeGate(options, context, signal)
     await finish(
       'needs-decision',
       'The ticket branch changed while CI was waiting; retry maintain-pr to publish and verify it.',
@@ -206,6 +208,7 @@ export async function pollPullRequestChecks(
     head,
     signal,
   )
+  await refreshMergeGate(options, context, signal, { checks })
   signal.throwIfAborted()
   if (checks.state === 'head-changed') {
     await finish(
@@ -285,15 +288,7 @@ export async function pollPullRequestFeedback(
     signal,
   )
   const detail = (await getTicketDetail(database, ticket.number))!
-  const fresh = feedback.filter(
-    (f) =>
-      Date.parse(f.createdAt) >= Date.parse(ticket.createdAt) &&
-      !detail.artifacts.some(
-        (a) =>
-          a.kind === 'comment' &&
-          a.content?.includes(`<!-- github-feedback:${f.id} -->`),
-      ),
-  )
+  const fresh = freshFeedback(detail, feedback)
   if (!fresh.length) return false
   signal.throwIfAborted()
   await completeAttempt(database, attempt.id, {

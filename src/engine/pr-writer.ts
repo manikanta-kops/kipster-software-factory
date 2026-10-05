@@ -1,3 +1,5 @@
+import { newEvidenceFile } from '../artifacts/storage.ts'
+import { scenarioIndex } from '../domain/evidence.ts'
 import { mkdir, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { RunnerOptions } from './runner.ts'
@@ -25,26 +27,29 @@ export async function writePullRequest(
   const cached = await getPullRequestDescription(database, ticket.id, head)
   if (cached) return cached
   const detail = (await getTicketDetail(database, ticket.number))!
-  const factoryUrl =
-    step.kind === 'system' ? step.with['factoryUrl'] : undefined
-  const root =
-    typeof factoryUrl === 'string'
-      ? factoryUrl.replace(/\/$/, '')
-      : 'http://localhost:4600'
-  const timeline = `${root}/#/tickets/${ticket.number}`
-  const evidence = detail.artifacts
-    .filter(
-      (a) =>
-        a.kind === 'evidence' &&
-        detail.attempts.find((at) => at.id === a.attemptId)?.headCommit ===
-          head,
-    )
-    .map((a) => ({
-      title: a.title,
-      commit: detail.attempts.find((at) => at.id === a.attemptId)?.headCommit,
-      url: `${root}/api/artifacts/${a.id}`,
-    }))
-  const instructions = `Only evidence for this exact commit is listed; if none, say that verification evidence is unavailable and link the timeline. CI is not yet checked: describe it as pending at the time of writing and point to the PR checks and ticket timeline for current status.\nHead commit: ${head}\nEvidence links: ${JSON.stringify(evidence)}\nTicket timeline: ${timeline}`
+  const evidence = detail.artifacts.filter(
+    (a) =>
+      a.kind === 'evidence' &&
+      (a.observedCommit ??
+        detail.attempts.find((at) => at.id === a.attemptId)?.headCommit) ===
+        head,
+  )
+  const scenarios = scenarioIndex(
+    evidence,
+    detail.attempts,
+    new Map(
+      detail.workflow.steps
+        .filter((s) => s.kind === 'agent')
+        .map((s) => [s.id, s.role]),
+    ),
+    head,
+  )
+  const instructions = `Head commit: ${head}
+Ticket number: ${ticket.number}
+Independent proof scenarios: ${JSON.stringify(scenarios)}
+Workflow has tester: ${detail.workflow.steps.some((s) => s.kind === 'agent' && s.role === 'tester')}
+Current evidence: ${JSON.stringify(evidence.map((a) => ({ title: a.title, scenario: a.scenario, result: a.scenarioResult, content: a.content })))}
+Only evidence at this exact commit counts. If the workflow has no tester, state that it is an untested workflow; builder evidence is not independent proof. Describe what each labelled scenario proved; unlabelled evidence has no scenario index. Distinguish independent tester/reproducer proof from repository checks. Include exactly "Owner-approved unverified scenario data is unavailable". No approval data is stored in this slice; do not infer it from prose. CI is pending at publication; the live ticket panel and GitHub checks report current status. Include exactly "Evidence on ticket #${ticket.number} in the factory". Do not include local URLs, file paths or factory links. No hosted attachments are configured.`
   const git = (args: string[]) => run('git', args, { cwd, signal })
   for (let retry = 1; retry <= 2; retry++) {
     const directory = join(
@@ -75,7 +80,7 @@ export async function writePullRequest(
       ]),
     })
     await writeFile(join(directory, 'prompt.md'), prompt)
-    const log = join(directory, 'agent.log')
+    const log = await newEvidenceFile(home, ticket.id)
     await writeFile(log, '')
     await addAttemptArtifacts(database, attempt.id, [
       { kind: 'log', title: `writer run ${retry}`, path: log },
@@ -108,13 +113,23 @@ export async function writePullRequest(
       if (
         body.length > 4000 ||
         !body.includes(`Verified at ${head}`) ||
-        !(evidence.length
-          ? evidence.some((e) => body.includes(e.url))
-          : body.includes(timeline)) ||
+        !scenarios.every((s) => body.includes(s.scenario)) ||
+        !body.includes(
+          'Owner-approved unverified scenario data is unavailable',
+        ) ||
+        !body.includes(`Evidence on ticket #${ticket.number} in the factory`) ||
+        /\]\((?!https:\/\/github\.com\/)/i.test(body) ||
+        /(?:^|[\s(])\/(?:tmp|var|private|opt|Users|home)\//.test(body) ||
+        (body.match(/https?:\/\/[^\s)<]+/gi) ?? []).some(
+          (url) => !url.startsWith('https://github.com/'),
+        ) ||
+        /(?:https?:\/\/(?:localhost|127\.0\.0\.1|\[::1\]|[^/\s]*\.ts\.net)|file:\/\/|\]\((?:\/|#)|\/Users\/|\/home\/)/i.test(
+          body,
+        ) ||
         !/Merge danger:.*(?:one-way door|two-way door)/i.test(body)
       )
         throw new Error(
-          'Writer description requires <= 4,000 characters, a factory evidence link, Verified at current SHA and Merge danger with door classification',
+          'Writer description requires <= 4,000 characters, a factory ticket reference without local links, Verified at current SHA and Merge danger with door classification',
         )
       await addAttemptArtifacts(database, attempt.id, notes)
       await savePullRequestDescription(database, ticket.id, head, body)

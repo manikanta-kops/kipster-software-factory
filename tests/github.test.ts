@@ -258,3 +258,31 @@ test('feedback includes change requests, owner and inline comments; ignores fact
   )
   assert.match(feedback.at(-1)!.body, /app.ts:12/)
 })
+
+test('PR fact adapter compares the head against today’s base tip, including merged PRs', async () => {
+  const github = createGitHub(async (_command, args) => {
+    if (args[1] === 'view')
+      return JSON.stringify({
+        url: 'https://github.com/acme/shop/pull/1',
+        state: 'MERGED',
+        headRefOid: 'a'.repeat(40),
+        baseRefOid: 'b'.repeat(40),
+        baseRefName: 'next',
+        isDraft: false,
+        mergeable: 'UNKNOWN',
+      })
+    if (args.includes('--jq')) return 'c'.repeat(40)
+    assert.ok(
+      args.some((a) => a.includes(`${'a'.repeat(40)}...${'c'.repeat(40)}`)),
+    )
+    return JSON.stringify({ ahead_by: 4 })
+  })
+  const pr = await github.inspect(
+    'acme/shop',
+    'https://github.com/acme/shop/pull/1',
+    new AbortController().signal,
+  )
+  assert.equal(pr.baseRefOid, 'c'.repeat(40))
+  assert.equal(pr.behind, 4)
+  assert.equal(pr.mergeable, 'UNKNOWN')
+})

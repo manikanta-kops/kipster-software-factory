@@ -1,6 +1,8 @@
+import type { CheckFact } from '../domain/merge-gate.ts'
 import { run } from '../executors/process.ts'
 
 export interface Checks {
+  checks?: CheckFact[]
   state: 'pending' | 'passed' | 'failed' | 'none' | 'head-changed'
   failures: { name: string; url: string; excerpt: string }[]
 }
@@ -133,7 +135,9 @@ export async function inspectChecks(
           : [],
       ),
   )
-  const selected = checks.filter((c) => c.isRequired)
+  const selected = checks.filter(
+    (c) => c.isRequired || required.includes(c.name ?? c.context ?? ''),
+  )
   // Repositories without protection still get their configured CI checked.
   const relevant = selected.length || required.length ? selected : checks
   const missing = required.some(
@@ -197,5 +201,35 @@ export async function inspectChecks(
           ? 'passed'
           : 'none',
     failures,
+    checks: [
+      ...checks.map((c): CheckFact => ({
+        name: c.name ?? c.context ?? 'Unknown check',
+        required: c.isRequired || required.includes(c.name ?? c.context ?? ''),
+        url: c.detailsUrl ?? c.targetUrl ?? '',
+        state:
+          c.kind === 'CheckRun'
+            ? c.status !== 'COMPLETED'
+              ? 'pending'
+              : ['SUCCESS', 'NEUTRAL', 'SKIPPED'].includes(c.conclusion ?? '')
+                ? 'passed'
+                : 'failed'
+            : c.state === 'SUCCESS'
+              ? 'passed'
+              : ['FAILURE', 'ERROR'].includes(c.state ?? '')
+                ? 'failed'
+                : 'pending',
+      })),
+      ...[...new Set(required)]
+        .filter(
+          (requiredName) =>
+            !selected.some((c) => (c.name ?? c.context) === requiredName),
+        )
+        .map((requiredName): CheckFact => ({
+          name: requiredName,
+          required: true,
+          url: '',
+          state: 'pending',
+        })),
+    ],
   }
 }

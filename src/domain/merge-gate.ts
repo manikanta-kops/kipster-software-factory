@@ -10,6 +10,8 @@ export interface CheckFact {
   url: string
 }
 export interface MergeFacts {
+  observationError?: string | null
+  baseBranchMatches?: boolean
   head: string
   localHead: string
   base: string
@@ -109,7 +111,14 @@ export function evaluateMergeGate(
   evaluatedAt: string,
 ): MergeGate {
   const blockers: string[] = []
+  if (facts.observationError) blockers.push('Live gate facts are unavailable')
+  if (facts.baseBranchMatches === false)
+    blockers.push('PR targets a different base branch')
   const needsOwner: string[] = []
+  if (!/^[0-9a-f]{40}([0-9a-f]{24})?$/.test(facts.head))
+    blockers.push('PR head is unknown')
+  if (!Number.isSafeInteger(facts.behind) || facts.behind < 0)
+    blockers.push('Base ancestry is unknown')
   const current = (v: VerdictFact | null, outcome: string) =>
     v?.status === 'finished' && v.outcome === outcome && v.commit === facts.head
   if (!facts.hasTester) {
@@ -156,4 +165,9 @@ export function evaluateMergeGate(
     facts,
     evaluatedAt,
   }
+}
+
+export interface GateSnapshot {
+  latest: MergeGate
+  lastGreen: MergeGate | null
 }

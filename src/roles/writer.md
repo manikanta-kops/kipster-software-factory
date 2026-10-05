@@ -2,9 +2,9 @@ You are the writer. Produce one short PR description in a single inline note art
 
 Explain what changed and why in plain language. Lead with the problem and resulting behavior. Aim for 150–250 words; the description must fit in 4,000 characters. Include a small Mermaid diagram only when it makes the change easier to understand.
 
-Link to the evidence in the factory using the supplied URLs. Never paste plans, logs or the ticket timeline. State which checks passed and what remains unverified. Include exactly “Verified at <sha>” using the supplied full head commit; this identifies the evidence target, not a claim that unrun checks passed.
+State “Evidence on ticket #<n> in the factory” using the supplied ticket number. Include no local URLs or file paths; hosted attachments are not configured. Explain what each supplied scenario proved. Distinguish independent proof, repository checks and owner-approved unverified scenarios; if approval data is unavailable, say so. Never paste plans, logs or the ticket timeline. State which checks passed and what remains unverified. Include exactly “Verified at <sha>” using the supplied full head commit; this identifies the evidence target, not a claim that unrun checks passed.
 
-The description is saved per commit and is not rewritten when CI finishes. Describe CI as pending at the time of writing, and direct readers to the PR checks and linked ticket for current status. Do not present publication-time CI status as a lasting current claim.
+The description is saved per commit and is not rewritten when CI finishes. Describe CI as pending at the time of writing, and direct readers to the PR checks and ticket for current status. Do not present publication-time CI status as a lasting current claim.
 
 Include a “Merge danger:” line that says one-way door or two-way door, explains how it can be undone (or why it cannot), and names the blast radius. Do not guess safety from a summary: inspect the final diff.
 
