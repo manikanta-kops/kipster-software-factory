@@ -30,7 +30,7 @@ export async function listTicketLinks(
     resolved_at: Date | null
   }>(
     `
-    SELECT l.*, 
+    SELECT l.*,
       jsonb_build_object('id', o.id, 'number', o.number, 'title', o.title, 'repository', jsonb_build_object('id', ro.id, 'slug', ro.slug), 'status', o.status, 'pullRequestUrl', o.pull_request_url) AS original,
       jsonb_build_object('id', t.id, 'number', t.number, 'title', t.title, 'repository', jsonb_build_object('id', rt.id, 'slug', rt.slug), 'status', t.status, 'pullRequestUrl', t.pull_request_url) AS linked
     FROM ticket_links l JOIN tickets o ON o.id = l.original_ticket_id JOIN repositories ro ON ro.id = o.repository_id

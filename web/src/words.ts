@@ -43,6 +43,7 @@ export function doing(ticket: Ticket, step: StepSummary | undefined) {
   if (ticket.status === 'done') return 'Done'
   if (ticket.status === 'cancelled') return 'Cancelled'
   if (ticket.waiting?.for === 'pull-request-checks') return 'Waiting for CI'
+  if (ticket.waiting?.for === 'other-repo') return 'Waiting for linked ticket'
   if (ticket.status === 'needs-you') return 'Waiting for you'
   if (!step) return humanize(ticket.currentStep)
   if (step.kind === 'human') return 'Waiting for you'

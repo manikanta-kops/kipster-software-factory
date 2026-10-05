@@ -75,9 +75,11 @@ export function TicketPage({
           </div>
         )}
       </header>
-      {ticket.waiting && ticket.waiting.for !== 'pull-request-checks' && (
-        <ActionPanel key={ticket.waiting.attemptId} detail={query.data} />
-      )}
+      {ticket.waiting &&
+        !['pull-request-checks', 'other-repo'].includes(ticket.waiting.for) && (
+          <ActionPanel key={ticket.waiting.attemptId} detail={query.data} />
+        )}
+      <RepositoryContext detail={query.data} />
       <MergeGatePanel detail={query.data} />
       <Verdict
         detail={query.data}
@@ -104,6 +106,100 @@ export function TicketPage({
       )}
       <Timeline key={ticket.id} detail={query.data} />
     </article>
+  )
+}
+
+function RepositoryContext({ detail }: { detail: TicketResponse }) {
+  const { ticket, dependencies = [], links = [] } = detail
+  if (!dependencies.length && !links.length) return null
+  return (
+    <section className="steps-card" aria-label="Repository context">
+      {dependencies.length > 0 && (
+        <>
+          <h2 className="section-title">Read-only dependencies</h2>
+          <ul>
+            {dependencies.map((repository) => (
+              <li key={repository.id}>
+                {repository.slug}{' '}
+                <span className="muted">
+                  ({repository.defaultBranch}, refreshed before each agent
+                  session)
+                </span>
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
+      {links.length > 0 && (
+        <>
+          <h2 className="section-title">Linked tickets</h2>
+          <ul>
+            {links.map((link) => {
+              const original = link.original.id === ticket.id
+              const other = original ? link.linked : link.original
+              return (
+                <li key={link.id}>
+                  {original ? 'Needs change in' : 'Requested by'}{' '}
+                  {other.repository.slug}:{' '}
+                  <a className="text-link" href={`#/tickets/${other.number}`}>
+                    #{other.number} {other.title}
+                  </a>{' '}
+                  <Status value={other.status} />
+                  <PullRequest url={other.pullRequestUrl} />
+                  {link.mergeCommit && (
+                    <span>
+                      {' '}
+                      Merge commit{' '}
+                      <Commit
+                        commit={link.mergeCommit}
+                        repository={undefined}
+                      />
+                    </span>
+                  )}
+                </li>
+              )
+            })}
+          </ul>
+          {ticket.waiting?.for === 'other-repo' && (
+            <p>
+              Waiting for the linked ticket’s pull request to merge. The builder
+              will run again automatically.
+            </p>
+          )}
+          {links.some((link) => link.original.id === ticket.id) && (
+            <p className="muted">
+              Cancelling this ticket does not cancel its linked tickets.
+            </p>
+          )}
+          {ticket.waiting?.for === 'other-repo' && (
+            <CancelLinkedWait number={ticket.number} />
+          )}
+        </>
+      )}
+    </section>
+  )
+}
+
+function CancelLinkedWait({ number }: { number: number }) {
+  const client = useQueryClient()
+  const cancel = useMutation({
+    mutationFn: () => api.cancel(number, {}),
+    onSuccess: (data) => {
+      client.setQueryData(['ticket', number], data)
+      void client.invalidateQueries({ queryKey: ['tickets'] })
+    },
+  })
+  return (
+    <>
+      <button
+        className="danger"
+        disabled={cancel.isPending}
+        onClick={() => cancel.mutate()}
+      >
+        Cancel ticket
+      </button>
+      <ErrorMessage error={cancel.error} />
+    </>
   )
 }
 
