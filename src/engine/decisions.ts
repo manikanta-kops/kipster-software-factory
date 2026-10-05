@@ -50,6 +50,19 @@ export async function runDecision(
       signal.throwIfAborted()
     }
   }
+  const input = await askDecision(options, facts, params, signal)
+  await recordDecisionOutcome(options.database, context.attempt.id, input)
+}
+
+export async function askDecision(
+  options: Pick<RunnerOptions, 'home' | 'decisions'>,
+  facts: import('../domain/decisions.ts').DecisionFacts,
+  params: Pick<
+    import('../domain/decisions.ts').DecisionInput,
+    'question' | 'options' | 'bands'
+  >,
+  signal: AbortSignal,
+): Promise<import('../domain/decisions.ts').DecisionInput> {
   const started = Date.now()
   let answer = null
   let band: 'acted' | 'confirm' | 'owner' | 'no-key' | 'error' = 'no-key'
@@ -85,12 +98,12 @@ export async function runDecision(
     reason = typeSafeError(error)
   }
   signal.throwIfAborted()
-  await recordDecisionOutcome(options.database, context.attempt.id, {
+  return {
     ...params,
     facts,
     answer,
     band,
     reason,
     durationMs: Date.now() - started,
-  })
+  }
 }

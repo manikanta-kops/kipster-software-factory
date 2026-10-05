@@ -60,6 +60,8 @@ export interface VerificationOptions {
   readonly signal?: AbortSignal
   /** verify-kit runs the deterministic gate after setup, before provisioning/start. */
   readonly check?: boolean
+  /** Run setup and check without starting an app. */
+  readonly checkOnly?: boolean
 }
 const leased = new Set<number>()
 async function reservePort(): Promise<{ port: number; server: Server }> {
@@ -183,7 +185,8 @@ export async function startVerification(
   }
   try {
     const kit = kitSchema.parse(options.kit)
-    if (!kit.verify) throw new Error('Kit has no verify block')
+    if (!kit.verify && !options.checkOnly)
+      throw new Error('Kit has no verify block')
     if (!/^[0-9a-f]{40}([0-9a-f]{24})?$/.test(options.commit))
       throw new Error('commit must be a full object ID')
     stage = 'checkout'
@@ -211,6 +214,18 @@ export async function startVerification(
     await run('git', ['remote', 'remove', 'origin'], { cwd: checkout, signal })
     await command('setup', kit.setup)
     if (options.check) await command('check', kit.check)
+    if (options.checkOnly)
+      return {
+        url: '',
+        ports: [],
+        databaseUrl: null,
+        checkout,
+        evidenceDir,
+        logs,
+        exited: Promise.resolve(),
+        stop,
+      }
+    if (!kit.verify) throw new Error('Kit has no verify block')
     stage = 'ports'
     for (let i = 0; i < kit.verify.ports; i++)
       reservations.push(await reservePort())

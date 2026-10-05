@@ -1,13 +1,15 @@
 import { invalidateMergeGate } from '../store/merge-gates.ts'
 import { pruneEvidence, adoptEvidence } from '../store/evidence.ts'
-import { refreshMergeGate } from './merge-gate.ts'
-import { setArtifactHome } from '../store/database.ts'
+import { pollMergeWait } from './merge-wait.ts'
+import { checkAfterMerge } from './post-merge.ts'
 import {
-  pollPullRequestChecks,
-  pollPullRequestBase,
-  pollPullRequestFeedback,
-} from './pull-requests.ts'
-import { run as runProcess } from '../executors/process.ts'
+  pendingPostMergeChecks,
+  markPostMergePolled,
+} from '../store/post-merge.ts'
+import type { DecisionDependencies } from './decisions.ts'
+import type { LibraryEntry } from '../library/library.ts'
+import { setArtifactHome } from '../store/database.ts'
+import { pollPullRequestChecks } from './pull-requests.ts'
 import { engineConfig, type EngineConfig } from '../config.ts'
 import { executeAgent, type AgentExecutor } from '../executors/cli.ts'
 import { github as realGitHub, type GitHub } from '../github/github.ts'
@@ -22,7 +24,6 @@ import {
 } from '../store/repositories.ts'
 import {
   claimAttempts,
-  completeAttempt,
   failAttempt,
   getTicket,
   interruptRunning,
@@ -44,6 +45,8 @@ export interface SchedulerOptions {
   github?: GitHub
   fallbackMs?: number
   mergePollMs?: number
+  decisions?: DecisionDependencies
+  bugWorkflow?: LibraryEntry
   onError?: (error: unknown) => void
 }
 export async function startScheduler(
@@ -65,6 +68,7 @@ export async function startScheduler(
     workspaces,
     github,
     execute: options.execute ?? executeAgent,
+    ...(options.decisions ? { decisions: options.decisions } : {}),
   }
   const report =
     options.onError ?? ((error: unknown) => console.error('Scheduler:', error))
@@ -77,6 +81,8 @@ export async function startScheduler(
       done: Promise<void>
     }
   >()
+  const postMergeJobs = new Map<string, Promise<void>>()
+  const mergeJobs = new Map<number, Promise<void>>()
   let stopped = false
   let ticking: Promise<void> | undefined
   let requested = false
@@ -128,6 +134,7 @@ export async function startScheduler(
           workspaces,
           github,
           execute: options.execute ?? executeAgent,
+          ...(options.decisions ? { decisions: options.decisions } : {}),
         },
         context,
         controller.signal,
@@ -202,65 +209,45 @@ export async function startScheduler(
       }
       for (const context of await listWaitingForMerge(database)) {
         if (stopped) return
-        try {
-          if (!context.ticket.pullRequestUrl) continue
-          const pr = await github.inspect(
-            context.repository.slug,
-            context.ticket.pullRequestUrl,
-            AbortSignal.any([lifetime.signal, AbortSignal.timeout(30_000)]),
-          )
-          try {
-            await refreshMergeGate(
-              runnerOptions,
-              context,
-              AbortSignal.any([lifetime.signal, AbortSignal.timeout(30_000)]),
-              { pr },
-            )
-          } catch (error) {
-            await invalidateMergeGate(database, context.ticket.id, error)
-            if (pr.state === 'OPEN') throw error
-            report(error)
-          }
-          if (pr.state === 'OPEN') {
-            const feedback = await pollPullRequestFeedback(
-              runnerOptions,
-              context,
-              AbortSignal.any([lifetime.signal, AbortSignal.timeout(30_000)]),
-            )
-            if (!feedback)
-              await pollPullRequestBase(
-                runnerOptions,
-                context,
-                AbortSignal.any([lifetime.signal, AbortSignal.timeout(30_000)]),
-              )
-          } else {
-            const signal = AbortSignal.any([
-              lifetime.signal,
-              AbortSignal.timeout(30_000),
-            ])
-            if (pr.state === 'MERGED')
-              await workspaces.prepareRepository(context.repository, signal)
-            const headCommit = await runProcess('git', ['rev-parse', 'HEAD'], {
-              cwd: workspaces.path(context.ticket),
-              signal,
-            }).catch(() => null)
-            await completeAttempt(
-              database,
-              context.attempt.id,
-              {
-                outcome: pr.state === 'MERGED' ? 'merged' : 'rejected',
-                summary: `Pull request ${pr.state.toLowerCase()}: ${pr.url}`,
-                artifacts: [],
-              },
-              headCommit ? { headCommit } : {},
-            )
-          }
-        } catch (error) {
-          if (!stopped) {
-            await invalidateMergeGate(database, context.ticket.id, error)
-            report(error)
-          }
-        }
+        if (mergeJobs.has(context.attempt.id)) continue
+        const job = pollMergeWait(
+          runnerOptions,
+          context,
+          AbortSignal.any([lifetime.signal, AbortSignal.timeout(60_000)]),
+        )
+          .catch(async (error) => {
+            if (!stopped) {
+              await invalidateMergeGate(database, context.ticket.id, error)
+              report(error)
+            }
+          })
+          .finally(() => {
+            mergeJobs.delete(context.attempt.id)
+          })
+        mergeJobs.set(context.attempt.id, job)
+      }
+      for (const check of await pendingPostMergeChecks(database)) {
+        if (stopped) return
+        if (postMergeJobs.size >= 2) break
+        const key = `${check.repositoryId}:${check.mergeCommit}`
+        if (postMergeJobs.has(key)) continue
+        await markPostMergePolled(database, check)
+        const job = checkAfterMerge(
+          runnerOptions,
+          check,
+          AbortSignal.any([
+            lifetime.signal,
+            AbortSignal.timeout(config.stepTimeoutMinutes * 60_000),
+          ]),
+          options.bugWorkflow,
+        )
+          .catch((error) => {
+            if (!stopped) report(error)
+          })
+          .finally(() => {
+            postMergeJobs.delete(key)
+          })
+        postMergeJobs.set(key, job)
       }
     }
     for (const repository of await listRepositories(database, {
@@ -346,6 +333,7 @@ export async function startScheduler(
         await ticking
         await checking
         await pruning
+        await Promise.all([...mergeJobs.values(), ...postMergeJobs.values()])
         await Promise.all([...active.values()].map((item) => item.done))
         try {
           if (held) await interruptRunning(database)

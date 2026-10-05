@@ -63,6 +63,9 @@ export async function startFactory(
         events,
         home: options.home ?? defaultHome(),
         config: engineConfig.parse(options),
+        ...(loaded.library.get('bug')
+          ? { bugWorkflow: loaded.library.get('bug')! }
+          : {}),
       })
   } catch (error) {
     await events.close()
