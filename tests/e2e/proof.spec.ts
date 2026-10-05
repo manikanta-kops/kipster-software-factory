@@ -13,9 +13,7 @@ test('published legacy ticket links reach the matching ticket timeline', async (
     page.getByRole('heading', { name: 'Fix the typo on the pricing page' }),
   ).toBeVisible()
   await expect(
-    page.getByText('Archive: attempts, older evidence and logs', {
-      exact: true,
-    }),
+    page.getByRole('heading', { name: 'What happened' }),
   ).toBeVisible()
 })
 
@@ -49,9 +47,6 @@ test('open running logs refresh, closed logs stop polling, and completion loads 
   await request.post('/__test/update-log', {
     data: { url: factory.url, finish: true },
   })
-  await page
-    .getByText('Archive: attempts, older evidence and logs', { exact: true })
-    .click()
   await toggle.click()
   await expect(log).toContainText('Agent finished')
   const completedCount = fetched.length
@@ -100,9 +95,6 @@ test('evidence belongs to its test run, media uses the configured API, and logs 
     Object.assign(globalThis, { KIPSTER_API_BASE_URL: url })
   }, factory.url)
   await page.goto(`/#/tickets/${factory.tickets.proofPassed}`)
-  await page
-    .getByText('Archive: attempts, older evidence and logs', { exact: true })
-    .click()
   const run = page.locator('.attempt-entry').filter({
     has: page.getByRole('heading', { name: 'test tester', exact: true }),
   })

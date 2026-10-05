@@ -89,11 +89,6 @@ for (const colorScheme of ['light', 'dark'] as const) {
           contentType: 'image/png',
         })
         if (screen.name === 'proof') {
-          await page
-            .getByText('Archive: attempts, older evidence and logs', {
-              exact: true,
-            })
-            .click()
           const run = page.locator('.attempt-entry').filter({
             has: page.getByRole('heading', {
               name: 'test tester',
@@ -172,12 +167,7 @@ for (const colorScheme of ['light', 'dark'] as const) {
           })
         }
         if (screen.name === 'ask') {
-          await page
-            .getByText('Archive: attempts, older evidence and logs', {
-              exact: true,
-            })
-            .click()
-          const timeline = page.getByRole('region', { name: 'Timeline' })
+          const timeline = page.getByRole('region', { name: 'What happened' })
           await expect(timeline.locator('.event-entry')).toHaveCount(0)
           const timelinePath = testInfo.outputPath(
             `timeline-${size}-${colorScheme}.png`,
@@ -194,7 +184,7 @@ for (const colorScheme of ['light', 'dark'] as const) {
             timeline.getByText('attempt · claimed', { exact: false }).first(),
           ).toBeVisible()
           await timeline
-            .getByRole('heading', { name: 'Timeline', exact: true })
+            .getByRole('heading', { name: 'What happened', exact: true })
             .scrollIntoViewIfNeeded()
           expect(
             await page.evaluate(

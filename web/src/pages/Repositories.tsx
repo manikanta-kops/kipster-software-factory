@@ -4,6 +4,13 @@ import type { CreateRepositoryRequest } from '../../../src/api/contract.ts'
 import { api } from '../api.ts'
 import { ErrorMessage, Status } from '../components/Shared.tsx'
 import { repositoriesQuery } from '../queries.ts'
+import { RepositoryDot } from '../components/Filters.tsx'
+
+const KIT_WORDS = {
+  valid: 'Kit ready, so every workflow can run here',
+  invalid: 'Kit needs a fix. Quick changes still run.',
+  missing: 'No kit yet, so only quick changes run here',
+} as const
 
 function repositoryInput(input: string): CreateRepositoryRequest {
   const value = input.trim()
@@ -44,7 +51,10 @@ export function Repositories() {
       <header className="page-heading">
         <div>
           <h1>Repositories</h1>
-          <p className="muted">Where your tickets become changes.</p>
+          <p className="muted">
+            Where your tickets become changes. A kit lets agents run and prove
+            changes in the running app.
+          </p>
         </div>
       </header>
       <form
@@ -79,12 +89,13 @@ export function Repositories() {
         {query.data?.repositories.map((repository) => (
           <li key={repository.id}>
             <div>
-              <h2>{repository.slug}</h2>
-              <p className="muted">
-                Default branch: {repository.defaultBranch}
-              </p>
+              <h2>
+                <RepositoryDot id={repository.id} />
+                {repository.slug}
+              </h2>
               <p className={`kit-status ${repository.kit.status}`}>
-                Kit: {repository.kit.status}
+                {KIT_WORDS[repository.kit.status]}
+                <span className="muted"> · {repository.defaultBranch}</span>
               </p>
               {repository.kit.capabilities.length > 0 && (
                 <div className="chips" aria-label="Kit capabilities">

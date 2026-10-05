@@ -75,9 +75,7 @@ test('curated scenario evidence opens at a stable same-origin address; archive a
     page.getByRole('region', { name: 'Evidence item' }).getByRole('img'),
   ).toHaveAttribute('src', `/api/artifacts/${key}`)
   await page.getByRole('link', { name: `‹ Back to ticket #${number}` }).click()
-  const archive = page.locator('.evidence-archive')
-  await expect(archive).not.toHaveAttribute('open', '')
-  await archive.locator('summary').first().click()
+  const archive = page.getByRole('region', { name: 'What happened' })
   await expect(
     archive.getByLabel('Cart recording (synthetic demo)', { exact: true }),
   ).toBeVisible()
