@@ -1,3 +1,4 @@
+import { listTicketLinks, listDependencies } from './ticket-links.ts'
 import { retainArtifact } from '../artifacts/storage.ts'
 import { artifactHome } from './database.ts'
 import type { DecisionInput } from '../domain/decisions.ts'
@@ -8,6 +9,8 @@ import { detectMediaType } from '../artifacts/media-type.ts'
 // pure lifecycle what happens, applies the answer and records events in one transaction.
 import { FactoryError } from '../domain/errors.ts'
 import {
+  afterLinkedTicket,
+  waitForOtherRepository,
   afterCancel,
   afterDecision,
   afterTypedDecision,
@@ -39,6 +42,7 @@ import type {
   HumanChoice,
   Repository,
   Ticket,
+  TicketLink,
   TicketAskReason,
   TicketStatus,
   WaitingFor,
@@ -63,10 +67,13 @@ export interface NewTicket {
   readonly title: string
   /** Markdown. */
   readonly body?: string
+  readonly dependencies?: readonly string[]
 }
 
 export interface TicketDetail {
   readonly ticket: Ticket
+  readonly dependencies: readonly Repository[]
+  readonly links: readonly TicketLink[]
   /** The workflow version the ticket runs, which may be older than the library's. */
   readonly workflow: Workflow
   readonly attempts: readonly Attempt[]
@@ -137,13 +144,16 @@ export async function getTicketDetail(
 ): Promise<TicketDetail | null> {
   const ticket = await getTicket(database, number)
   if (!ticket) return null
-  const [workflow, attempts, artifacts, events] = await Promise.all([
-    loadWorkflow(database, ticket.workflow.name, ticket.workflow.version),
-    listAttempts(database, ticket.id),
-    listArtifacts(database, ticket.id),
-    listEvents(database, { ticketId: ticket.id, limit: 10_000 }),
-  ])
-  return { ticket, workflow, attempts, artifacts, events }
+  const [workflow, attempts, artifacts, events, dependencies, links] =
+    await Promise.all([
+      loadWorkflow(database, ticket.workflow.name, ticket.workflow.version),
+      listAttempts(database, ticket.id),
+      listArtifacts(database, ticket.id),
+      listEvents(database, { ticketId: ticket.id, limit: 10_000 }),
+      listDependencies(database, ticket.id),
+      listTicketLinks(database, ticket.id),
+    ])
+  return { ticket, workflow, attempts, artifacts, events, dependencies, links }
 }
 
 export async function listAttempts(
@@ -204,73 +214,99 @@ export async function createTicket(
   database: Database,
   input: NewTicket,
 ): Promise<Ticket> {
+  return transaction(database, (connection) => insertTicket(connection, input))
+}
+
+async function insertTicket(
+  connection: Connection,
+  input: NewTicket,
+): Promise<Ticket> {
   const { workflow, version, source } = input.workflow
   const title = input.title.trim()
   if (title === '') throw new FactoryError('invalid', 'Give the ticket a title')
 
-  return transaction(database, async (connection) => {
-    const repository = await getRepository(connection, input.repository)
-    if (!repository) {
+  const repository = await getRepository(connection, input.repository)
+  if (!repository) {
+    throw new FactoryError(
+      'invalid',
+      `No repository ${input.repository} is registered`,
+    )
+  }
+  if (repository.status !== 'ready') {
+    throw new FactoryError(
+      'conflict',
+      `${repository.slug} is ${repository.status}${repository.lastError ? ` (${repository.lastError})` : ''}; tickets can start once it is ready`,
+    )
+  }
+  checkCapabilities(workflow, repository)
+  const dependencies: Repository[] = []
+  for (const slug of input.dependencies ?? []) {
+    const dependency = await getRepository(connection, slug)
+    if (!dependency)
       throw new FactoryError(
         'invalid',
-        `No repository ${input.repository} is registered`,
+        `No dependency repository ${slug} is registered`,
       )
-    }
-    if (repository.status !== 'ready') {
+    if (dependency.id === repository.id)
       throw new FactoryError(
-        'conflict',
-        `${repository.slug} is ${repository.status}${repository.lastError ? ` (${repository.lastError})` : ''}; tickets can start once it is ready`,
+        'invalid',
+        'A ticket cannot depend on its own repository',
       )
-    }
-    checkCapabilities(workflow, repository)
+    if (!dependencies.some((item) => item.id === dependency.id))
+      dependencies.push(dependency)
+  }
 
-    await connection.query(
-      `INSERT INTO workflow_versions (name, version, source, definition)
+  await connection.query(
+    `INSERT INTO workflow_versions (name, version, source, definition)
        VALUES ($1, $2, $3, $4)
        ON CONFLICT (name, version) DO NOTHING`,
-      [workflow.name, version, source, JSON.stringify(workflow)],
-    )
-    const { rows } = await connection.query<{ number: number }>(
-      "SELECT nextval('ticket_numbers')::integer AS number",
-    )
-    const number = (rows[0] as { number: number }).number
-    const opening = startTicket(workflow)
-    const status = ticketStatus({ status: opening.status, next: null })
-    const inserted = await connection.query<{ id: number }>(
-      `INSERT INTO tickets (number, repository_id, workflow_name, workflow_version,
+    [workflow.name, version, source, JSON.stringify(workflow)],
+  )
+  const { rows } = await connection.query<{ number: number }>(
+    "SELECT nextval('ticket_numbers')::integer AS number",
+  )
+  const number = (rows[0] as { number: number }).number
+  const opening = startTicket(workflow)
+  const status = ticketStatus({ status: opening.status, next: null })
+  const inserted = await connection.query<{ id: number }>(
+    `INSERT INTO tickets (number, repository_id, workflow_name, workflow_version,
                             title, body, branch, current_step, status)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
        RETURNING id`,
-      [
-        number,
-        repository.id,
-        workflow.name,
-        version,
-        title,
-        input.body ?? '',
-        branchName(number, title),
-        opening.stepId,
-        status,
-      ],
+    [
+      number,
+      repository.id,
+      workflow.name,
+      version,
+      title,
+      input.body ?? '',
+      branchName(number, title),
+      opening.stepId,
+      status,
+    ],
+  )
+  const ticketId = (inserted.rows[0] as { id: number }).id
+  for (const dependency of dependencies)
+    await connection.query(
+      'INSERT INTO ticket_dependencies (ticket_id, repository_id) VALUES ($1, $2)',
+      [ticketId, dependency.id],
     )
-    const ticketId = (inserted.rows[0] as { id: number }).id
-    const events: NewEvent[] = [
-      {
-        ticketId,
-        kind: 'ticket.created',
-        data: {
-          number,
-          repository: repository.slug,
-          workflow: workflow.name,
-          version,
-          status,
-        },
+  const events: NewEvent[] = [
+    {
+      ticketId,
+      kind: 'ticket.created',
+      data: {
+        number,
+        repository: repository.slug,
+        workflow: workflow.name,
+        version,
+        status,
       },
-    ]
-    await insertOpening(connection, ticketId, opening, events)
-    await recordEvents(connection, events)
-    return (await getTicket(connection, number)) as Ticket
-  })
+    },
+  ]
+  await insertOpening(connection, ticketId, opening, events)
+  await recordEvents(connection, events)
+  return (await getTicket(connection, number)) as Ticket
 }
 
 /**
@@ -380,6 +416,140 @@ export async function completeAttempt(
       { summary: parsed.summary, ...completion },
       events,
     )
+  })
+}
+
+/** Linking and parking commit together; a replay of the same builder result returns the existing link. */
+export async function linkOtherRepository(
+  database: Database,
+  attemptId: number,
+  result: unknown,
+  workflow: NewTicket['workflow'],
+  headCommit: string,
+): Promise<TicketLink> {
+  const parsed = parseStepResult(result)
+  if (!/^[0-9a-f]{40}([0-9a-f]{24})?$/.test(headCommit))
+    throw new FactoryError('invalid', 'Invalid commit object ID')
+  if (!parsed.otherRepository)
+    throw new FactoryError('invalid', 'Missing other repository request')
+  return transaction(database, async (connection) => {
+    const locked = await lockByAttempt(connection, attemptId)
+    const existing = (await listTicketLinks(connection, locked.id)).find(
+      (link) => link.attemptId === attemptId,
+    )
+    if (existing) return existing
+    const attempt = openAttemptOf(locked, attemptId)
+    const status = waitForOtherRepository(locked.workflow, locked.attempts)
+    const original = (await getTicket(connection, locked.number))!
+    const target = await getRepository(
+      connection,
+      parsed.otherRepository!.repository,
+    )
+    if (!target)
+      throw new FactoryError(
+        'invalid',
+        `No repository ${parsed.otherRepository!.repository} is registered`,
+      )
+    if (target.id === original.repository.id)
+      throw new FactoryError(
+        'invalid',
+        'needs-other-repo must target another repository',
+      )
+    if (workflow.workflow.name !== parsed.otherRepository!.workflow)
+      throw new FactoryError(
+        'invalid',
+        'Linked workflow does not match the request',
+      )
+    const linked = await insertTicket(connection, {
+      ...parsed.otherRepository!,
+      workflow,
+      dependencies: [original.repository.slug],
+    })
+    await connection.query(
+      'INSERT INTO ticket_links (original_ticket_id, attempt_id, linked_ticket_id) VALUES ($1, $2, $3)',
+      [locked.id, attemptId, linked.id],
+    )
+    const events: NewEvent[] = []
+    await insertArtifacts(
+      connection,
+      locked.id,
+      attemptId,
+      parsed.artifacts,
+      events,
+    )
+    await connection.query(
+      `UPDATE attempts SET status = 'waiting', waiting_for = 'other-repo', waiting_since = now(), outcome = 'needs-other-repo', summary = $2, head_commit = $3 WHERE id = $1`,
+      [attemptId, parsed.summary, headCommit],
+    )
+    events.push(
+      {
+        ticketId: locked.id,
+        kind: 'attempt.waiting',
+        data: {
+          attemptId,
+          stepId: attempt.stepId,
+          waitingFor: 'other-repo',
+          linkedTicketNumber: linked.number,
+        },
+      },
+      {
+        ticketId: linked.id,
+        kind: 'ticket.linked',
+        data: { originalTicketNumber: locked.number },
+      },
+    )
+    await setTicketStatus(connection, locked, status, attempt.stepId, events)
+    await recordEvents(connection, events)
+    return (await listTicketLinks(connection, locked.id)).find(
+      (link) => link.attemptId === attemptId,
+    )!
+  })
+}
+
+export async function resolveLinkedTicket(
+  database: Database,
+  link: TicketLink,
+  mergeCommit: string | null,
+  summary: string,
+): Promise<void> {
+  if (
+    mergeCommit !== null &&
+    !/^[0-9a-f]{40}([0-9a-f]{24})?$/.test(mergeCommit)
+  )
+    throw new FactoryError('invalid', 'Invalid merge commit')
+  await transaction(database, async (connection) => {
+    const locked = await lockByAttempt(connection, link.attemptId)
+    const currentLink = (await listTicketLinks(connection, locked.id)).find(
+      (item) => item.id === link.id,
+    )
+    if (!currentLink || currentLink.resolvedAt) return
+    if (['done', 'cancelled'].includes(locked.status)) return
+    const attempt = openAttemptOf(locked, link.attemptId)
+    if (!['done', 'cancelled'].includes(currentLink.linked.status)) return
+    const transition = afterLinkedTicket(
+      locked.attempts,
+      mergeCommit !== null,
+      summary,
+    )
+    await connection.query(
+      'UPDATE ticket_links SET merge_commit = $2, resolved_at = now() WHERE id = $1',
+      [link.id, mergeCommit],
+    )
+    const events: NewEvent[] = []
+    await insertArtifacts(
+      connection,
+      locked.id,
+      attempt.id,
+      [
+        {
+          kind: 'note',
+          title: `Linked ticket #${currentLink.linked.number}`,
+          content: summary,
+        },
+      ],
+      events,
+    )
+    await apply(connection, locked, transition, { summary }, events)
   })
 }
 

@@ -92,6 +92,24 @@ const slug = z
   .string()
   .regex(/^[a-z][a-z0-9-]*$/, 'use lowercase letters, digits and hyphens')
 
+export const otherRepositoryRequestSchema = z.strictObject({
+  repository: z
+    .string()
+    .trim()
+    .regex(/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/, 'use owner/name')
+    .refine(
+      (value) =>
+        value.split('/').every((part) => part !== '.' && part !== '..'),
+      'use owner/name',
+    ),
+  title: z.string().trim().min(1).max(200),
+  body: z.string().trim().min(1).max(100_000),
+  workflow: slug.default('feature'),
+})
+export type OtherRepositoryRequest = z.infer<
+  typeof otherRepositoryRequestSchema
+>
+
 const confidence = z.number().min(0).max(1)
 
 export const decideParams = z.strictObject({

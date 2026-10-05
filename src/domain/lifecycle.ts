@@ -1,7 +1,12 @@
 // The ticket lifecycle: given a ticket's attempts and what just happened, decide how the
 // open attempt closes and which attempt opens next. The store applies the answer.
 import { z } from 'zod'
-import { decideParams, LIMIT } from './catalog.ts'
+import {
+  decideParams,
+  LIMIT,
+  otherRepositoryRequestSchema,
+  type OtherRepositoryRequest,
+} from './catalog.ts'
 import { FactoryError } from './errors.ts'
 import {
   ARTIFACT_KINDS,
@@ -38,6 +43,7 @@ export interface ArtifactInput {
 
 /** What an agent or system step reports when it finishes (an agent's result.json). */
 export interface StepResult {
+  readonly otherRepository?: OtherRepositoryRequest | undefined
   readonly outcome: string
   readonly summary: string
   readonly artifacts: readonly ArtifactInput[]
@@ -60,11 +66,23 @@ export const artifactInputSchema = z
     { message: 'give either content or path' },
   )
 
-export const stepResultSchema = z.strictObject({
-  outcome: z.string().min(1),
-  summary: z.string().trim().min(1),
-  artifacts: z.array(artifactInputSchema).default([]),
-})
+export const stepResultSchema = z
+  .strictObject({
+    outcome: z.string().min(1),
+    summary: z.string().trim().min(1),
+    artifacts: z.array(artifactInputSchema).default([]),
+    otherRepository: otherRepositoryRequestSchema.optional(),
+  })
+  .refine(
+    (result) =>
+      (result.outcome === 'needs-other-repo') ===
+      (result.otherRepository !== undefined),
+    {
+      path: ['otherRepository'],
+      message:
+        'needs-other-repo requires otherRepository; other outcomes must omit it',
+    },
+  )
 
 /** What the lifecycle needs to know about each of a ticket's attempts, oldest first. */
 export interface AttemptState {
@@ -113,7 +131,11 @@ export function ticketStatus(
   if (latest.status === 'pending') return 'queued'
   if (latest.status === 'running') return 'running'
   // Waiting for CI is the factory's job, not the owner's.
-  if (latest.waitingFor === 'pull-request-checks') return 'running'
+  if (
+    latest.waitingFor === 'pull-request-checks' ||
+    latest.waitingFor === 'other-repo'
+  )
+    return 'running'
   return 'needs-you'
 }
 
@@ -409,6 +431,56 @@ export function waitForMerge(
     )
   }
   return ticketStatus({ status: 'waiting', next: null, waitingFor })
+}
+
+/** A builder proposes work elsewhere; the system opens a link and parks this attempt. */
+export function waitForOtherRepository(
+  workflow: Workflow,
+  history: readonly AttemptState[],
+): TicketStatus {
+  const attempt = openAttempt(history)
+  const step = stepOf(workflow, attempt.stepId)
+  if (
+    attempt.status !== 'running' ||
+    step.kind !== 'agent' ||
+    step.role !== 'builder'
+  )
+    throw new FactoryError(
+      'conflict',
+      'Only a running builder can wait for another repository',
+    )
+  return 'running'
+}
+
+export function afterLinkedTicket(
+  history: readonly AttemptState[],
+  merged: boolean,
+  summary: string,
+): Transition {
+  const attempt = openAttempt(history)
+  if (attempt.status !== 'waiting' || attempt.waitingFor !== 'other-repo')
+    throw new FactoryError(
+      'conflict',
+      'This attempt is not waiting for a linked ticket',
+    )
+  return transition(
+    {
+      status: 'finished',
+      outcome: 'needs-other-repo',
+      next: merged
+        ? { to: 'step', stepId: attempt.stepId }
+        : { to: 'ask', because: 'needs-decision' },
+    },
+    merged
+      ? {
+          stepId: attempt.stepId,
+          status: 'pending',
+          waitingFor: null,
+          askReason: null,
+          summary: null,
+        }
+      : ask(attempt.stepId, 'needs-decision', summary),
+  )
 }
 
 /** A claimed pending attempt starts running. */
