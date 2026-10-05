@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs'
 import { readFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
@@ -13,6 +14,12 @@ export const DEFAULT_ALLOWED_ORIGINS: readonly string[] = [
   'http://tauri.localhost',
   'https://tauri.localhost',
 ]
+
+export function factoryVersion(): string {
+  const manifest = new URL('../package.json', import.meta.url)
+  return (JSON.parse(readFileSync(manifest, 'utf8')) as { version: string })
+    .version
+}
 
 /** Where the factory keeps its configuration and, later, repository caches and evidence. */
 export function defaultHome(): string {
@@ -52,7 +59,8 @@ export type AgentConfig = z.infer<typeof agentConfig>
 
 const configFile = z.strictObject({
   ...engineConfig.shape,
-  databaseUrl: z.string().min(1),
+  /** Absent: the factory runs its own PostgreSQL cluster in the home directory. */
+  databaseUrl: z.string().min(1).optional(),
   port: z.int().min(1).max(65_535).default(DEFAULT_PORT),
   allowedOrigins: z
     .array(z.string().min(1))

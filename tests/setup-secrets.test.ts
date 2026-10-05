@@ -103,7 +103,6 @@ test('non-interactive setup migrates real PostgreSQL and preserves fields on re-
       '--port',
       '4702',
       '--non-interactive',
-      '--skip-typesafe',
       '--secret-backend',
       'file',
     ],
@@ -111,8 +110,14 @@ test('non-interactive setup migrates real PostgreSQL and preserves fields on re-
     toolPath,
   )
   assert.equal(first.code, 0, first.output)
-  for (const tool of ['git', 'gh', 'codex', 'claude'])
-    assert.match(first.output, new RegExp(`Warning: ${tool}.*will not work`))
+  for (const warning of [
+    /git\s+not found; repository checkout/,
+    /GitHub\s+gh is not installed; GitHub checks and pull requests will not work/,
+    /Codex\s+not found; Codex agent steps will not work/,
+    /Claude\s+not found; Claude agent steps will not work/,
+  ])
+    assert.match(first.output, warning)
+  assert.match(first.output, /Database\s+your PostgreSQL/)
   const migrations = await store.database.query(
     'SELECT version FROM schema_migrations',
   )
@@ -124,15 +129,7 @@ test('non-interactive setup migrates real PostgreSQL and preserves fields on re-
   assert.equal(config.agents.default.cli, 'claude')
   assert.equal((await readConfig(home)).port, 4702)
   const second = await command(
-    [
-      'setup',
-      '--home',
-      home,
-      '--non-interactive',
-      '--skip-typesafe',
-      '--secret-backend',
-      'file',
-    ],
+    ['setup', '--home', home, '--non-interactive', '--secret-backend', 'file'],
     '',
     toolPath,
   )
