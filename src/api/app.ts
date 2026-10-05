@@ -3,6 +3,7 @@ import { scenarioIndex } from '../domain/evidence.ts'
 import { getMergeGate } from '../store/merge-gates.ts'
 import { setArtifactHome } from '../store/database.ts'
 import { listDecisions, decisionCounts } from '../store/decisions.ts'
+import { saveUploadedWorkflow } from '../store/workflows.ts'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { serveStatic } from '@hono/node-server/serve-static'
@@ -15,7 +16,7 @@ import { FactoryError } from '../domain/errors.ts'
 import { runsOf } from '../domain/lifecycle.ts'
 import { describeRoutes } from '../domain/routing.ts'
 import { type Step, stepContract, type Workflow } from '../domain/workflow.ts'
-import type { Library } from '../library/library.ts'
+import { type LibraryEntry, parseUpload } from '../library/library.ts'
 import type { Database } from '../store/database.ts'
 import type { EventSignal } from '../store/events.ts'
 import {
@@ -43,7 +44,9 @@ import type {
   StepSummary,
   TicketResponse,
   TicketsResponse,
+  WorkflowResponse,
   WorkflowsResponse,
+  WorkflowSummary,
 } from './contract.ts'
 import { streamEvents } from './event-stream.ts'
 import {
@@ -54,11 +57,13 @@ import {
   optionRequest,
   resolveRequest,
   statusFilter,
+  uploadWorkflowRequest,
 } from './requests.ts'
 
 export interface AppOptions {
   readonly database: Database
-  readonly library: Library
+  /** Shared with the scheduler, so uploaded workflows are usable at once. */
+  readonly library: Map<string, LibraryEntry>
   /** Wakes event streams when events are recorded. */
   readonly events: EventSignal
   /** Factory home; artifact files are served only from inside it. */
@@ -72,8 +77,8 @@ export interface AppOptions {
 class InvalidRequest extends FactoryError {
   readonly issues: readonly string[]
 
-  constructor(issues: readonly string[]) {
-    super('invalid', 'Invalid request')
+  constructor(issues: readonly string[], message = 'Invalid request') {
+    super('invalid', message)
     this.issues = issues
   }
 }
@@ -126,14 +131,32 @@ export function createApp({
 
   app.get('/api/workflows', (c) =>
     c.json<WorkflowsResponse>({
-      workflows: [...library.values()].map(({ workflow, version }) => ({
-        name: workflow.name,
-        version,
-        description: workflow.description,
-        steps: workflow.steps.map((step) => summarize(workflow, step)),
-      })),
+      workflows: [...library.values()].map(summarizeWorkflow),
     }),
   )
+
+  app.post('/api/workflows', async (c) => {
+    // A JSON content type makes cross-site browsers ask permission first.
+    if (!c.req.header('Content-Type')?.startsWith('application/json'))
+      throw new FactoryError('invalid', 'Send the workflow as JSON')
+    const input = await body(c, uploadWorkflowRequest)
+    const result = parseUpload(input.source)
+    if (!result.ok)
+      throw new InvalidRequest(result.errors, 'The workflow is not valid')
+    const { entry } = result
+    const existing = library.get(entry.workflow.name)
+    if (existing && !existing.uploaded)
+      throw new FactoryError(
+        'conflict',
+        `"${entry.workflow.name}" is a workflow file in the factory and cannot be replaced by an upload; use another name`,
+      )
+    await saveUploadedWorkflow(database, entry)
+    library.set(entry.workflow.name, entry)
+    return c.json<WorkflowResponse>(
+      { workflow: summarizeWorkflow(entry) },
+      existing ? 200 : 201,
+    )
+  })
 
   app.get('/api/repositories', async (c) =>
     c.json<RepositoriesResponse>({
@@ -418,6 +441,20 @@ function parse<T>(schema: z.ZodType<T>, value: unknown): T {
     )
   }
   return parsed.data
+}
+
+function summarizeWorkflow({
+  workflow,
+  version,
+  uploaded,
+}: LibraryEntry): WorkflowSummary {
+  return {
+    name: workflow.name,
+    version,
+    description: workflow.description,
+    steps: workflow.steps.map((step) => summarize(workflow, step)),
+    origin: uploaded ? 'upload' : 'file',
+  }
 }
 
 function summarize(workflow: Workflow, step: Step): StepSummary {

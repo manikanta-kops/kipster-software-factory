@@ -1592,6 +1592,49 @@ main > section:has(.repository-form) {
 .workflow-list .name {
   font-weight: 600;
 }
+.workflow-list .origin {
+  margin-left: 4px;
+  font: 500 11px var(--mono);
+  color: var(--grey);
+}
+.workflow-upload {
+  display: grid;
+  gap: 10px;
+  margin-top: 22px;
+  padding-top: 18px;
+  border-top: 1px solid var(--hair-2);
+  font-size: 13px;
+}
+.workflow-upload .button {
+  justify-self: start;
+  position: relative;
+}
+.workflow-upload .button:focus-within {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.workflow-upload .button[aria-disabled='true'] {
+  opacity: 0.4;
+  cursor: default;
+}
+.workflow-upload input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+}
+.workflow-upload p {
+  margin: 0;
+  line-height: 1.4;
+}
+.workflow-upload .error ul {
+  display: grid;
+  gap: 4px;
+  margin: 6px 0 0;
+  padding-left: 18px;
+  list-style: disc;
+  overflow-wrap: anywhere;
+}
 .workflow-list .description {
   font-size: 13px;
   color: var(--grey);

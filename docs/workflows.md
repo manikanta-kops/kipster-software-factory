@@ -3,6 +3,11 @@
 Workflows are YAML files named `<name>.yml`. Validate a directory with
 `npm run kf -- check <dir>`.
 
+Add a workflow by uploading its file on the Workflows page, or put it in the
+factory's workflow directory and restart. Uploads cannot reuse a workflow
+file's name; uploading an existing uploaded name creates a new version. To have
+a model write one, give it `skills/kipster-workflows/SKILL.md`.
+
 ```yaml
 name: feature # lowercase, digits and hyphens; matches the file name
 description: One line saying what the workflow is for.

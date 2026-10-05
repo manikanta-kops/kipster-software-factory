@@ -12,6 +12,8 @@ import type {
   ResolveRequest,
   TicketResponse,
   TicketsResponse,
+  UploadWorkflowRequest,
+  WorkflowResponse,
   WorkflowsResponse,
 } from '../../src/api/contract.ts'
 
@@ -29,17 +31,27 @@ const baseUrl = (
 ).replace(/\/$/, '')
 const url = (path: string) => `${baseUrl}/api${path}`
 
+/** A failed request; `summary` and `issues` keep the server's parts apart. */
+export class ApiError extends Error {
+  readonly summary: string
+  readonly issues: readonly string[]
+
+  constructor(summary: string, issues: readonly string[]) {
+    super([summary, ...issues].join(': '))
+    this.summary = summary
+    this.issues = issues
+  }
+}
+
 async function response(path: string, init?: RequestInit) {
   const result = await fetch(url(path), init)
   if (!result.ok) {
     const problem = (await result
       .json()
       .catch(() => null)) as ErrorResponse | null
-    throw new Error(
-      problem
-        ? [problem.error, ...(problem.issues ?? [])].join(': ')
-        : `Request failed (${result.status})`,
-    )
+    throw problem
+      ? new ApiError(problem.error, problem.issues ?? [])
+      : new ApiError(`Request failed (${result.status})`, [])
   }
   return result
 }
@@ -65,6 +77,8 @@ export const api = {
     post<TicketResponse>(`/tickets/${number}/option`, body),
   workflows: (signal: AbortSignal) =>
     get<WorkflowsResponse>('/workflows', signal),
+  uploadWorkflow: (body: UploadWorkflowRequest) =>
+    post<WorkflowResponse>('/workflows', body),
   repositories: (signal: AbortSignal) =>
     get<RepositoriesResponse>('/repositories', signal),
   tickets: (signal: AbortSignal) => get<TicketsResponse>('/tickets', signal),

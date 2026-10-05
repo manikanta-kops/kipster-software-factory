@@ -2,12 +2,19 @@ import { fileURLToPath } from 'node:url'
 import { serve } from '@hono/node-server'
 import { createApp } from './api/app.ts'
 import { engineConfig, type EngineConfig, defaultHome } from './config.ts'
-import { BUILT_IN_WORKFLOWS, loadLibrary } from './library/library.ts'
+import {
+  addUploads,
+  BUILT_IN_WORKFLOWS,
+  loadLibrary,
+} from './library/library.ts'
 import { openDatabase } from './store/database.ts'
 import { listenForEvents } from './store/events.ts'
 import { migrate } from './store/migrate.ts'
 import { startScheduler } from './engine/scheduler.ts'
-import { recordWorkflowVersions } from './store/workflows.ts'
+import {
+  listUploadedWorkflows,
+  recordWorkflowVersions,
+} from './store/workflows.ts'
 
 export const BUILT_WEB_APP = fileURLToPath(
   new URL('../dist/web/', import.meta.url),
@@ -48,6 +55,11 @@ export async function startFactory(
   try {
     await migrate(database)
     await recordWorkflowVersions(database, loaded.library)
+    for (const warning of addUploads(
+      loaded.library,
+      await listUploadedWorkflows(database),
+    ))
+      console.warn(warning)
   } catch (error) {
     await database.end()
     throw error
