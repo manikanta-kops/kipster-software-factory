@@ -250,20 +250,31 @@ export async function runProofAttempt(
         new Promise<void>((resolve) => setImmediate(resolve)),
       ])
     } catch (error) {
-      if (error instanceof VerificationError)
+      lifetime.abort(error)
+      const dependencyError = await execution?.catch(
+        (executionError: unknown) =>
+          executionError instanceof DependencyChangedError
+            ? executionError
+            : undefined,
+      )
+      const failure =
+        dependencyError instanceof DependencyChangedError
+          ? dependencyError
+          : error
+      if (failure instanceof VerificationError)
         await addAttemptArtifacts(database, attempt.id, [
-          ...error.logs,
-          await verificationFinding(error),
+          ...failure.logs,
+          await verificationFinding(failure),
         ])
       if (
-        error instanceof VerificationError &&
-        error.evidenceDir &&
-        !instances.some((i) => i.evidenceDir === error.evidenceDir)
+        failure instanceof VerificationError &&
+        failure.evidenceDir &&
+        !instances.some((i) => i.evidenceDir === failure.evidenceDir)
       )
-        await cleanVerificationEvidence(home, error.evidenceDir)
-      if (error instanceof DependencyChangedError) throw error
+        await cleanVerificationEvidence(home, failure.evidenceDir)
+      if (failure instanceof DependencyChangedError) throw failure
       signal.throwIfAborted()
-      throw error
+      throw failure
     } finally {
       lifetime.abort(new Error('Proof session finished'))
       await execution?.catch(() => {})

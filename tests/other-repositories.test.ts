@@ -599,3 +599,44 @@ test('invalid targets always ask the owner even when needs-decision has a custom
   assert.equal(ask.ticket.waiting?.for, 'ask')
   assert.match(ask.ticket.waiting!.summary!, /No repository fixture\/missing/)
 })
+
+test('an instance crash still restores dependencies and reports their changed files to the owner', async (t) => {
+  const { proofFixture } = await import('./helpers/proof.ts')
+  const { proofContext } = await import('./fixtures/proof-agent.ts')
+  let path = ''
+  const f = await proofFixture({
+    dependency: true,
+    execute: async (invocation) => {
+      path = dependencies(invocation.prompt)[0]!.path
+      await chmod(join(path, 'behaviour.txt'), 0o644)
+      await writeFile(
+        join(path, 'behaviour.txt'),
+        'Modified before instance crash',
+      )
+      const instance = proofContext(invocation.prompt).instances[0]!
+      const { pid } = (await (
+        await fetch(`${instance.url}/health`)
+      ).json()) as { pid: number }
+      process.kill(pid, 'SIGTERM')
+      await new Promise<void>((_resolve, reject) => {
+        if (invocation.signal.aborted) reject(invocation.signal.reason)
+        else
+          invocation.signal.addEventListener(
+            'abort',
+            () => reject(invocation.signal.reason),
+            { once: true },
+          )
+      })
+    },
+  })
+  t.after(() => f.close())
+  await assert.rejects(
+    f.next('reproduce'),
+    /changed read-only dependencies; restored/,
+  )
+  const detail = await f.detail()
+  assert.match(detail.ticket.waiting!.summary!, /behaviour.txt/)
+  assert.equal(await readFile(join(path, 'behaviour.txt'), 'utf8'), 'broken')
+  const { readdir } = await import('node:fs/promises')
+  assert.deepEqual(await readdir(join(f.home, 'verification')), [])
+})
