@@ -84,9 +84,16 @@ store or view local evidence. Structured owner-approved unverified scenario data
 is not provided by the gate/evidence slice and is explicitly unavailable.
 
 Typed decisions, confidence bands and their override log are a parallel Wave 1
-slice. Wave 2 will consume the gate and decisions for automatic merges within
-hard path rules, add post-merge checks and open bug tickets when a check fails.
-Bounded recovery from repeated base changes remains a policy requirement.
+slice. Wave 2 adds opt-in per-repository auto-merge in PostgreSQL, one factual
+safety decision per PR head, confirm-band system merge controls, fresh gate
+re-evaluation and squash merging pinned to the decided head. Hard rules, missing
+keys and errors retain owner merging. Background post-merge checks watch the
+exact merge commit (or run the kit check without CI), and atomically open one
+bug ticket and linked timeline note on failure. Consecutive base re-syncs are
+bounded by `maxBaseSyncs` (default 3), reset by owner retry or merge. A CI settle
+window (default 3 minutes) protects against late registration after pushes;
+untested workflows show a needs-owner reason without being blocked. Evidence is
+copied before the ticket transaction and rolled-back copies are cleaned up.
 
 Hosted attachments come later: an optional configured storage target and a
 `publish-evidence` system action will upload retained items and record hosted

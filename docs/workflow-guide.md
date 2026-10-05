@@ -49,6 +49,25 @@ failure seen in practice.
   diff statistics and test results, never from an agent's description of its
   own change.
 
+Repository auto-merge is off by default. Turn it on in Repositories to let the
+system ask a merge-safety decision after proof, CI and the live gate pass. An
+acted `merge` answer merges automatically. A confirm-band `merge` offers **Merge**
+(the system performs it) or **I’ll review**. An `owner` choice, low confidence,
+missing TypeSafe key or request error leaves merging with you on GitHub. The
+factory asks once per PR head; every actual merge checks fresh facts and matches
+that exact head. Hard rules still require you for migrations, kit and CI changes,
+untested workflows and invalid trusted kits, whatever a decision says.
+
+`maintain-pr.with.ciSettleMinutes` defaults to 3: absent checks wait briefly after
+a push so late CI can register and use the `ci-failed` route.
+`maintain-pr.with.maxBaseSyncs` defaults to 3: repeated base advances then park
+for you with a summary. Retry (or move the ticket) to reset the count.
+
+After any PR merge, background checks watch the merge commit on the default
+branch. Repositories with no CI use the kit check in a disposable checkout.
+Failures create one bug ticket per merge commit and link it from the original
+timeline; other tickets continue running.
+
 ## Learning
 
 - **Lessons become checks.** A repeated mistake becomes a test, lint or script,
