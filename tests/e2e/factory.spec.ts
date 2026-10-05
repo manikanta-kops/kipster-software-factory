@@ -20,6 +20,45 @@ test('home separates attention, progress and finished tickets', async ({
   await expect(page.getByText('Add a dark mode toggle')).toBeVisible()
 })
 
+test('home filters by repository and kind of work', async ({
+  page,
+  factory,
+}) => {
+  await page.goto(factory.url)
+  const needs = page.getByRole('region', { name: 'Needs you' })
+  await expect(
+    needs.getByRole('heading', { name: 'Validate email addresses on sign-up' }),
+  ).toBeVisible()
+  await expect(
+    needs.locator('.repo-tag', { hasText: 'demo-shop' }).first(),
+  ).toBeVisible()
+  const pick = page.getByRole('button', { name: 'everything' })
+  await pick.click()
+  const panel = page.getByRole('dialog', { name: 'Filters' })
+  await panel.getByLabel('Feature').check()
+  await page.keyboard.press('Escape')
+  await expect(panel).toBeHidden()
+  await expect(page.getByRole('button', { name: 'feature work' })).toBeFocused()
+  await expect(
+    needs.getByRole('heading', { name: 'Validate email addresses on sign-up' }),
+  ).toBeHidden()
+  await expect(
+    needs.getByRole('heading', { name: 'Cart quantity changes are proven' }),
+  ).toBeVisible()
+  await page.getByRole('button', { name: 'feature work' }).click()
+  await panel.getByLabel('legacy-api').check()
+  await panel.getByRole('button', { name: 'Done' }).click()
+  await expect(
+    page.getByText('Nothing in feature work in legacy-api needs you.'),
+  ).toBeVisible()
+  await page.getByRole('link', { name: 'Repositories', exact: true }).click()
+  await page.getByRole('link', { name: 'Today', exact: true }).click()
+  await page.getByRole('button', { name: 'Show everything' }).click()
+  await expect(
+    needs.getByRole('heading', { name: 'Validate email addresses on sign-up' }),
+  ).toBeVisible()
+})
+
 test('approve a plan', async ({ page, factory, request }) => {
   await page.goto(`${factory.url}/#/tickets/${factory.tickets.approvePlan}`)
   const panel = page.getByRole('region', {
@@ -107,7 +146,7 @@ for (const action of ['retry', 'move', 'cancel'] as const)
       action === 'move' ? 'build' : 'review',
     )
     const decision = page
-      .getByRole('region', { name: 'Timeline' })
+      .getByRole('region', { name: 'What happened' })
       .locator('.attempt-entry')
       .first()
     await expect(decision).toContainText('human decision')
@@ -240,7 +279,7 @@ test('live updates reconcile another client, reconnect, and keep one stream acro
   await expect(
     page.getByRole('button', { name: 'Approve', exact: true }),
   ).toHaveCount(0)
-  const timeline = page.getByRole('region', { name: 'Timeline' })
+  const timeline = page.getByRole('region', { name: 'What happened' })
   await expect(timeline.locator('.attempt-entry').first()).toContainText(
     'approved',
   )
@@ -249,7 +288,7 @@ test('live updates reconcile another client, reconnect, and keep one stream acro
   ).toBeVisible()
   await expect(timeline.locator('.event-entry')).toHaveCount(0)
   await page.getByRole('link', { name: 'Repositories', exact: true }).click()
-  await page.getByRole('link', { name: 'Needs you', exact: true }).click()
+  await page.getByRole('link', { name: 'Today', exact: true }).click()
   expect(streams).toBe(1)
   await context.setOffline(true)
   await request.post('/__test/disconnect', { data: { url: factory.url } })
@@ -314,9 +353,15 @@ test('workflows render steps and loops, with direct hash links and back navigati
   await page.getByRole('link', { name: /^bug / }).click()
   await expect(page).toHaveURL(/#\/workflows\/bug$/)
   const diagram = page.getByRole('figure', { name: 'bug workflow' })
-  await expect(diagram.getByText('reproduce', { exact: true })).toBeVisible()
+  await expect(
+    diagram.getByRole('button', { name: 'reproduce: reproducer' }),
+  ).toBeVisible()
   await expect(diagram.getByText('changes-needed → fix').first()).toBeVisible()
-  await expect(diagram.locator('path.edge.back')).not.toHaveCount(0)
+  await expect(diagram.locator('path.edge')).toHaveCount(0)
+  await diagram.getByRole('button', { name: 'test: tester' }).click()
+  await expect(diagram.locator('path.edge.back')).toHaveCount(2)
+  await diagram.getByText('Show all loops').click()
+  await expect(diagram.locator('path.edge.back')).not.toHaveCount(2)
   await page.goBack()
   await expect(
     page.getByRole('heading', { name: 'large-feature' }),
@@ -339,7 +384,7 @@ test('empty attention keeps the quiet home message', async ({
   await expect(
     page.getByRole('heading', { name: 'Nothing needs you.' }),
   ).toBeVisible()
-  await expect(page.getByRole('heading', { name: 'In progress' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Moving' })).toBeVisible()
 })
 
 test('runtime API base directs fetch and live events to a separate factory', async ({
@@ -407,7 +452,7 @@ test('timeline groups step runs and human decisions, with internal events behind
   factory,
 }) => {
   await page.goto(`${factory.url}/#/tickets/${factory.tickets.askAfterLimit}`)
-  const timeline = page.getByRole('region', { name: 'Timeline' })
+  const timeline = page.getByRole('region', { name: 'What happened' })
   const runs = timeline.locator('.attempt-entry')
   await expect(runs).toHaveCount(8)
   await expect(runs.first()).toContainText('review')
@@ -462,7 +507,7 @@ test('all-events preference survives live decisions and returns to a quiet timel
   const number = factory.tickets.approvePlan
   await page.goto(`${factory.url}/#/tickets/${number}`)
   await expect(page.locator('output.status')).toHaveText('Live')
-  const timeline = page.getByRole('region', { name: 'Timeline' })
+  const timeline = page.getByRole('region', { name: 'What happened' })
   const toggle = timeline.getByRole('button', { name: 'Show all events' })
   await toggle.click()
   const detail = (await (
@@ -495,7 +540,7 @@ test('queued tickets keep internal events out of the default timeline', async ({
   factory,
 }) => {
   await page.goto(`${factory.url}/#/tickets/${factory.tickets.queued}`)
-  const timeline = page.getByRole('region', { name: 'Timeline' })
+  const timeline = page.getByRole('region', { name: 'What happened' })
   await expect(
     timeline.getByText('No step runs or decisions yet.'),
   ).toBeVisible()
@@ -513,12 +558,12 @@ test('repositories show valid and invalid kits and gate workflows on capabilitie
   const valid = page
     .locator('.repository-list li')
     .filter({ hasText: 'kipster/demo-shop' })
-  await expect(valid).toContainText('Kit: valid')
+  await expect(valid).toContainText('Kit ready')
   await expect(valid.locator('.chip')).toHaveText(['setup', 'verify'])
   const invalid = page
     .locator('.repository-list li')
     .filter({ hasText: 'kipster/invalid-kit' })
-  await expect(invalid).toContainText('Kit: invalid')
+  await expect(invalid).toContainText('Kit needs a fix')
   await expect(invalid).toContainText('verify.ready:')
   await page.goto(`${factory.url}/#/tickets/new`)
   await page

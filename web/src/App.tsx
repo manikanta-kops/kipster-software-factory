@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Logo } from './components/Logo.tsx'
 import { NeedsYou } from './pages/NeedsYou.tsx'
 import { Workflows } from './pages/Workflows.tsx'
@@ -7,15 +7,17 @@ import { TicketPage } from './pages/Ticket.tsx'
 import { Repositories } from './pages/Repositories.tsx'
 import { usePath } from './router.ts'
 import { useLiveEvents } from './queries.ts'
+import { noFilter, type TicketFilter } from './components/Filters.tsx'
 
 export function App() {
   const path = usePath()
   const live = useLiveEvents()
   const main = useRef<HTMLElement>(null)
+  const [filter, setFilter] = useState<TicketFilter>(noFilter)
   useEffect(() => {
     document.title =
       path === '/'
-        ? 'Needs you · Kipster'
+        ? 'Today · Kipster'
         : `${path.split('/').filter(Boolean).join(' / ')} · Kipster`
     main.current?.focus()
   }, [path])
@@ -34,43 +36,51 @@ export function App() {
         Skip to content
       </a>
       <header className="bar">
-        <a
-          href="#/"
-          className="brand"
-          aria-label="Kipster Software Factory home"
-        >
-          <Logo />
-          <span>Kipster Software Factory</span>
-        </a>
-        <nav aria-label="Main">
-          <a href="#/" aria-current={path === '/' ? 'page' : undefined}>
-            Needs you
-          </a>
+        <div className="bar-inner">
           <a
-            href="#/repositories"
-            aria-current={path === '/repositories' ? 'page' : undefined}
+            href="#/"
+            className="brand"
+            aria-label="Kipster Software Factory home"
           >
-            Repositories
+            <Logo />
+            <span>Kipster</span>
           </a>
-          <a href="#/workflows" aria-current={onWorkflows ? 'page' : undefined}>
-            Workflows
+          <nav aria-label="Main">
+            <a href="#/" aria-current={path === '/' ? 'page' : undefined}>
+              Today
+            </a>
+            <a
+              href="#/repositories"
+              aria-current={path === '/repositories' ? 'page' : undefined}
+            >
+              Repositories
+            </a>
+            <a
+              href="#/workflows"
+              aria-current={onWorkflows ? 'page' : undefined}
+            >
+              Workflows
+            </a>
+          </nav>
+          <output
+            className={`status ${live}`}
+            aria-live="polite"
+            title="Live updates"
+          >
+            {live === 'ready'
+              ? 'Live'
+              : live === 'connecting'
+                ? 'Connecting'
+                : 'Reconnecting'}
+          </output>
+          <a className="button primary new-ticket" href="#/tickets/new">
+            New ticket
           </a>
-        </nav>
-        <output
-          className={`status ${live}`}
-          aria-live="polite"
-          title="Live updates"
-        >
-          {live === 'ready'
-            ? 'Live'
-            : live === 'connecting'
-              ? 'Connecting'
-              : 'Reconnecting'}
-        </output>
+        </div>
       </header>
       <main id="main" ref={main} tabIndex={-1}>
         {path === '/' ? (
-          <NeedsYou />
+          <NeedsYou filter={filter} onFilter={setFilter} />
         ) : path === '/tickets/new' ? (
           <NewTicket />
         ) : ticket ? (
@@ -83,7 +93,7 @@ export function App() {
           <section className="quiet">
             <h1>Page not found</h1>
             <a href="#/" className="text-link">
-              Back to Needs you
+              Back to today
             </a>
           </section>
         )}
