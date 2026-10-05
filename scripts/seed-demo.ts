@@ -12,7 +12,11 @@ import {
   devDatabaseUrl,
   ensureDevDatabase,
 } from './dev-database.ts'
-import { isClusterRunning, startCluster, stopCluster } from './postgres.ts'
+import {
+  isClusterRunning,
+  startCluster,
+  stopCluster,
+} from '../src/store/cluster.ts'
 
 const { values } = parseArgs({
   options: { 'database-url': { type: 'string' }, home: { type: 'string' } },

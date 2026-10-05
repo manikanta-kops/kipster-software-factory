@@ -45,8 +45,8 @@ src/
                 the ticket lifecycle and the records the API returns.
                 No I/O; the web app imports its types.
   library/      Loads and versions workflow files.
-  store/        PostgreSQL access and append-only migrations. The only place
-                that writes SQL; the engine and API call its functions.
+  store/        PostgreSQL access, append-only migrations and private clusters.
+                The only place that writes SQL; the engine and API call its functions.
   api/          HTTP API (Hono) and the response contract shared with the web app.
   engine/       Scheduler, context packets, step execution and system actions.
   executors/    Fresh Codex/Claude CLI sessions and process-group supervision.
@@ -57,11 +57,14 @@ src/
   github/       Small gh-backed PR interface.
   roles/        Base instructions for each catalog role.
   server.ts     Composes the store, library, engine and API into a running factory.
-  cli.ts        `kf setup | secret | serve | migrate | check`.
+  cli.ts        `kf setup | start | stop | status | logs | update | secret | serve | migrate | check`.
   config.ts     Factory home and config.json.
+  setup.ts      Guided setup: tool and GitHub checks, database, port and agent default.
+  service.ts    The macOS launchd user agent that runs `kf serve` in the background.
 web/            React app: what needs you, workflows, and later tickets.
 workflows/      Built-in workflow library.
-scripts/        Development and test PostgreSQL clusters.
+scripts/        Development and test databases, demo data and the release bundle.
+install.sh      Installs or updates a release bundle on macOS.
 tests/          Unit and integration tests (node:test) and browser tests (Playwright).
 ```
 
@@ -155,7 +158,6 @@ pushes and GitHub mutations for system steps.
 
 ```json
 {
-  "databaseUrl": "postgresql://localhost/kipster",
   "port": 4600,
   "concurrency": 2,
   "stepTimeoutMinutes": 60,
@@ -176,6 +178,29 @@ its optional `model` is passed to that CLI. Accepted CLI names are `codex` and
 `claude`; accepted role keys come from the catalog. `allowedOrigins` retains its
 existing meaning. The existing `--database-url` shortcut runs with defaults
 instead of reading `config.json`.
+
+Without `databaseUrl`, the factory runs a private PostgreSQL cluster in
+`<home>/postgres`. It listens only on a Unix socket in a `0700` directory under
+`/tmp` (socket paths are limited to about 100 bytes). `kf serve` and `kf migrate` start it
+when it is not running and stop it on exit if they started it. An installed
+release uses its bundled PostgreSQL; a source checkout uses PostgreSQL 18 on
+`PATH`. Set `databaseUrl` (or pass `--database-url` to setup) to use your own
+database instead.
+
+### Installation and releases
+
+A release is one archive per Mac architecture, built by `scripts/bundle.ts`:
+the app with production dependencies and the built web app, Node.js and
+PostgreSQL, each download pinned by SHA-256. `install.sh` verifies the archive
+against the release `SHA256SUMS` and unpacks it to `<home>/versions/<version>`. It points
+`<home>/current` at it and keeps the previous version for rollback. It links
+`kf` into `~/.local/bin` and runs `kf setup --start`. `kf start` writes a
+launchd user agent that runs `kf serve` at login with the `PATH` captured at
+that moment, so agents find `gh`, `codex` and `claude`. Updates stop the
+service before replacing the version. A `v*` tag on `master` that matches
+`package.json` publishes a release (`.github/workflows/release.yml`). Pull
+requests touching installation build and smoke-test both bundles without
+publishing.
 
 Verified against installed Codex **0.160.0** and Claude Code **2.1.289**:
 
@@ -468,11 +493,15 @@ verify browser UI proof, Claude, GitHub publication or moving-base routing.
 ## Guided setup and secrets (Slice 4)
 
 `kf setup` creates or updates the home's config.json, keeping fields it does not
-ask about. It validates the PostgreSQL connection and migrates it before saving,
-asks for a port, and warns about missing Git, gh/auth, Codex and Claude. Scripted
-setup uses `--non-interactive`, `--database-url`, `--port`, `--skip-typesafe` or
-`--typesafe-stdin`. TypeSafe is an optional, hidden-input step validated through
-GET /v1/models. Re-running with Enter retains an existing stored key.
+ask about. It validates the PostgreSQL connection (the private cluster unless a
+database URL is configured) and migrates it before saving. It shows the active
+GitHub account and scopes, offering `gh auth login` when signed out, and warns
+about missing Git, gh, Codex and Claude. It asks for the default agent only when
+both CLIs are installed and no agents are configured. It asks nothing else, so a
+re-run or a machine with one agent CLI needs no input. Scripted setup uses
+`--non-interactive`, `--database-url`, `--port` or `--typesafe-stdin`.
+TypeSafe is not prompted for; `--typesafe-stdin` validates a key through
+GET /v1/models before storing it.
 
 `kf secret set|list|remove` manages named secrets. The pinned @napi-rs/keyring
 backend uses service `kipster-software-factory` and the secret name as account;
