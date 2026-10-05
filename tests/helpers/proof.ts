@@ -36,6 +36,11 @@ export async function proofFixture(
   const home = join(root, 'home')
   const source = join(root, 'source')
   await mkdir(join(source, '.kipster/verify/features'), { recursive: true })
+  await mkdir(join(source, '.kipster/context'))
+  await writeFile(
+    join(source, '.kipster/context/index.md'),
+    '- [Checkout](../verify/features/checkout.md): TRUSTED PROOF INDEX\n',
+  )
   await copyFile(
     new URL('../fixtures/verification-app.ts', import.meta.url),
     join(source, 'app.ts'),

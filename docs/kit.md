@@ -46,8 +46,24 @@ Do not use the factory's own database or any shared development database.
 
 ## Files
 
+Every agent prompt reads `roles/<role>.md` and `context/index.md` from the
+fetched default branch, never from the ticket branch, so a ticket cannot change
+the instructions its own steps receive. They apply whether or not `kit.yml` is
+valid. Ticket edits to them take effect after the owner merges. Linked documents
+are read from the agent's own checkout, like any other repository file.
+
 - `roles/<role>.md`: optional repository instructions, appended to the fixed role
-  prompt as before.
+  prompt after the workflow step's instructions. They extend the factory's role
+  rules; they do not replace them.
+- `context/index.md`: optional, recommended. A short map of the repository's
+  documentation, injected into every agent prompt. List each document with a
+  relative link and one line saying when to read it, for example
+  `- [Billing](billing.md): read before changing invoices or tax.` Put the
+  documents themselves in `context/`, or link existing ones elsewhere in the
+  repository (`../../docs/architecture.md`) instead of copying them. Agents
+  open linked documents only when relevant. The factory injects at most 8,000
+  characters, cut at a line boundary with a note to read the rest; a longer
+  index is never rejected. Keep it a map, not the documentation.
 - `verify/README.md`: required, nonempty when verify exists. Explain the provided
   URL, test users, app-driving tools/commands, evidence capture, state reset and
   how to navigate the feature maps. Agents use the instance the factory supplies;

@@ -9,7 +9,7 @@ import {
 import { runDecision, type DecisionDependencies } from './decisions.ts'
 import { maintainPullRequest } from './pull-requests.ts'
 import { runProofAttempt } from './proof.ts'
-import { loadKit } from '../kit/kit.ts'
+import { loadKit, loadTrustedInstructions } from '../kit/kit.ts'
 import {
   startVerification,
   VerificationError,
@@ -179,6 +179,7 @@ async function executeAttempt(
   if (step.kind === 'agent') {
     const selected = config.agents.roles[step.role] ?? config.agents.default
     const before = await git(['rev-parse', 'HEAD'])
+    const trusted = await loadTrustedInstructions(cwd, base, step.role, signal)
     for (let retry = 0; retry < 2; retry++) {
       signal.throwIfAborted()
       const directory = join(
@@ -194,10 +195,10 @@ async function executeAttempt(
         dependencies: session.dependencies,
         step,
         detail,
-        cwd,
         directory,
         diff,
         home,
+        trusted,
       })
       await writeFile(join(directory, 'prompt.md'), prompt)
       const log = await newEvidenceFile(home, ticket.id)

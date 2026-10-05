@@ -6,6 +6,7 @@ import { join } from 'node:path'
 import type { RunnerOptions } from './runner.ts'
 import { buildPrompt, readResult } from './prompt.ts'
 import { run } from '../executors/process.ts'
+import { loadTrustedInstructions } from '../kit/kit.ts'
 import {
   addAttemptArtifacts,
   getTicketDetail,
@@ -54,6 +55,12 @@ Current evidence: ${JSON.stringify(evidence.map((a) => ({ title: a.title, scenar
 Only evidence at this exact commit counts. If the workflow has no tester, state that it is an untested workflow; builder evidence is not independent proof. Describe what each labelled scenario proved; unlabelled evidence has no scenario index. Distinguish independent tester/reproducer proof from repository checks. Do not claim any scenario was approved without proof. CI is pending at publication; the live ticket panel and GitHub checks report current status. Include exactly "Evidence on ticket #${ticket.number} in the factory". Do not include local URLs, file paths or factory links. No hosted attachments are configured.`
   let rejection = ''
   const git = (args: string[]) => run('git', args, { cwd, signal })
+  const trusted = await loadTrustedInstructions(
+    cwd,
+    `origin/${repository.defaultBranch}`,
+    'writer',
+    signal,
+  )
   for (let retry = 1; retry <= 2; retry++) {
     const directory = join(
       home,
@@ -77,9 +84,9 @@ Only evidence at this exact commit counts. If the workflow has no tester, state 
           : instructions,
       },
       detail,
-      cwd,
       directory,
       home,
+      trusted,
       diff: await git([
         'diff',
         '--stat',

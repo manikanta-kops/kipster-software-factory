@@ -2,6 +2,7 @@ import { z } from 'zod'
 import { parse } from 'yaml'
 import { run } from '../executors/process.ts'
 import type { RepositoryKit } from '../domain/records.ts'
+import type { RoleName } from '../domain/catalog.ts'
 
 const command = z.string().trim().min(1)
 export const verifySchema = z
@@ -200,5 +201,38 @@ export async function loadKit(
       kit: null,
       state: { status: 'invalid', error: String(error), capabilities: [] },
     }
+  }
+}
+export type TrustedInstructions = {
+  readonly roleInstructions: string
+  readonly contextIndex: string
+}
+export const CONTEXT_INDEX_PATH = '.kipster/context/index.md'
+/** Reads the default-branch commit so a ticket cannot rewrite the instructions its own steps receive. */
+export async function loadTrustedInstructions(
+  repositoryPath: string,
+  commit: string,
+  role: RoleName,
+  signal?: AbortSignal,
+): Promise<TrustedInstructions> {
+  const git = (args: string[]) =>
+    run('git', args, { cwd: repositoryPath, ...(signal ? { signal } : {}) })
+  const rolePath = `.kipster/roles/${role}.md`
+  const present = (
+    await git([
+      'ls-tree',
+      '-r',
+      '--name-only',
+      commit,
+      '--',
+      rolePath,
+      CONTEXT_INDEX_PATH,
+    ])
+  ).split('\n')
+  const read = async (path: string) =>
+    present.includes(path) ? git(['show', `${commit}:${path}`]) : ''
+  return {
+    roleInstructions: await read(rolePath),
+    contextIndex: await read(CONTEXT_INDEX_PATH),
   }
 }
