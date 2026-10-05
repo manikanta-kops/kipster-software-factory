@@ -23,6 +23,7 @@ export async function withPreparedArtifacts<T>(
   const home = artifactHome(database)
   const copies: string[] = []
   const prepared: PreparedArtifact[] = []
+  let recording = false
   try {
     for (const input of inputs) {
       const artifact = home
@@ -43,9 +44,24 @@ export async function withPreparedArtifacts<T>(
       }
       prepared.push({ ...artifact, mediaType })
     }
+    recording = true
     return await work(prepared)
   } catch (error) {
-    await Promise.all(copies.map((path) => rm(path, { force: true })))
+    let removable = copies
+    if (recording && copies.length) {
+      // A commit acknowledgement can be lost; preserve referenced files or uncertain state.
+      try {
+        const { rows: referenced } = await database.query<{ path: string }>(
+          'SELECT path FROM artifacts WHERE path = ANY($1::text[])',
+          [copies],
+        )
+        const retained = new Set(referenced.map((artifact) => artifact.path))
+        removable = copies.filter((path) => !retained.has(path))
+      } catch {
+        throw error
+      }
+    }
+    await Promise.all(removable.map((path) => rm(path, { force: true })))
     throw error
   }
 }

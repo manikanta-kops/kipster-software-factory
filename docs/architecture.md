@@ -593,7 +593,7 @@ another merge or re-test. A merged PR or an owner retry/move resets the count.
 ## Durable evidence (Slice 4, Wave 1)
 
 Recorded file artifacts are copied to `home/evidence/<ticket-id>/<unique-file>`
-before the ticket-locking transaction opens. Newly copied files are removed if preparation or the transaction fails; existing owned live logs are preserved. Sources and destinations are contained in home
+before the ticket-locking transaction opens. Newly copied, unreferenced files are removed if preparation or the transaction fails; existing owned live logs are preserved. If a commit acknowledgement is lost, referenced evidence survives; uncertain copies are preserved when the database cannot confirm their state. Sources and destinations are contained in home
 with symlink resolution. Engine/harness logs are written directly to their owned
 stable files so live logs remain live. Proof records each file's actual base/head
 `observedCommit` separately from the attempt verdict; agents cannot provide this

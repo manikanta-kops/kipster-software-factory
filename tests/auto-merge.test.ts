@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { readdir, writeFile } from 'node:fs/promises'
+import { readFile, readdir, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { autoMergeFixture } from './helpers/auto-merge.ts'
 import { pollAutoMerge } from '../src/engine/auto-merge.ts'
@@ -25,6 +25,8 @@ import {
 import { checkAfterMerge } from '../src/engine/post-merge.ts'
 import { runAttempt } from '../src/engine/runner.ts'
 import { run } from '../src/executors/process.ts'
+import { withPreparedArtifacts } from '../src/store/artifact-preparation.ts'
+import { transaction } from '../src/store/database.ts'
 
 for (const band of [
   'acted',
@@ -413,6 +415,44 @@ test('evidence copies precede ticket lock and rollback removes only copies, pres
   connection.release()
   await assert.rejects(recording, /no longer open/)
   assert.deepEqual(await readdir(directory), before)
+})
+
+test('an error after committing evidence preserves its referenced copy', async (t) => {
+  const f = await autoMergeFixture(t)
+  const context = await f.context()
+  const source = join(f.home, 'committed-evidence.txt')
+  await writeFile(source, 'Committed evidence survives a lost acknowledgement')
+  await assert.rejects(
+    withPreparedArtifacts(
+      f.store.database,
+      context.attempt.id,
+      [{ kind: 'evidence', title: 'Committed evidence', path: source }],
+      async ([artifact]) => {
+        await transaction(f.store.database, async (connection) => {
+          await connection.query(
+            `INSERT INTO artifacts(ticket_id, attempt_id, kind, title, path, media_type)
+             VALUES ($1, $2, 'evidence', 'Committed evidence', $3, $4)`,
+            [
+              f.ticket.id,
+              context.attempt.id,
+              artifact!.path,
+              artifact!.mediaType,
+            ],
+          )
+        })
+        throw new Error('Commit acknowledgement lost')
+      },
+    ),
+    /Commit acknowledgement lost/,
+  )
+  const retained = (await f.detail()).artifacts.find(
+    (artifact) => artifact.title === 'Committed evidence',
+  )!
+  assert.notEqual(retained.path, source)
+  assert.equal(
+    await readFile(retained.path!, 'utf8'),
+    await readFile(source, 'utf8'),
+  )
 })
 
 test('a slow post-merge check cannot hold a scheduler slot or stop another ticket', async (t) => {
