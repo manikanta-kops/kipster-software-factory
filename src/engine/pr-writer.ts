@@ -24,8 +24,6 @@ export async function writePullRequest(
 ): Promise<string> {
   const { database, home, config, execute } = options
   const { ticket, attempt, repository, step } = context
-  const cached = await getPullRequestDescription(database, ticket.id, head)
-  if (cached) return cached
   const detail = (await getTicketDetail(database, ticket.number))!
   const evidence = detail.artifacts.filter(
     (a) =>
@@ -44,6 +42,9 @@ export async function writePullRequest(
     ),
     head,
   )
+  const cached = await getPullRequestDescription(database, ticket.id, head)
+  if (cached && validDescription(cached, head, ticket.number, scenarios))
+    return cached
   const instructions = `Head commit: ${head}
 Ticket number: ${ticket.number}
 Independent proof scenarios: ${JSON.stringify(scenarios)}
@@ -110,24 +111,7 @@ Only evidence at this exact commit counts. If the workflow has no tester, state 
       if (notes.length !== 1)
         throw new Error('Writer must provide one inline description note')
       const body = notes[0]!.content!.trim()
-      if (
-        body.length > 4000 ||
-        !body.includes(`Verified at ${head}`) ||
-        !scenarios.every((s) => body.includes(s.scenario)) ||
-        !body.includes(
-          'Owner-approved unverified scenario data is unavailable',
-        ) ||
-        !body.includes(`Evidence on ticket #${ticket.number} in the factory`) ||
-        /\]\((?!https:\/\/github\.com\/)/i.test(body) ||
-        /(?:^|[\s(])\/(?:tmp|var|private|opt|Users|home)\//.test(body) ||
-        (body.match(/https?:\/\/[^\s)<]+/gi) ?? []).some(
-          (url) => !url.startsWith('https://github.com/'),
-        ) ||
-        /(?:https?:\/\/(?:localhost|127\.0\.0\.1|\[::1\]|[^/\s]*\.ts\.net)|file:\/\/|\]\((?:\/|#)|\/Users\/|\/home\/)/i.test(
-          body,
-        ) ||
-        !/Merge danger:.*(?:one-way door|two-way door)/i.test(body)
-      )
+      if (!validDescription(body, head, ticket.number, scenarios))
         throw new Error(
           'Writer description requires <= 4,000 characters, a factory ticket reference without local links, Verified at current SHA and Merge danger with door classification',
         )
@@ -140,4 +124,28 @@ Only evidence at this exact commit counts. If the workflow has no tester, state 
     }
   }
   throw new Error('Writer did not produce a description')
+}
+
+function validDescription(
+  body: string,
+  head: string,
+  ticketNumber: number,
+  scenarios: readonly { scenario: string }[],
+): boolean {
+  return (
+    body.length <= 4000 &&
+    body.includes(`Verified at ${head}`) &&
+    scenarios.every((s) => body.includes(s.scenario)) &&
+    body.includes('Owner-approved unverified scenario data is unavailable') &&
+    body.includes(`Evidence on ticket #${ticketNumber} in the factory`) &&
+    !/\]\((?!https:\/\/github\.com\/)/i.test(body) &&
+    !/(?:^|[\s(])\/(?:tmp|var|private|opt|Users|home)\//.test(body) &&
+    (body.match(/https?:\/\/[^\s)<]+/gi) ?? []).every((url) =>
+      url.startsWith('https://github.com/'),
+    ) &&
+    !/(?:https?:\/\/(?:localhost|127\.0\.0\.1|\[::1\]|[^/\s]*\.ts\.net)|file:\/\/|\]\((?:\/|#)|\/Users\/|\/home\/)/i.test(
+      body,
+    ) &&
+    /Merge danger:.*(?:one-way door|two-way door)/i.test(body)
+  )
 }

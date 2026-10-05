@@ -603,6 +603,26 @@ test('writer invalid output retries in a fresh session before publication', asyn
   )
 })
 
+test('maintenance replaces a cached description containing local evidence links', async (t) => {
+  const { getPullRequestDescription, savePullRequestDescription } =
+    await import('../src/store/pull-requests.ts')
+  const f = await fixture(t)
+  await savePullRequestDescription(
+    f.store.database,
+    f.ticket.id,
+    f.head,
+    `Verified at ${f.head}\nOwner-approved unverified scenario data is unavailable\nEvidence on ticket #${f.ticket.number} in the factory\nMerge danger: two-way door\n[Evidence](http://localhost:4600/api/artifacts/1)`,
+  )
+  await f.publish()
+  assert.equal(f.writers(), 1)
+  assert.equal(f.bodies.length, 1)
+  assert.doesNotMatch(f.bodies[0]!, /localhost|127\.0\.0\.1/)
+  assert.equal(
+    await getPullRequestDescription(f.store.database, f.ticket.id, f.head),
+    f.bodies[0]!.split('\n\n<!--')[0],
+  )
+})
+
 test('gate is evaluated during CI and merge waits, with checks separate from historical writer text', async (t) => {
   const { getMergeGate } = await import('../src/store/merge-gates.ts')
   const { refreshMergeGate } = await import('../src/engine/merge-gate.ts')
