@@ -22,10 +22,7 @@ async function fixture(
 }
 async function cleaned(f: Awaited<ReturnType<typeof proofFixture>>) {
   const entries = await readdir(join(f.home, 'verification'))
-  assert.ok(
-    entries.every((name) => name.startsWith('evidence-')),
-    entries.join(', '),
-  )
+  assert.ok(entries.length === 0, entries.join(', '))
   const { rows } = await f.store.database.query<{ datname: string }>(
     'SELECT datname FROM pg_database',
   )
@@ -184,6 +181,7 @@ test('bug reproduced on base → fixed → tester proves failing base and passin
   const passed = await f.next('test')
   assert.equal(passed.outcome, 'passed')
   assert.equal(passed.headCommit, fixed.headCommit)
+  assert.equal(passed.reproductionAttemptId, reproduced.id)
   assert.match(passed.summary!, new RegExp(`base ${f.base}`))
   const invocation = f.invocations.at(-1)!
   const instances = proofContext(invocation.prompt).instances
@@ -203,6 +201,31 @@ test('bug reproduced on base → fixed → tester proves failing base and passin
     [500, 200],
   )
   const artifacts = (await f.detail()).artifacts
+  assert.equal(
+    artifacts.find(
+      (a) => a.attemptId === passed.id && a.title === 'base checkout response',
+    )!.observedCommit,
+    f.base,
+  )
+  assert.equal(
+    artifacts.find(
+      (a) => a.attemptId === passed.id && a.title === 'head checkout response',
+    )!.observedCommit,
+    fixed.headCommit,
+  )
+  const { scenarioIndex } = await import('../src/domain/evidence.ts')
+  const index = scenarioIndex(
+    artifacts,
+    (await f.detail()).attempts,
+    new Map([
+      ['test', 'tester'],
+      ['reproduce', 'reproducer'],
+    ]),
+    fixed.headCommit!,
+  )
+  assert.equal(index.find((s) => s.role === 'tester')!.commit, fixed.headCommit)
+  assert.equal(index.find((s) => s.role === 'tester')!.current, true)
+
   assert.equal(
     artifacts.filter(
       (a) => a.attemptId === reproduced.id && a.title === 'Reproduction steps',
@@ -421,6 +444,15 @@ test('the PR description includes the factory-pinned Verified at line', async (t
     return { url: 'https://github.com/fixture/proof/pull/1', state: 'OPEN' }
   }
   f.options.github.checks = async () => ({ state: 'none', failures: [] })
+  f.options.github.inspect = async () => ({
+    url: 'https://github.com/fixture/proof/pull/1',
+    state: 'OPEN',
+    headRefOid: built.headCommit!,
+    isDraft: false,
+    baseRefName: 'main',
+    mergeable: 'MERGEABLE',
+  })
+  f.options.github.feedback = async () => []
   await f.next('maintain-pr')
   assert.match(body, new RegExp(`Verified at ${built.headCommit}`))
   await cleaned(f)

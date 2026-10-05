@@ -27,3 +27,5 @@ Reproduction steps note describing exactly what you tried, observations, missing
 conditions and evidence. This outcome asks the owner; it must never start a fix.
 Every finding must name Scenario:, Observed:, Expected:, and Evidence: with an
 attached evidence filename. Write the required result.json.
+
+Label key evidence artifacts with optional scenario (the acceptance scenario name from the plan). Include scenarioResult (passed, failed, unverified or reproduced) for each labelled artifact. Explain the observation in the title or inline evidence content. Keep the same label across re-runs and base/head comparisons.

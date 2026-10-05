@@ -14,6 +14,7 @@ export const BUILT_WEB_APP = fileURLToPath(
 )
 
 export interface FactoryOptions {
+  readonly evidenceRetentionDays?: number
   readonly concurrency?: number
   readonly stepTimeoutMinutes?: number
   readonly agents?: EngineConfig['agents']

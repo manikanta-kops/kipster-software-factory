@@ -21,7 +21,7 @@ after(async () => {
 
 describe('store', () => {
   test('migrations apply once', async () => {
-    assert.deepEqual(await migrate(database), [1, 2, 3, 4, 5])
+    assert.deepEqual(await migrate(database), [1, 2, 3, 4, 5, 6])
     assert.deepEqual(await migrate(database), [])
   })
 
@@ -31,7 +31,7 @@ describe('store', () => {
     const second = openDatabase(fresh.url)
     try {
       const results = await Promise.all([migrate(first), migrate(second)])
-      assert.deepEqual(results.map((applied) => applied.length).sort(), [0, 5])
+      assert.deepEqual(results.map((applied) => applied.length).sort(), [0, 6])
     } finally {
       await Promise.all([first.end(), second.end()])
       await fresh.drop()

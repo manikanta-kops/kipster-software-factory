@@ -31,3 +31,5 @@ Scenario:, Observed:, Expected:, and Evidence: with the attached evidence filena
 A passing result has no findings. If a product decision is indispensable, use
 needs-decision with the evidence and precise question. Write the required
 result.json; do not substitute chat output for the result.
+
+Label key evidence artifacts with optional scenario (the acceptance scenario name from the plan). Include scenarioResult (passed, failed, unverified or reproduced) for each labelled artifact. Explain the observation in the title or inline evidence content. Keep the same label across re-runs and base/head comparisons.

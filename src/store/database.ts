@@ -5,6 +5,14 @@ export type Connection = PoolClient
 /** A pool or a connection inside a transaction. */
 export type Queryable = Pick<Connection, 'query'>
 
+const homes = new WeakMap<Queryable, string>()
+export function setArtifactHome(database: Queryable, home: string) {
+  homes.set(database, home)
+}
+export function artifactHome(database: Queryable): string | undefined {
+  return homes.get(database)
+}
+
 const urls = new WeakMap<Database, string>()
 export function databaseUrl(database: Database): string {
   const url = urls.get(database)
@@ -23,6 +31,8 @@ export async function transaction<T>(
   work: (connection: Connection) => Promise<T>,
 ): Promise<T> {
   const connection = await database.connect()
+  const home = artifactHome(database)
+  if (home) setArtifactHome(connection, home)
   try {
     await connection.query('BEGIN')
     const result = await work(connection)

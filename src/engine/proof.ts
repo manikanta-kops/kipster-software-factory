@@ -1,5 +1,8 @@
 import {
-  copyFile,
+  newEvidenceFile,
+  cleanVerificationEvidence,
+} from '../artifacts/storage.ts'
+import {
   lstat,
   mkdir,
   readFile,
@@ -7,7 +10,7 @@ import {
   realpath,
   writeFile,
 } from 'node:fs/promises'
-import { basename, extname, join, relative, sep } from 'node:path'
+import { basename, join, relative, sep } from 'node:path'
 import type { Database } from '../store/database.ts'
 import type { ArtifactInput, StepResult } from '../domain/lifecycle.ts'
 import type { AttemptContext, TicketDetail } from '../store/tickets.ts'
@@ -33,6 +36,7 @@ type Instance = VerificationInstance & {
 }
 type RetainedArtifact = {
   source: string
+  commit: string | null
   artifact: ArtifactInput & { path: string }
 }
 
@@ -132,6 +136,7 @@ export async function runProofAttempt(
       for (const target of targets) {
         const instance = await startVerification({
           home,
+          ticketId: ticket.id,
           repository: repositoryPath,
           commit: target.commit,
           kit,
@@ -176,7 +181,7 @@ export async function runProofAttempt(
         proof: { context: proof, roleInstructions },
       })
       await writeFile(join(directory, 'prompt.md'), prompt)
-      const log = join(directory, 'agent.log')
+      const log = await newEvidenceFile(home, ticket.id)
       await writeFile(log, '')
       await addAttemptArtifacts(database, attempt.id, [
         { kind: 'log', title: `${step.role} run ${retry}`, path: log },
@@ -210,15 +215,20 @@ export async function runProofAttempt(
         )
       }
       const artifacts = await Promise.all(
-        result.artifacts.map(async (artifact, index) => {
+        result.artifacts.map(async (artifact) => {
           if (!artifact.path) return { artifact, source: null }
-          const path = join(
-            directory,
-            `artifact-${index}${extname(artifact.path) || '.txt'}`,
-          )
           const source = await artifactPath(home, artifact.path)
-          await copyFile(source, path)
-          return { artifact: { ...artifact, path }, source }
+          const instance =
+            instances.find((i) => source.startsWith(`${i.evidenceDir}/`)) ??
+            (
+              await Promise.all(
+                instances.map(async (i) => ({
+                  instance: i,
+                  root: await realpath(i.evidenceDir),
+                })),
+              )
+            ).find((i) => source.startsWith(`${i.root}/`))?.instance
+          return { artifact, source, commit: instance?.commit ?? null }
         }),
       )
       retained = artifacts.filter(
@@ -241,12 +251,18 @@ export async function runProofAttempt(
           ...error.logs,
           await verificationFinding(error),
         ])
+      if (
+        error instanceof VerificationError &&
+        error.evidenceDir &&
+        !instances.some((i) => i.evidenceDir === error.evidenceDir)
+      )
+        await cleanVerificationEvidence(home, error.evidenceDir)
       signal.throwIfAborted()
       throw error
     } finally {
       lifetime.abort(new Error('Proof session finished'))
       await execution?.catch(() => {})
-      await retainAndStop(instances, database, attempt.id, retained)
+      await retainAndStop(instances, database, attempt.id, retained, home)
     }
     signal.throwIfAborted()
     if ((await git(['rev-parse', 'HEAD'])) !== head)
@@ -260,7 +276,12 @@ export async function runProofAttempt(
         database,
         attempt.id,
         { ...result, summary },
-        { headCommit },
+        {
+          headCommit,
+          ...(bug && reproduction
+            ? { reproductionAttemptId: reproduction.id }
+            : {}),
+        },
       )
       return
     }
@@ -361,22 +382,28 @@ async function retainAndStop(
   database: Database,
   attemptId: number,
   retained: RetainedArtifact[],
+  home: string,
 ) {
   // Always try every cleanup even if another stop fails; retain evidence on failures too.
   const cleanup = await Promise.allSettled(instances.map((i) => i.stop()))
   // Attach declared files here too, so cleanup or stale-head failures retain them once.
-  await addAttemptArtifacts(
-    database,
-    attemptId,
-    retained.map((item) => item.artifact),
-  )
+  for (const item of retained)
+    await addAttemptArtifacts(
+      database,
+      attemptId,
+      [item.artifact],
+      item.commit ? { commit: item.commit } : {},
+    )
   const declared = new Set(retained.map((item) => item.source))
-  for (const instance of instances)
+  for (const instance of instances) {
     await addAttemptArtifacts(
       database,
       attemptId,
       await capturedEvidence(instance, declared),
+      { commit: instance.commit },
     )
+    await cleanVerificationEvidence(home, instance.evidenceDir)
+  }
   const failures = cleanup.filter((r) => r.status === 'rejected')
   if (failures.length)
     throw new AggregateError(

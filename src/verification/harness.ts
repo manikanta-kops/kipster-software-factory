@@ -1,3 +1,4 @@
+import { newEvidenceFile } from '../artifacts/storage.ts'
 import { mkdir, mkdtemp, open, rm, writeFile } from 'node:fs/promises'
 import { join, resolve as resolvePath } from 'node:path'
 import { createServer, type Server } from 'node:net'
@@ -50,6 +51,7 @@ export interface VerificationInstance {
 }
 export interface VerificationOptions {
   readonly home: string
+  readonly ticketId?: number
   /** Local repository cache containing the exact commit, including ticket commits. */
   readonly repository: string
   readonly commit: string
@@ -171,7 +173,9 @@ export async function startVerification(
     value: string | undefined,
   ) => {
     stage = name
-    const path = join(evidenceDir, `${name}.log`)
+    const path = options.ticketId
+      ? await newEvidenceFile(options.home, options.ticketId)
+      : join(evidenceDir, `${name}.log`)
     await writeFile(path, value ? '' : 'No setup command declared.\n')
     logs.push({ kind: 'log', title: `Verification ${name}`, path })
     if (value)
@@ -217,7 +221,9 @@ export async function startVerification(
     const databaseUrl = db?.url ?? null
     const url = expand(kit.verify.ready, ports, databaseUrl, false)
     stage = 'start'
-    const path = join(evidenceDir, 'start.log')
+    const path = options.ticketId
+      ? await newEvidenceFile(options.home, options.ticketId)
+      : join(evidenceDir, 'start.log')
     await writeFile(path, '')
     logs.push({ kind: 'log', title: 'Verification start', path })
     for (const item of reservations) await closePort(item.server)

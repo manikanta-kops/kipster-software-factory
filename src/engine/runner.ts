@@ -1,3 +1,8 @@
+import { setArtifactHome } from '../store/database.ts'
+import {
+  newEvidenceFile,
+  cleanVerificationEvidence,
+} from '../artifacts/storage.ts'
 import { maintainPullRequest } from './pull-requests.ts'
 import { runProofAttempt } from './proof.ts'
 import { loadKit } from '../kit/kit.ts'
@@ -6,8 +11,8 @@ import {
   VerificationError,
   verificationFinding,
 } from '../verification/harness.ts'
-import { copyFile, mkdir, writeFile } from 'node:fs/promises'
-import { extname, join } from 'node:path'
+import { mkdir, writeFile } from 'node:fs/promises'
+import { join } from 'node:path'
 import type { EngineConfig } from '../config.ts'
 import { markRepositoryReady } from '../store/repositories.ts'
 import type { Database } from '../store/database.ts'
@@ -23,7 +28,7 @@ import type { AgentExecutor } from '../executors/cli.ts'
 import { run } from '../executors/process.ts'
 import type { Workspaces } from '../workspace/workspaces.ts'
 import type { GitHub } from '../github/github.ts'
-import { artifactPath, buildPrompt, readResult } from './prompt.ts'
+import { buildPrompt, readResult } from './prompt.ts'
 
 export interface RunnerOptions {
   database: Database
@@ -38,6 +43,7 @@ export async function runAttempt(
   context: AttemptContext,
   signal: AbortSignal,
 ): Promise<void> {
+  setArtifactHome(options.database, options.home)
   try {
     await executeAttempt(options, context, signal)
   } catch (error) {
@@ -91,6 +97,7 @@ async function executeAttempt(
         )
       instance = await startVerification({
         home,
+        ticketId: ticket.id,
         repository: cwd,
         commit: headCommit,
         kit: loaded.kit,
@@ -144,6 +151,7 @@ async function executeAttempt(
       )
     } finally {
       await instance?.stop()
+      if (instance) await cleanVerificationEvidence(home, instance.evidenceDir)
     }
     return
   }
@@ -180,7 +188,7 @@ async function executeAttempt(
         home,
       })
       await writeFile(join(directory, 'prompt.md'), prompt)
-      const log = join(directory, 'agent.log')
+      const log = await newEvidenceFile(home, ticket.id)
       await writeFile(log, '')
       await addAttemptArtifacts(database, attempt.id, [
         { kind: 'log', title: `${step.role} run ${retry + 1}`, path: log },
@@ -223,17 +231,7 @@ async function executeAttempt(
         (await git(['status', '--porcelain']))
       )
         throw new Error('Builder left uncommitted changes')
-      const artifacts = await Promise.all(
-        result.artifacts.map(async (artifact, index) => {
-          if (!artifact.path) return artifact
-          const path = join(
-            directory,
-            `artifact-${index}${extname(artifact.path) || '.txt'}`,
-          )
-          await copyFile(await artifactPath(home, artifact.path), path)
-          return { ...artifact, path }
-        }),
-      )
+      const artifacts = result.artifacts
       await completeAttempt(
         database,
         attempt.id,
