@@ -125,6 +125,10 @@ export async function adoptEvidence(
       title: row.title,
       path: row.path,
     })
+    await database.query(
+      'UPDATE tickets SET evidence_pruned_at = NULL WHERE id = $1',
+      [row.ticket_id],
+    )
     await database.query('UPDATE artifacts SET path = $2 WHERE id = $1', [
       row.id,
       retained.path,

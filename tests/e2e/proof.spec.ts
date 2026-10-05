@@ -12,7 +12,11 @@ test('published legacy ticket links reach the matching ticket timeline', async (
   await expect(
     page.getByRole('heading', { name: 'Fix the typo on the pricing page' }),
   ).toBeVisible()
-  await expect(page.getByRole('heading', { name: 'Timeline' })).toBeVisible()
+  await expect(
+    page.getByText('Archive: attempts, older evidence and logs', {
+      exact: true,
+    }),
+  ).toBeVisible()
 })
 
 test('open running logs refresh, closed logs stop polling, and completion loads final output', async ({
@@ -45,6 +49,10 @@ test('open running logs refresh, closed logs stop polling, and completion loads 
   await request.post('/__test/update-log', {
     data: { url: factory.url, finish: true },
   })
+  await page
+    .getByText('Archive: attempts, older evidence and logs', { exact: true })
+    .click()
+  await toggle.click()
   await expect(log).toContainText('Agent finished')
   const completedCount = fetched.length
   await page.clock.fastForward(6000)
@@ -92,13 +100,18 @@ test('evidence belongs to its test run, media uses the configured API, and logs 
     Object.assign(globalThis, { KIPSTER_API_BASE_URL: url })
   }, factory.url)
   await page.goto(`/#/tickets/${factory.tickets.proofPassed}`)
+  await page
+    .getByText('Archive: attempts, older evidence and logs', { exact: true })
+    .click()
   const run = page.locator('.attempt-entry').filter({
     has: page.getByRole('heading', { name: 'test tester', exact: true }),
   })
   await expect(run.locator('.attempt-meta')).toContainText('Commit aaaaaaa')
-  const thumbnail = run.getByRole('button', {
-    name: 'Enlarge Cart image (synthetic demo)',
-  })
+  const thumbnail = page
+    .getByRole('region', { name: 'Scenario evidence' })
+    .getByRole('button', {
+      name: 'Enlarge Cart image (synthetic demo)',
+    })
   await expect(thumbnail).toBeVisible()
   await thumbnail.focus()
   await page.keyboard.press('Enter')

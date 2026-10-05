@@ -1,3 +1,5 @@
+import { MergeGatePanel } from '../components/MergeGate.tsx'
+import { EvidenceIndex } from '../components/EvidenceIndex.tsx'
 import { useEffect, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import type {
@@ -20,7 +22,13 @@ import { repositoriesQuery, ticketQuery } from '../queries.ts'
 import { ArtifactView } from '../components/ArtifactView.tsx'
 import { Commit, Verdict } from '../components/Verdict.tsx'
 
-export function TicketPage({ number }: { number: number }) {
+export function TicketPage({
+  number,
+  evidenceId,
+}: {
+  number: number
+  evidenceId?: number
+}) {
   const query = useQuery(ticketQuery(number))
   const repositories = useQuery(repositoriesQuery)
   if (query.isPending) return <p className="muted">Loading ticket…</p>
@@ -44,6 +52,11 @@ export function TicketPage({ number }: { number: number }) {
           </div>
         </div>
       </header>
+      <MergeGatePanel detail={query.data} />
+      <EvidenceIndex
+        detail={query.data}
+        {...(evidenceId === undefined ? {} : { selected: evidenceId })}
+      />
       <Verdict
         detail={query.data}
         repository={repositories.data?.repositories.find(
@@ -75,7 +88,23 @@ export function TicketPage({ number }: { number: number }) {
           <MarkdownBody>{ticket.body}</MarkdownBody>
         </details>
       )}
-      <Timeline key={ticket.id} detail={query.data} />
+      {query.data.attempts
+        .filter((a) => a.status === 'running')
+        .map((attempt) => (
+          <ol className="timeline" key={attempt.id}>
+            <AttemptEntry
+              attempt={attempt}
+              detail={query.data}
+              artifacts={query.data.artifacts.filter(
+                (a) => a.attemptId === attempt.id,
+              )}
+            />
+          </ol>
+        ))}
+      <details className="evidence-archive">
+        <summary>Archive: attempts, older evidence and logs</summary>
+        <Timeline key={ticket.id} detail={query.data} />
+      </details>
     </article>
   )
 }
@@ -86,11 +115,12 @@ function Timeline({ detail }: { detail: TicketResponse }) {
     ...detail.attempts
       .filter(
         (attempt) =>
-          showAll ||
-          attempt.finishedAt ||
-          (attempt.startedAt &&
-            attempt.waitingFor !== 'human' &&
-            attempt.waitingFor !== 'ask'),
+          attempt.status !== 'running' &&
+          (showAll ||
+            attempt.finishedAt ||
+            (attempt.startedAt &&
+              attempt.waitingFor !== 'human' &&
+              attempt.waitingFor !== 'ask')),
       )
       .map((attempt) => ({
         type: 'attempt' as const,
@@ -130,7 +160,11 @@ function Timeline({ detail }: { detail: TicketResponse }) {
               attempt={entry.item}
               detail={detail}
               artifacts={detail.artifacts.filter(
-                (artifact) => artifact.attemptId === entry.item.id,
+                (artifact) =>
+                  artifact.attemptId === entry.item.id &&
+                  !detail.evidenceIndex?.some(
+                    (s) => s.artifactId === artifact.id,
+                  ),
               )}
             />
           ) : (
@@ -388,6 +422,7 @@ function AttemptEntry({
         <ArtifactView
           key={artifact.id}
           artifact={artifact}
+          ticketNumber={detail.ticket.number}
           defaultOpen={attempt.executor === 'human' && artifact.kind === 'note'}
           live={attempt.status === 'running' && artifact.kind === 'log'}
         />

@@ -1,3 +1,7 @@
+import { evaluateMergeGate, type MergeFacts } from '../src/domain/merge-gate.ts'
+import { saveMergeGate } from '../src/store/merge-gates.ts'
+import { getTicketDetail } from '../src/store/tickets.ts'
+import { setArtifactHome } from '../src/store/database.ts'
 import { defaultHome } from '../src/config.ts'
 import { writeDemoEvidence } from './demo-evidence.ts'
 // Fills a database with repositories and quick-change tickets in every state, using the
@@ -45,6 +49,7 @@ export async function seedDemo(
   library: Library,
   home: string = defaultHome(),
 ): Promise<DemoTickets> {
+  setArtifactHome(database, home)
   await migrate(database)
   const lock = await acquireSchedulerLock(database, () => {}, 'demo')
   try {
@@ -313,11 +318,15 @@ async function seedLocked(
         artifacts: [
           {
             kind: 'evidence',
+            scenario: 'Cart quantity updates the total',
+            scenarioResult: 'passed',
             title: 'Cart image (synthetic demo)',
             path: evidence.image,
           },
           {
             kind: 'evidence',
+            scenario: 'Cart quantity updates the total',
+            scenarioResult: 'passed',
             title: 'Cart recording (synthetic demo)',
             path: evidence.video,
           },
@@ -370,6 +379,55 @@ async function seedLocked(
   }
   const proofPassed = await proof(false)
   const proofStale = await proof(true)
+  for (const number of [proofPassed, proofStale, waitingForMerge]) {
+    const detail = (await getTicketDetail(database, number))!
+    const hasTester = number !== waitingForMerge
+    const head = 'a'.repeat(40)
+    const facts: MergeFacts = {
+      head,
+      localHead: head,
+      base: 'c'.repeat(40),
+      behind: 0,
+      tester: hasTester
+        ? { status: 'finished', outcome: 'passed', commit: head }
+        : null,
+      hasTester,
+      reproducer: null,
+      hasReproducer: false,
+      ci: 'passed',
+      checks: [
+        {
+          name: 'Demo repository checks',
+          state: 'passed',
+          required: true,
+          url: '',
+        },
+      ],
+      feedback: [],
+      buildWork: false,
+      state: 'OPEN',
+      draft: false,
+      mergeable: 'MERGEABLE',
+      paths: hasTester ? [] : ['.github/workflows/check.yml'],
+      migrationGlobs: [],
+      trustedKitError: null,
+      approvedUnverified: null,
+    }
+    await saveMergeGate(
+      database,
+      detail.ticket.id,
+      evaluateMergeGate(facts, new Date().toISOString()),
+    )
+    if (number === proofStale)
+      await saveMergeGate(
+        database,
+        detail.ticket.id,
+        evaluateMergeGate(
+          { ...facts, localHead: 'b'.repeat(40), buildWork: true },
+          new Date().toISOString(),
+        ),
+      )
+  }
 
   // Running: the planner is working on it.
   const running = await create(

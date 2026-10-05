@@ -106,6 +106,9 @@ for (const action of ['retry', 'move', 'cancel'] as const)
     expect(detail.ticket.currentStep).toBe(
       action === 'move' ? 'build' : 'review',
     )
+    await page
+      .getByText('Archive: attempts, older evidence and logs', { exact: true })
+      .click()
     const decision = page
       .getByRole('region', { name: 'Timeline' })
       .locator('.attempt-entry')
@@ -240,6 +243,9 @@ test('live updates reconcile another client, reconnect, and keep one stream acro
   await expect(
     page.getByRole('button', { name: 'Approve', exact: true }),
   ).toHaveCount(0)
+  await page
+    .getByText('Archive: attempts, older evidence and logs', { exact: true })
+    .click()
   const timeline = page.getByRole('region', { name: 'Timeline' })
   await expect(timeline.locator('.attempt-entry').first()).toContainText(
     'approved',
@@ -288,6 +294,9 @@ test.describe('artifact files', () => {
     await expect(
       page.getByRole('link', { name: 'Bad link' }),
     ).not.toHaveAttribute('href', /^javascript:/)
+    await page
+      .getByText('Archive: attempts, older evidence and logs', { exact: true })
+      .click()
     await page.getByText('Planner log log').click()
     await expect(
       page.locator('pre').filter({ hasText: 'Planner started' }),
@@ -407,6 +416,9 @@ test('timeline groups step runs and human decisions, with internal events behind
   factory,
 }) => {
   await page.goto(`${factory.url}/#/tickets/${factory.tickets.askAfterLimit}`)
+  await page
+    .getByText('Archive: attempts, older evidence and logs', { exact: true })
+    .click()
   const timeline = page.getByRole('region', { name: 'Timeline' })
   const runs = timeline.locator('.attempt-entry')
   await expect(runs).toHaveCount(8)
@@ -462,6 +474,9 @@ test('all-events preference survives live decisions and returns to a quiet timel
   const number = factory.tickets.approvePlan
   await page.goto(`${factory.url}/#/tickets/${number}`)
   await expect(page.locator('output.status')).toHaveText('Live')
+  await page
+    .getByText('Archive: attempts, older evidence and logs', { exact: true })
+    .click()
   const timeline = page.getByRole('region', { name: 'Timeline' })
   const toggle = timeline.getByRole('button', { name: 'Show all events' })
   await toggle.click()
@@ -495,6 +510,9 @@ test('queued tickets keep internal events out of the default timeline', async ({
   factory,
 }) => {
   await page.goto(`${factory.url}/#/tickets/${factory.tickets.queued}`)
+  await page
+    .getByText('Archive: attempts, older evidence and logs', { exact: true })
+    .click()
   const timeline = page.getByRole('region', { name: 'Timeline' })
   await expect(
     timeline.getByText('No step runs or decisions yet.'),

@@ -89,6 +89,11 @@ for (const colorScheme of ['light', 'dark'] as const) {
           contentType: 'image/png',
         })
         if (screen.name === 'proof') {
+          await page
+            .getByText('Archive: attempts, older evidence and logs', {
+              exact: true,
+            })
+            .click()
           const run = page.locator('.attempt-entry').filter({
             has: page.getByRole('heading', {
               name: 'test tester',
@@ -119,7 +124,8 @@ for (const colorScheme of ['light', 'dark'] as const) {
             path: evidencePath,
             contentType: 'image/png',
           })
-          await run
+          await page
+            .getByRole('region', { name: 'Scenario evidence' })
             .getByRole('button', {
               name: 'Enlarge Cart image (synthetic demo)',
             })
@@ -166,6 +172,11 @@ for (const colorScheme of ['light', 'dark'] as const) {
           })
         }
         if (screen.name === 'ask') {
+          await page
+            .getByText('Archive: attempts, older evidence and logs', {
+              exact: true,
+            })
+            .click()
           const timeline = page.getByRole('region', { name: 'Timeline' })
           await expect(timeline.locator('.event-entry')).toHaveCount(0)
           const timelinePath = testInfo.outputPath(

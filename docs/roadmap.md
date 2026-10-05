@@ -51,8 +51,7 @@ and a Merge danger line explaining reversibility and blast radius.
 After pushing, CI is checked at the exact head. Pending checks park persistently
 without a scheduler slot. Required checks must pass; failures return log excerpts
 to the builder, no checks continue immediately, and `with.ciTimeoutMinutes`
-(default 60) bounds waiting with an owner decision. `with.factoryUrl` sets the
-public evidence-link origin. While merge waits, current change requests and new
+(default 60) bounds waiting with an owner decision. Slice 4 replaces installation-specific evidence links with factory ticket references. While merge waits, current change requests and new
 owner comments become deduplicated comment artifacts and `changes-needed`.
 Base advancement during either CI or owner-merge waiting queues another
 scheduled maintenance attempt and refreshes proof before republishing. The
@@ -73,23 +72,27 @@ failure was not injected during acceptance.
 
 ## Slice 4: Decisions and merging
 
-Typed decisions with confidence bands, logged so overrides can tune thresholds.
-Merge policy with path rules and decisions; automatic merges for what the policy
-allows; a post-merge check that opens a bug ticket when something breaks.
+Wave 1 adds facts and rules; the owner still merges. The merge gate checks
+current independent proof and reproduction comparisons, base ancestry, required
+CI, open feedback, build work and PR state. Kit, CI and migration paths always
+need the owner; extra migration globs come only from the trusted default kit.
+The ticket shows live checks and retains an older green head while rebuilding.
+Scenario evidence has durable per-ticket storage, stable in-app routes, a curated
+index, an expandable archive and configurable retention (default 30 days after
+completion, retaining final-commit index items). No integration is required to
+store or view local evidence. Structured owner-approved unverified scenario data
+is not provided by the gate/evidence slice and is explicitly unavailable.
 
-The live acceptance run adds concrete requirements:
+Typed decisions, confidence bands and their override log are a parallel Wave 1
+slice. Wave 2 will consume the gate and decisions for automatic merges within
+hard path rules, add post-merge checks and open bug tickets when a check fails.
+Bounded recovery from repeated base changes remains a policy requirement.
 
-- Gate merging on the current head and base, required CI, current proof and no
-  outstanding feedback or build work. An older green PR head remains visible
-  while the factory rebuilds.
-- Make decisions distinguish independent proof, repository checks and approved
-  unverified scenarios. Show current CI status separately from the writer's
-  historical description.
-- Give evidence a curated scenario index, an expandable archive and durable,
-  shareable URLs with a retention policy; the local default needs the running
-  factory instance.
-- Bound recovery from repeated base changes. Keep explicit human control for
-  kit, CI and migration changes when defining auto-merge policy.
+Hosted attachments come later: an optional configured storage target and a
+`publish-evidence` system action will upload retained items and record hosted
+URLs for the writer. Without that integration, PRs say “Evidence on ticket #<n>
+in the factory” and contain no local links. Configuration must be optional; the
+factory's local evidence workflow continues to work without storage hosting.
 
 ## Slice 5: Larger work
 

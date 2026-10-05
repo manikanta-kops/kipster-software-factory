@@ -512,3 +512,42 @@ test('a branch commit during proof rejects the verdict without changing its reco
   )
   await cleaned(f)
 })
+
+test('bug merge gate requires the exact tester-confirmed reproduction at the current PR head', async (t) => {
+  const f = await fixture(t, {
+    script: {
+      reproducer: [{ proof: true }],
+      builder: [{ commit: true, fixed: true }],
+      tester: [{ proof: true }],
+    },
+  })
+  const reproduced = await f.next('reproduce')
+  await f.next('fix')
+  const tested = await f.next('test')
+  await f.next('review')
+  const url = 'https://github.com/fixture/proof/pull/1'
+  f.options.github.maintain = async () => ({ url, state: 'OPEN' })
+  f.options.github.inspect = async () => ({
+    url,
+    state: 'OPEN',
+    headRefOid: tested.headCommit!,
+    baseRefName: 'main',
+    isDraft: false,
+    mergeable: 'MERGEABLE',
+  })
+  f.options.github.checks = async () => ({ state: 'passed', failures: [] })
+  f.options.github.feedback = async () => []
+  await f.next('maintain-pr')
+  const { getMergeGate } = await import('../src/store/merge-gates.ts')
+  const gate = (await getMergeGate(f.store.database, f.ticket.id))!.latest
+  assert.equal(gate.ready, true)
+  assert.equal(gate.facts.reproducer!.commit, tested.headCommit)
+  assert.equal(
+    (await f.detail()).attempts.find((a) => a.id === reproduced.id)!.headCommit,
+    f.base,
+  )
+  const index = (await f.detail()).artifacts.find(
+    (a) => a.attemptId === tested.id && a.title === 'head checkout response',
+  )!
+  assert.equal(index.observedCommit, tested.headCommit)
+})

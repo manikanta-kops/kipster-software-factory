@@ -13,10 +13,12 @@ export function ArtifactView({
   artifact,
   defaultOpen = false,
   live = false,
+  ticketNumber,
 }: {
   artifact: Artifact
   defaultOpen?: boolean
   live?: boolean
+  ticketNumber?: number
 }) {
   const [open, setOpen] = useState(defaultOpen)
   const [viewing, setViewing] = useState(false)
@@ -29,16 +31,33 @@ export function ArtifactView({
   const file = useQuery({
     queryKey: ['artifact', artifact.id, live],
     queryFn: ({ signal }) => api.artifact(artifact.id, signal),
-    enabled: open && artifact.content === null && isText,
+    enabled: !artifact.prunedAt && open && artifact.content === null && isText,
     staleTime: Infinity,
     refetchInterval: live ? 3000 : false,
   })
   const content = artifact.content ?? file.data
   const source = api.artifactUrl(artifact.id)
+  const address =
+    ticketNumber === undefined || artifact.kind !== 'evidence' ? null : (
+      <a
+        className="text-link"
+        href={`#/tickets/${ticketNumber}/evidence/${artifact.id}`}
+      >
+        Open evidence item
+      </a>
+    )
+  if (artifact.prunedAt)
+    return (
+      <p className="muted">
+        {artifact.title}: removed after {artifact.retentionDays} days {address}
+      </p>
+    )
   if (isImage || isVideo)
     return (
       <figure className="media-evidence">
-        <figcaption>{artifact.title}</figcaption>
+        <figcaption>
+          {artifact.title} {address}
+        </figcaption>
         {isImage ? (
           <>
             <button
@@ -92,6 +111,7 @@ export function ArtifactView({
       </summary>
       {open && (
         <>
+          {address}
           <ErrorMessage error={file.error} />
           {isText && artifact.content === null && file.isPending && (
             <output className="muted">Loading artifact…</output>

@@ -1,3 +1,5 @@
+import type { GateSnapshot } from '../domain/merge-gate.ts'
+import type { ScenarioEvidence } from '../domain/evidence.ts'
 // Response shapes shared by the server and the web app. Change by addition only.
 import type {
   Artifact,
@@ -120,6 +122,8 @@ export interface TicketWorkflowSummary {
 
 // GET /api/tickets/:number, and the answer to every ticket action
 export interface TicketResponse {
+  readonly mergeGate?: GateSnapshot | null
+  readonly evidenceIndex?: readonly ScenarioEvidence[]
   readonly ticket: Ticket
   readonly workflow: TicketWorkflowSummary
   /** Oldest first; the last one is open unless the ticket has ended. */

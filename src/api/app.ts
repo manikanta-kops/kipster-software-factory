@@ -1,3 +1,7 @@
+import { evaluateMergeGate } from '../domain/merge-gate.ts'
+import { scenarioIndex } from '../domain/evidence.ts'
+import { getMergeGate } from '../store/merge-gates.ts'
+import { setArtifactHome } from '../store/database.ts'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { serveStatic } from '@hono/node-server/serve-static'
@@ -80,6 +84,7 @@ export function createApp({
   allowedOrigins = DEFAULT_ALLOWED_ORIGINS,
   webRoot,
 }: AppOptions) {
+  setArtifactHome(database, home)
   const app = new Hono()
 
   app.onError((error, c) => {
@@ -212,6 +217,11 @@ export function createApp({
   app.get('/api/artifacts/:id{[0-9]+}', async (c) => {
     const artifact = await getArtifact(database, Number(c.req.param('id')))
     if (!artifact) throw new FactoryError('not-found', 'No such artifact')
+    if (artifact.prunedAt)
+      return c.json<ErrorResponse>(
+        { error: `Artifact removed after ${artifact.retentionDays} days` },
+        410,
+      )
     c.header('X-Content-Type-Options', 'nosniff')
     c.header('Content-Security-Policy', "default-src 'none'; sandbox")
     if (artifact.content !== null) {
@@ -273,7 +283,44 @@ export function createApp({
     const detail = await getTicketDetail(database, number)
     if (!detail) throw new FactoryError('not-found', `No ticket #${number}`)
     const { workflow, attempts } = detail
+    const snapshot = await getMergeGate(database, detail.ticket.id)
+    const observedAttempt = attempts.findLast((a) => a.headCommit)
+    const observed = attempts.findLast((a) => a.headCommit)?.headCommit ?? null
+    const mergeGate = snapshot
+      ? {
+          ...snapshot,
+          latest: evaluateMergeGate(
+            {
+              ...snapshot.latest.facts,
+              buildWork: attempts.some((a) =>
+                ['pending', 'running'].includes(a.status),
+              ),
+              localHead:
+                observedAttempt &&
+                Date.parse(
+                  observedAttempt.finishedAt ??
+                    observedAttempt.startedAt ??
+                    observedAttempt.createdAt,
+                ) > Date.parse(snapshot.latest.evaluatedAt)
+                  ? observed!
+                  : snapshot.latest.facts.localHead,
+            },
+            snapshot.latest.evaluatedAt,
+          ),
+        }
+      : null
     return {
+      mergeGate,
+      evidenceIndex: scenarioIndex(
+        detail.artifacts,
+        attempts,
+        new Map(
+          workflow.steps
+            .filter((s) => s.kind === 'agent')
+            .map((s) => [s.id, s.role]),
+        ),
+        mergeGate?.latest.facts.localHead ?? observed,
+      ),
       ticket: detail.ticket,
       workflow: {
         name: workflow.name,
@@ -287,7 +334,7 @@ export function createApp({
       attempts,
       artifacts: await Promise.all(
         detail.artifacts.map(async (artifact) => {
-          if (!artifact.path) return artifact
+          if (!artifact.path || artifact.prunedAt) return artifact
           const file = await inspectArtifactFile(home, artifact.path)
           return file.ok ? { ...artifact, mediaType: file.type } : artifact
         }),

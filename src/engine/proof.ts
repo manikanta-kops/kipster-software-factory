@@ -295,6 +295,15 @@ async function validateProof(
   home: string,
 ) {
   if (result.outcome === 'needs-decision') return
+  if (
+    ['passed', 'reproduced'].includes(result.outcome) &&
+    result.artifacts.some((a) =>
+      ['failed', 'unverified'].includes(a.scenarioResult ?? ''),
+    )
+  )
+    throw new Error(
+      'A passing proof cannot contain failed or unverified scenario results',
+    )
   const evidence = await Promise.all(
     result.artifacts
       .filter((a) => a.kind === 'evidence' && a.path)

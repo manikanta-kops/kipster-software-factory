@@ -106,8 +106,7 @@ there; it cannot dirty the ticket checkout. The start process is supervised in i
 own POSIX process group. `exited` rejects on unexpected exit, including after
 readiness. Callers must await `stop()` in `finally`; it is idempotent and kills
 only that process group, drops only its generated `verify_<uuid>` database, and
-removes only its disposable checkout. Evidence remains under
-`home/verification/evidence-<unique>/`. Caller cancellation also stops a returned
+removes only its disposable checkout. The harness supplies a scratch `home/verification/evidence-<unique>/`; engine callers copy recorded files into `home/evidence/<ticket-id>/` before removing that scratch directory. Harness callers outside the engine own evidence retention. Caller cancellation also stops a returned
 instance. Factory-crash supervision terminates processes; database/checkout
 recovery after SIGKILL is not implemented in this slice.
 
@@ -137,8 +136,7 @@ text/plain, other bytes application/octet-stream. HTML is inert text. Inline
 content is text/markdown. Agents do not choose the type. The artifact endpoint
 serves the detected type with nosniff and a sandbox CSP; existing path containment
 and symlink checks remain. Old files receive the generic type until resolved by
-the API. Evidence files must stay under factory home, and are copied into step
-storage when an agent result is ingested.
+the API. Evidence files must stay under factory home, and are copied into stable per-ticket storage when recorded. Optional `scenario` labels match plan acceptance scenarios; `scenarioResult` is passed, failed, unverified or reproduced. The factory records an optional `observedCommit` for each proof file based on its base/head instance; agents cannot set it. The API adds `prunedAt` and `retentionDays`; pruned rows remain addressable.
 
 `Attempt.headCommit` is a nullable full object ID observed by the factory.
 Ordinary agent steps and verify-kit/maintain-pr/merge record it at completion;

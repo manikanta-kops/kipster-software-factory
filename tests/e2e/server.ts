@@ -36,6 +36,8 @@ const fixtures = new Map<
     close: () => Promise<void>
     disconnect: () => void
     updateLog: (finish: boolean) => Promise<void>
+    gate: (state: string) => Promise<void>
+    prune: () => Promise<void>
   }
 >()
 // Register before the app's static fallback by composing a small fixture router.
@@ -93,6 +95,10 @@ router.post('/__test/fixtures', async (c) => {
   await addAttemptArtifacts(fixture.database, runningAttempt.id, [
     { kind: 'log', title: 'Live agent log', path: 'running.log' },
   ])
+  const runningLog = (await getTicketDetail(
+    fixture.database,
+    fixture.tickets.running,
+  ))!.artifacts.find((a) => a.title === 'Live agent log')!.path!
   let artifactTicketNumber: number | null = null
   if (c.req.query('artifacts') === 'true') {
     const artifactTicket = await createTicket(fixture.database, {
@@ -148,9 +154,74 @@ router.post('/__test/fixtures', async (c) => {
   }
   fixtures.set(url, {
     disconnect,
+    gate: async (state) => {
+      const { getMergeGate, saveMergeGate } =
+        await import('../../src/store/merge-gates.ts')
+      const { evaluateMergeGate } =
+        await import('../../src/domain/merge-gate.ts')
+      const detail = (await getTicketDetail(
+        fixture.database,
+        fixture.tickets.proofPassed,
+      ))!
+      const facts = (await getMergeGate(fixture.database, detail.ticket.id))!
+        .latest.facts
+      const ci =
+        state === 'failed'
+          ? 'failed'
+          : state === 'pending'
+            ? 'pending'
+            : 'passed'
+      await saveMergeGate(
+        fixture.database,
+        detail.ticket.id,
+        evaluateMergeGate(
+          {
+            ...facts,
+            ci,
+            checks: [
+              {
+                name: 'Demo repository checks',
+                state: ci,
+                required: true,
+                url: '',
+              },
+            ],
+            paths:
+              state === 'paths'
+                ? [
+                    '.kipster/kit.yml',
+                    'db/migrations/001.sql',
+                    '.github/workflows/ci.yml',
+                  ]
+                : [],
+            behind: state === 'behind' ? 2 : 0,
+          },
+          new Date().toISOString(),
+        ),
+      )
+    },
+    prune: async () => {
+      const { pruneEvidence } = await import('../../src/store/evidence.ts')
+      const detail = (await getTicketDetail(
+        fixture.database,
+        fixture.tickets.proofPassed,
+      ))!
+      await completeAttempt(
+        fixture.database,
+        detail.ticket.waiting!.attemptId,
+        { outcome: 'merged', summary: 'Owner merged', artifacts: [] },
+        { headCommit: 'a'.repeat(40) },
+      )
+      await pruneEvidence(
+        fixture.database,
+        fixtureHome,
+        30,
+        new Date(Date.now() + 31 * 86400000),
+      )
+    },
     updateLog: async (finish) => {
       await appendFile(
-        join(fixtureHome, 'running.log'),
+        runningLog,
         finish ? 'Agent finished\n' : 'Agent made progress\n',
       )
       if (finish)
@@ -175,6 +246,16 @@ router.post('/__test/fixtures', async (c) => {
     tickets: fixture.tickets,
     artifactTicket: artifactTicketNumber,
   })
+})
+router.post('/__test/gate', async (c) => {
+  const { url, state } = await c.req.json<{ url: string; state: string }>()
+  await fixtures.get(url)?.gate(state)
+  return c.json({ ok: true })
+})
+router.post('/__test/prune', async (c) => {
+  const { url } = await c.req.json<{ url: string }>()
+  await fixtures.get(url)?.prune()
+  return c.json({ ok: true })
 })
 router.post('/__test/disconnect', async (c) => {
   const { url } = await c.req.json<{ url: string }>()
