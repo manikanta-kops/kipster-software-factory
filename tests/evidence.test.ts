@@ -9,7 +9,7 @@ import {
   getTicketDetail,
 } from '../src/store/tickets.ts'
 import { scenarioIndex } from '../src/domain/evidence.ts'
-import { pruneEvidence } from '../src/store/evidence.ts'
+import { adoptEvidence, pruneEvidence } from '../src/store/evidence.ts'
 import { retainArtifact } from '../src/artifacts/storage.ts'
 import { createApp } from '../src/api/app.ts'
 import { builtInLibrary } from './helpers/store.ts'
@@ -145,4 +145,19 @@ test('retention uses the injected clock, keeps final curated evidence, never pru
   const response = await app.request(`/api/artifacts/${removed[0]!.id}`)
   assert.equal(response.status, 410)
   assert.match(await response.text(), /removed after 30 days/)
+})
+
+test('adopting with a non-canonical home never re-copies retained files', async (t) => {
+  const f = await createDemoStore()
+  t.after(() => f.close())
+  const paths = async () =>
+    (
+      await f.database.query<{ path: string }>(
+        'SELECT path FROM artifacts WHERE path IS NOT NULL ORDER BY id',
+      )
+    ).rows.map((row) => row.path)
+  const before = await paths()
+  await adoptEvidence(f.database, `${f.home}/`)
+  await adoptEvidence(f.database, join(f.home, '.'))
+  assert.deepEqual(await paths(), before)
 })

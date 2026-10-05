@@ -611,7 +611,7 @@ test('maintenance replaces a cached description containing local evidence links'
     f.store.database,
     f.ticket.id,
     f.head,
-    `Verified at ${f.head}\nOwner-approved unverified scenario data is unavailable\nEvidence on ticket #${f.ticket.number} in the factory\nMerge danger: two-way door\n[Evidence](http://localhost:4600/api/artifacts/1)`,
+    `Verified at ${f.head}\nEvidence on ticket #${f.ticket.number} in the factory\nMerge danger: two-way door\n[Evidence](http://localhost:4600/api/artifacts/1)`,
   )
   await f.publish()
   assert.equal(f.writers(), 1)
@@ -812,3 +812,28 @@ for (const suffix of [
     assert.equal(f.bodies.length, 0)
   })
 }
+
+test('writer contract rejects local links but allows ordinary routes and public URLs', async () => {
+  const { validDescription } = await import('../src/engine/pr-writer.ts')
+  const head = 'a'.repeat(40)
+  const body = (extra: string) =>
+    `Verified at ${head}\nEvidence on ticket #3 in the factory\nMerge danger: two-way door, small blast radius.\n${extra}`
+  for (const allowed of [
+    'Adds GET /api/users/:id',
+    'Serves GET /api/artifacts/:id',
+    'An admin opens /users/42',
+    '[source](https://github.com/o/r/blob/x/src/pages/home/index.tsx)',
+    '[docs](https://docs.typesafe.ai/api)',
+  ])
+    assert.ok(validDescription(body(allowed), head, 3, []), allowed)
+  for (const rejected of [
+    '[proof](http://factory.lan:4600/#/tickets/1)',
+    '[proof](/api/artifacts/1)',
+    '[shot](./shot.png)',
+    'Logs in /Users/someone/.kipster-factory/steps',
+    'Saved under `~/.kipster-factory`',
+    'http://localhost:4600',
+    'https://studio.example.ts.net/',
+  ])
+    assert.ok(!validDescription(body(rejected), head, 3, []), rejected)
+})

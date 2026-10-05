@@ -50,7 +50,8 @@ Ticket number: ${ticket.number}
 Independent proof scenarios: ${JSON.stringify(scenarios)}
 Workflow has tester: ${detail.workflow.steps.some((s) => s.kind === 'agent' && s.role === 'tester')}
 Current evidence: ${JSON.stringify(evidence.map((a) => ({ title: a.title, scenario: a.scenario, result: a.scenarioResult, content: a.content })))}
-Only evidence at this exact commit counts. If the workflow has no tester, state that it is an untested workflow; builder evidence is not independent proof. Describe what each labelled scenario proved; unlabelled evidence has no scenario index. Distinguish independent tester/reproducer proof from repository checks. Include exactly "Owner-approved unverified scenario data is unavailable". No approval data is stored in this slice; do not infer it from prose. CI is pending at publication; the live ticket panel and GitHub checks report current status. Include exactly "Evidence on ticket #${ticket.number} in the factory". Do not include local URLs, file paths or factory links. No hosted attachments are configured.`
+Only evidence at this exact commit counts. If the workflow has no tester, state that it is an untested workflow; builder evidence is not independent proof. Describe what each labelled scenario proved; unlabelled evidence has no scenario index. Distinguish independent tester/reproducer proof from repository checks. Do not claim any scenario was approved without proof. CI is pending at publication; the live ticket panel and GitHub checks report current status. Include exactly "Evidence on ticket #${ticket.number} in the factory". Do not include local URLs, file paths or factory links. No hosted attachments are configured.`
+  let rejection = ''
   const git = (args: string[]) => run('git', args, { cwd, signal })
   for (let retry = 1; retry <= 2; retry++) {
     const directory = join(
@@ -68,7 +69,9 @@ Only evidence at this exact commit counts. If the workflow has no tester, state 
         role: 'writer',
         needs: [],
         routes: {},
-        instructions,
+        instructions: rejection
+          ? `${instructions}\n\nYour previous description was rejected: ${rejection}`
+          : instructions,
       },
       detail,
       cwd,
@@ -120,13 +123,14 @@ Only evidence at this exact commit counts. If the workflow has no tester, state 
       return body
     } catch (error) {
       await writeFile(join(directory, 'result-error.txt'), String(error))
+      rejection = error instanceof Error ? error.message : String(error)
       if (retry === 2) throw error
     }
   }
   throw new Error('Writer did not produce a description')
 }
 
-function validDescription(
+export function validDescription(
   body: string,
   head: string,
   ticketNumber: number,
@@ -136,14 +140,12 @@ function validDescription(
     body.length <= 4000 &&
     body.includes(`Verified at ${head}`) &&
     scenarios.every((s) => body.includes(s.scenario)) &&
-    body.includes('Owner-approved unverified scenario data is unavailable') &&
     body.includes(`Evidence on ticket #${ticketNumber} in the factory`) &&
-    !/\]\((?!https:\/\/github\.com\/)/i.test(body) &&
-    !/(?:^|[\s(])\/(?:tmp|var|private|opt|Users|home)\//.test(body) &&
-    (body.match(/https?:\/\/[^\s)<]+/gi) ?? []).every((url) =>
-      url.startsWith('https://github.com/'),
+    !/\]\((?:\/|#|\.)/.test(body) &&
+    !/(?:https?:\/\/(?:localhost|127\.0\.0\.1|\[::1\]|[^/\s]*\.ts\.net)|file:\/\/|https?:\/\/\S*\/(?:#\/tickets|api\/artifacts)\/)/i.test(
+      body,
     ) &&
-    !/(?:https?:\/\/(?:localhost|127\.0\.0\.1|\[::1\]|[^/\s]*\.ts\.net)|file:\/\/|\]\((?:\/|#)|\/Users\/|\/home\/)/i.test(
+    !/(?:^|[\s(`'"])(?:~|\/(?:Users|home|private|var\/folders|tmp))\//.test(
       body,
     ) &&
     /Merge danger:.*(?:one-way door|two-way door)/i.test(body)

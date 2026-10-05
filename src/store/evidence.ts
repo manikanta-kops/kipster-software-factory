@@ -1,3 +1,4 @@
+import { resolve } from 'node:path'
 import { scenarioIndex } from '../domain/evidence.ts'
 import { inspectArtifactFile } from '../api/artifact-files.ts'
 import { realpath } from 'node:fs/promises'
@@ -114,8 +115,9 @@ export async function adoptEvidence(
   }>(
     `SELECT a.id, a.ticket_id, a.kind, a.title, a.path FROM artifacts a JOIN attempts at ON at.id = a.attempt_id
      WHERE a.path IS NOT NULL AND a.pruned_at IS NULL AND at.status IN ('finished', 'failed', 'interrupted')
-       AND a.path NOT LIKE $1 ORDER BY a.id LIMIT $2`,
-    [`${home}/evidence/%`, limit],
+       AND left(a.path, length($1)) <> $1 ORDER BY a.id LIMIT $2`,
+    // Retained paths are stored resolved; a relative or trailing-slash home must still match them.
+    [`${resolve(home)}/evidence/`, limit],
   )
   for (const row of rows) {
     const file = await inspectArtifactFile(home, row.path)
