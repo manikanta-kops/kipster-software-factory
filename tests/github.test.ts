@@ -310,7 +310,7 @@ test('factory merge is squash and atomically matches the decided head', async ()
     new AbortController().signal,
   )
 })
-test('post-merge check queries the merge commit without a PR-head guard, paginates and honors required checks', async () => {
+test('post-merge check queries the merge commit without a PR-head guard and paginates all reported checks', async () => {
   const head = 'b'.repeat(40)
   let page = 0
   const github = createGitHub(async (_command, args) => {
@@ -361,8 +361,37 @@ test('post-merge check queries the merge commit without a PR-head guard, paginat
   assert.equal(checks.state, 'passed')
   assert.equal(
     checks.checks!.find((c) => c.name === 'Required CI')!.required,
-    true,
+    false,
   )
+})
+
+test('post-merge with no reported checks ignores PR-only required contexts', async () => {
+  let ruleRequests = 0
+  const github = createGitHub(async (_command, args) => {
+    if (!args.includes('graphql')) {
+      ruleRequests++
+      return JSON.stringify([
+        [
+          {
+            type: 'required_status_checks',
+            parameters: { required_status_checks: [{ context: 'PR-only CI' }] },
+          },
+        ],
+      ])
+    }
+    return JSON.stringify({
+      data: { repository: { object: { statusCheckRollup: null } } },
+    })
+  })
+  const checks = await github.commitChecks(
+    'acme/shop',
+    'next',
+    'b'.repeat(40),
+    new AbortController().signal,
+  )
+  assert.equal(checks.state, 'none')
+  assert.deepEqual(checks.checks, [])
+  assert.equal(ruleRequests, 0)
 })
 
 test('post-merge watches optional failures as well as required checks', async () => {

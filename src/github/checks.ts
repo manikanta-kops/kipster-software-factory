@@ -118,31 +118,33 @@ export async function inspectChecks(
       ? contexts.pageInfo.endCursor
       : undefined
   } while (cursor)
-  // Rulesets can require a check before GitHub has created its first context.
-  const rules = JSON.parse(
-    await command(
-      'gh',
-      [
-        'api',
-        '--paginate',
-        '--slurp',
-        `repos/${repository}/rules/branches/${encodeURIComponent(base)}`,
-      ],
-      { signal },
-    ),
-  ) as {
-    type: string
-    parameters?: { required_status_checks?: { context: string }[] }
-  }[][]
-  required.push(
-    ...rules
-      .flat()
-      .flatMap((r) =>
-        r.type === 'required_status_checks'
-          ? (r.parameters?.required_status_checks ?? []).map((c) => c.context)
-          : [],
+  if (!commitOnlyBranch) {
+    // PR requirements may never run on a default-branch commit.
+    const rules = JSON.parse(
+      await command(
+        'gh',
+        [
+          'api',
+          '--paginate',
+          '--slurp',
+          `repos/${repository}/rules/branches/${encodeURIComponent(base)}`,
+        ],
+        { signal },
       ),
-  )
+    ) as {
+      type: string
+      parameters?: { required_status_checks?: { context: string }[] }
+    }[][]
+    required.push(
+      ...rules
+        .flat()
+        .flatMap((r) =>
+          r.type === 'required_status_checks'
+            ? (r.parameters?.required_status_checks ?? []).map((c) => c.context)
+            : [],
+        ),
+    )
+  }
   const selected = checks.filter(
     (c) => c.isRequired || required.includes(c.name ?? c.context ?? ''),
   )

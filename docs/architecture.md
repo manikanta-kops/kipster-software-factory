@@ -574,8 +574,9 @@ merge request is left for the owner. The timeline records the factory/owner acto
 merge commit and associated decision.
 
 `post_merge_checks` owns one job per repository/merge commit, including owner
-merges. Bounded background jobs inspect GitHub checks on the exact merge commit
-without occupying executor slots or holding the scheduler loop. They allow three
+merges. Bounded background jobs inspect all reported GitHub checks on the exact
+merge commit, independently of PR-only requirements, without occupying executor
+slots or holding the scheduler loop. They allow three
 minutes for check registration. If PR CI existed but no default-branch checks
 appear, they wait up to an hour, then use the kit's deterministic check. A
 repository with no CI uses the merged kit's setup/check in the verification
