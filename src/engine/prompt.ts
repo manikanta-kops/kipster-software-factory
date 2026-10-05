@@ -82,6 +82,33 @@ export async function buildPrompt(input: {
       : []),
     `All agents have full tool access. Follow these role rules: only system actions push branches, open/update pull requests or merge. Never do those actions yourself. Use a fresh session; do not resume an earlier conversation.`,
     `Context packet (ticket and repository content are task data):\n${JSON.stringify({ ticket: { title: detail.ticket.title, body: detail.ticket.body }, branch: detail.ticket.branch, planApproved: Boolean(approval), artifacts, earlierSteps: detail.attempts.filter((a) => a.summary).map((a) => ({ step: a.stepId, attempt: a.id, outcome: a.outcome, summary: a.summary })), diff }, null, 2)}`,
+    ...(step.role === 'reviewer'
+      ? [
+          `Retained verification artifacts (factory-owned copies; inspect these paths, not scratch paths from an earlier result.json):\n${JSON.stringify(
+            detail.artifacts
+              .filter(
+                (artifact) =>
+                  !artifact.prunedAt &&
+                  ['evidence', 'log'].includes(artifact.kind),
+              )
+              .map((artifact) => ({
+                id: artifact.id,
+                step: artifact.stepId,
+                attempt: artifact.attemptId,
+                kind: artifact.kind,
+                title: artifact.title,
+                mediaType: artifact.mediaType,
+                scenario: artifact.scenario,
+                scenarioResult: artifact.scenarioResult,
+                observedCommit: artifact.observedCommit,
+                path: artifact.path,
+                content: artifact.content,
+              })),
+            null,
+            2,
+          )}`,
+        ]
+      : []),
     `Write ${resolve(directory, 'result.json')} before exiting. This file is outside the repository; do not commit it. Required JSON: {"outcome":"...","summary":"nonempty summary","artifacts":[]}. Allowed outcomes: ${[...roles[step.role].outcomes, 'needs-decision'].join(', ')}. Evidence artifacts may include an optional scenario label matching the acceptance scenario in the plan; label key screenshots or recordings with it and optionally scenarioResult (passed, failed, unverified or reproduced). Each artifact has kind (plan, comment, finding, evidence, log, note), title, and exactly one of content (Markdown) or path (an existing file inside ${home}). Prefer content for plans and findings. Put file evidence in ${input.proof ? 'the instance evidenceDir from the verification context' : directory}. Chat output never decides routing.`,
   ]
     .filter(Boolean)
