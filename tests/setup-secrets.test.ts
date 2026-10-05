@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
-import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { fileURLToPath } from 'node:url'
@@ -13,8 +13,12 @@ const cli = fileURLToPath(new URL('../src/cli.ts', import.meta.url))
 function command(
   args: string[],
   input = '',
+  toolPath?: string,
 ): Promise<{ code: number | null; output: string }> {
-  const child = spawn(process.execPath, [cli, ...args], { stdio: 'pipe' })
+  const child = spawn(process.execPath, [cli, ...args], {
+    stdio: 'pipe',
+    ...(toolPath ? { env: { ...process.env, PATH: toolPath } } : {}),
+  })
   let output = ''
   child.stdout.on('data', (data) => {
     output += data
@@ -83,20 +87,32 @@ test('non-interactive setup migrates real PostgreSQL and preserves fields on re-
       futureSetting: { retain: true },
     }),
   )
-  const first = await command([
-    'setup',
-    '--home',
-    home,
-    '--database-url',
-    store.url,
-    '--port',
-    '4702',
-    '--non-interactive',
-    '--skip-typesafe',
-    '--secret-backend',
-    'file',
-  ])
+  const toolPath = join(home, 'test-tools')
+  await mkdir(toolPath)
+  for (const tool of ['git', 'gh', 'codex', 'claude'])
+    await writeFile(join(toolPath, tool), '#!/bin/sh\nexit 1\n', {
+      mode: 0o700,
+    })
+  const first = await command(
+    [
+      'setup',
+      '--home',
+      home,
+      '--database-url',
+      store.url,
+      '--port',
+      '4702',
+      '--non-interactive',
+      '--skip-typesafe',
+      '--secret-backend',
+      'file',
+    ],
+    '',
+    toolPath,
+  )
   assert.equal(first.code, 0, first.output)
+  for (const tool of ['git', 'gh', 'codex', 'claude'])
+    assert.match(first.output, new RegExp(`Warning: ${tool}.*will not work`))
   const migrations = await store.database.query(
     'SELECT version FROM schema_migrations',
   )
@@ -107,15 +123,19 @@ test('non-interactive setup migrates real PostgreSQL and preserves fields on re-
   assert.deepEqual(config.futureSetting, { retain: true })
   assert.equal(config.agents.default.cli, 'claude')
   assert.equal((await readConfig(home)).port, 4702)
-  const second = await command([
-    'setup',
-    '--home',
-    home,
-    '--non-interactive',
-    '--skip-typesafe',
-    '--secret-backend',
-    'file',
-  ])
+  const second = await command(
+    [
+      'setup',
+      '--home',
+      home,
+      '--non-interactive',
+      '--skip-typesafe',
+      '--secret-backend',
+      'file',
+    ],
+    '',
+    toolPath,
+  )
   assert.equal(second.code, 0, second.output)
   assert.deepEqual(
     JSON.parse(await readFile(join(home, 'config.json'), 'utf8')),

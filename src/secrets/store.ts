@@ -10,7 +10,8 @@ import { join } from 'node:path'
 import { randomUUID } from 'node:crypto'
 
 export const SECRET_SERVICE = 'kipster-software-factory'
-export type SecretBackend = 'keychain' | 'file'
+export type SecretBackend =
+  'keychain' | 'secret-service' | 'credential-manager' | 'file'
 export interface Secrets {
   get(name: string): Promise<string | null>
   set(name: string, value: string): Promise<SecretBackend>
@@ -28,6 +29,12 @@ export function secretStore(
   backend: SecretBackend = 'keychain',
   warn: (message: string) => void = console.warn,
 ): Secrets {
+  const osBackend: SecretBackend =
+    process.platform === 'darwin'
+      ? 'keychain'
+      : process.platform === 'win32'
+        ? 'credential-manager'
+        : 'secret-service'
   const path = join(home, 'secrets.json')
   const read = async (): Promise<Record<string, string | null>> => {
     try {
@@ -95,7 +102,7 @@ export function secretStore(
           delete values[name]
           await write(values)
         }
-        return 'keychain'
+        return osBackend
       }
       values[name] = value
       await write(values)
@@ -109,7 +116,7 @@ export function secretStore(
           const credentials = await (
             await keyring()
           ).findCredentialsAsync(SECRET_SERVICE)
-          for (const { account } of credentials) names.set(account, 'keychain')
+          for (const { account } of credentials) names.set(account, osBackend)
         } catch {
           fallback()
         }

@@ -64,8 +64,8 @@ try {
   const signal = AbortSignal.timeout(120_000)
   await workspaces.prepareRepository(repository, signal)
   const cwd = await workspaces.prepare(ticket, repository, signal)
-  const path = join(cwd, 'src/web/pages/StationsPage.tsx')
-  const before = await readFile(path, 'utf8')
+  const changedPath = join(cwd, 'src/web/pages/StationsPage.tsx')
+  const before = await readFile(changedPath, 'utf8')
   const after = before.replace(
     'Completed · last 10 min',
     'Completed · last 10 floor min',
@@ -75,7 +75,7 @@ try {
     after,
     'Expected the current factory-floor completion label',
   )
-  await writeFile(path, after)
+  await writeFile(changedPath, after)
   await run('git', ['add', 'src/web/pages/StationsPage.tsx'], { cwd })
   await run(
     'git',
