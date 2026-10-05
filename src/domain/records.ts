@@ -68,6 +68,9 @@ export const EVENT_KINDS = [
   'repository.created',
   'repository.ready',
   'repository.failed',
+  'repository.policy',
+  'pull-request.merged',
+  'post-merge.checked',
   'ticket.created',
   'ticket.status',
   'ticket.pull-request',
@@ -94,6 +97,7 @@ export interface RepositoryKit {
 }
 
 export interface Repository {
+  readonly autoMerge?: boolean
   readonly id: number
   /** `owner/name` */
   readonly slug: string

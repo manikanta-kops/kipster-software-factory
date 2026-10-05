@@ -122,7 +122,6 @@ export function evaluateMergeGate(
   const current = (v: VerdictFact | null, outcome: string) =>
     v?.status === 'finished' && v.outcome === outcome && v.commit === facts.head
   if (!facts.hasTester) {
-    blockers.push('Untested workflow')
     needsOwner.push('Untested workflow')
   } else if (!current(facts.tester, 'passed'))
     blockers.push('Tester verdict is not passing at the current head')

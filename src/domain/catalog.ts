@@ -139,6 +139,8 @@ export const actions = {
       'Keeps the pull request mergeable: syncs with base, waits for CI and refreshes the description.',
     params: z.strictObject({
       ciTimeoutMinutes: z.number().positive().default(60),
+      ciSettleMinutes: z.number().nonnegative().default(3),
+      maxBaseSyncs: z.int().nonnegative().default(3),
     }),
     contract: fixed('ready', ['ready', 'conflict', 'ci-failed', 'base-moved']),
   },

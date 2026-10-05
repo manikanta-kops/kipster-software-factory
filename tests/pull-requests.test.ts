@@ -102,6 +102,7 @@ async function fixture(t: TestContext, tester = false, timeout = 60) {
           needs: [],
           with: {
             ciTimeoutMinutes: timeout,
+            ciSettleMinutes: 0,
           },
           routes: {},
         },
@@ -140,6 +141,10 @@ async function fixture(t: TestContext, tester = false, timeout = 60) {
   const bodies: string[] = []
   const checkedHeads: string[] = []
   const github: GitHub = {
+    merge: async () => {
+      throw new Error('Unexpected merge')
+    },
+    commitChecks: async () => ({ state: 'none', failures: [] }),
     async maintain(input) {
       bodies.push(input.body)
       return { url: 'https://github.com/fixture/repo/pull/1', state: 'OPEN' }
@@ -559,7 +564,7 @@ test('writer worktree mutation prevents pushing', async (t) => {
   )
 })
 
-test('no checks continues on the first snapshot without waiting for a scheduler poll', async (t) => {
+test('zero settle window permits no checks on the first snapshot', async (t) => {
   const f = await fixture(t)
   f.setChecks({ state: 'none', failures: [] })
   await f.publish()

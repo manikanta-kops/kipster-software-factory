@@ -9,10 +9,24 @@ export interface PullRequest {
   isDraft?: boolean
   mergeable?: 'MERGEABLE' | 'CONFLICTING' | 'UNKNOWN'
   behind?: number
+  mergeCommit?: { oid: string } | null
+  mergedAt?: string | null
   url: string
   state: 'OPEN' | 'MERGED' | 'CLOSED'
 }
 export interface GitHub {
+  merge(
+    repository: string,
+    url: string,
+    head: string,
+    signal: AbortSignal,
+  ): Promise<void>
+  commitChecks(
+    repository: string,
+    branch: string,
+    commit: string,
+    signal: AbortSignal,
+  ): Promise<Checks>
   checks(
     repository: string,
     url: string,
@@ -41,6 +55,24 @@ export interface GitHub {
 }
 export function createGitHub(command: typeof run = run): GitHub {
   return {
+    async merge(repository, url, head, signal) {
+      await command(
+        'gh',
+        [
+          'pr',
+          'merge',
+          url,
+          '--repo',
+          repository,
+          '--squash',
+          '--match-head-commit',
+          head,
+        ],
+        { signal },
+      )
+    },
+    commitChecks: (repository, branch, commit, signal) =>
+      inspectChecks(command, repository, '', commit, signal, branch),
     checks: (repository, url, head, signal) =>
       inspectChecks(command, repository, url, head, signal),
     feedback: (repository, url, signal) =>
@@ -120,7 +152,7 @@ export function createGitHub(command: typeof run = run): GitHub {
             '--repo',
             repository,
             '--json',
-            'url,state,headRefOid,baseRefOid,baseRefName,isDraft,mergeable',
+            'url,state,headRefOid,baseRefOid,baseRefName,isDraft,mergeable,mergeCommit,mergedAt',
           ],
           { signal },
         ),

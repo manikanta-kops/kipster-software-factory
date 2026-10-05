@@ -40,7 +40,12 @@ export async function retainArtifact(
   )
     return { ...artifact, path: resolve(home, artifact.path) }
   const path = join(directory, `${randomUUID()}${extname(file.path)}`)
-  await copyFile(file.path, path)
+  try {
+    await copyFile(file.path, path)
+  } catch (error) {
+    await rm(path, { force: true })
+    throw error
+  }
   return { ...artifact, path }
 }
 

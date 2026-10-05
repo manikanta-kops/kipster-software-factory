@@ -118,6 +118,10 @@ export async function proofFixture(
     workspaces,
     execute,
     github: {
+      merge: async () => {
+        throw new Error('Unexpected merge')
+      },
+      commitChecks: async () => ({ state: 'none', failures: [] }),
       maintain: async () => {
         throw new Error('No publication in proof fixture')
       },

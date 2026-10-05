@@ -40,7 +40,7 @@ test('untested workflows always need the owner and older green heads remain visi
 }) => {
   await page.goto(`${factory.url}/#/tickets/${factory.tickets.waitingForMerge}`)
   const gate = page.getByRole('region', { name: 'Merge gate' })
-  await expect(gate.getByRole('heading')).toContainText('Untested workflow')
+  await expect(gate.getByRole('heading')).toHaveText('Ready to merge')
   await expect(gate).toContainText('Needs you: Untested workflow')
   await page.goto(`${factory.url}/#/tickets/${factory.tickets.proofStale}`)
   await expect(gate).toContainText('Build work is queued or running')

@@ -117,8 +117,12 @@ async function setup(t: TestContext, script: object = {}) {
   const requests: Parameters<GitHub['maintain']>[0][] = []
   let inspections = 0
   const github: GitHub = {
+    merge: async () => {
+      throw new Error('Unexpected merge')
+    },
+    commitChecks: async () => ({ state: 'none', failures: [] }),
     async checks() {
-      return { state: 'none', failures: [] }
+      return { state: 'passed', failures: [] }
     },
     async feedback() {
       return []
@@ -129,7 +133,11 @@ async function setup(t: TestContext, script: object = {}) {
     },
     async inspect() {
       inspections++
-      return { url: 'https://github.com/fixture/repo/pull/1', state }
+      return {
+        url: 'https://github.com/fixture/repo/pull/1',
+        state,
+        mergeCommit: state === 'MERGED' ? { oid: 'd'.repeat(40) } : null,
+      }
     },
   }
   const errors: unknown[] = []

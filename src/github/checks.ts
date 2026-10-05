@@ -41,9 +41,18 @@ export async function inspectChecks(
   url: string,
   head: string,
   signal: AbortSignal,
+  commitOnlyBranch?: string,
 ): Promise<Checks> {
   const [owner, name] = repository.split('/')
-  const number = new URL(url).pathname.split('/').at(-1)!
+  const number = commitOnlyBranch
+    ? null
+    : new URL(url).pathname.split('/').at(-1)!
+  const checkQuery = commitOnlyBranch
+    ? query
+        .replace('$number:Int!, ', '')
+        .replace(/    pullRequest\(number:\$number\).*\n/, '')
+        .replaceAll('isRequired(pullRequestNumber:$number) ', '')
+    : query
   const checks: Check[] = []
   let cursor: string | undefined
   let required: string[] = []
@@ -56,13 +65,12 @@ export async function inspectChecks(
           'api',
           'graphql',
           '-f',
-          `query=${query}`,
+          `query=${checkQuery}`,
           '-f',
           `owner=${owner}`,
           '-f',
           `name=${name}`,
-          '-F',
-          `number=${number}`,
+          ...(number ? ['-F', `number=${number}`] : []),
           '-f',
           `sha=${head}`,
           ...(cursor ? ['-f', `cursor=${cursor}`] : []),
@@ -96,13 +104,13 @@ export async function inspectChecks(
     if (response.errors?.length)
       throw new Error(response.errors.map((e) => e.message).join('; '))
     const repo = response.data.repository
-    if (repo.pullRequest.headRefOid !== head)
+    if (!commitOnlyBranch && repo.pullRequest.headRefOid !== head)
       return { state: 'head-changed', failures: [] }
     if (!repo.object)
       throw new Error(`GitHub cannot find pushed commit ${head}`)
-    base = repo.pullRequest.baseRefName
+    base = commitOnlyBranch ?? repo.pullRequest.baseRefName
     required =
-      repo.pullRequest.baseRef?.branchProtectionRule
+      repo.pullRequest?.baseRef?.branchProtectionRule
         ?.requiredStatusCheckContexts ?? []
     const contexts = repo.object.statusCheckRollup?.contexts
     checks.push(...(contexts?.nodes ?? []))
@@ -139,7 +147,11 @@ export async function inspectChecks(
     (c) => c.isRequired || required.includes(c.name ?? c.context ?? ''),
   )
   // Repositories without protection still get their configured CI checked.
-  const relevant = selected.length || required.length ? selected : checks
+  const relevant = commitOnlyBranch
+    ? checks
+    : selected.length || required.length
+      ? selected
+      : checks
   const missing = required.some(
     (requiredName) =>
       !selected.some((c) => (c.name ?? c.context) === requiredName),
@@ -204,7 +216,8 @@ export async function inspectChecks(
     checks: [
       ...checks.map((c): CheckFact => ({
         name: c.name ?? c.context ?? 'Unknown check',
-        required: c.isRequired || required.includes(c.name ?? c.context ?? ''),
+        required:
+          !!c.isRequired || required.includes(c.name ?? c.context ?? ''),
         url: c.detailsUrl ?? c.targetUrl ?? '',
         state:
           c.kind === 'CheckRun'

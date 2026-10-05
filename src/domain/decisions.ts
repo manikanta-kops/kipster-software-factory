@@ -1,9 +1,11 @@
+import type { MergeFacts } from './merge-gate.ts'
 import { decideParams } from './catalog.ts'
 import { FactoryError } from './errors.ts'
 
 export type DecisionBand = 'acted' | 'confirm' | 'owner' | 'no-key' | 'error'
 export interface DecisionFacts {
-  readonly ticket: { readonly title: string; readonly body: string }
+  readonly gate?: MergeFacts
+  readonly ticket?: { readonly title: string; readonly body: string }
   readonly base: { readonly ref: string; readonly commit: string }
   readonly headCommit: string
   readonly files: readonly {
@@ -42,6 +44,10 @@ export interface DecisionInput {
   readonly durationMs: number
 }
 export interface DecisionRecord extends DecisionInput {
+  readonly purpose?: 'step' | 'merge'
+  readonly mergeError?: string | null
+  readonly mergeRequestedAt?: string | null
+  readonly mergeSucceededAt?: string | null
   readonly id: number
   readonly ticketId: number
   readonly ticketNumber: number

@@ -18,6 +18,7 @@ export interface NewRepository {
 
 interface RepositoryRow {
   id: number
+  auto_merge: boolean
   slug: string
   clone_url: string
   default_branch: string
@@ -33,6 +34,7 @@ interface RepositoryRow {
 function toRepository(row: RepositoryRow): Repository {
   return {
     id: row.id,
+    autoMerge: row.auto_merge,
     slug: row.slug,
     cloneUrl: row.clone_url,
     defaultBranch: row.default_branch,
@@ -187,4 +189,26 @@ export async function getRepositoryById(
 function found(row: RepositoryRow | undefined, id: number): RepositoryRow {
   if (!row) throw new FactoryError('not-found', `No repository with id ${id}`)
   return row
+}
+
+export async function setAutoMerge(
+  database: Database,
+  id: number,
+  enabled: boolean,
+): Promise<Repository> {
+  return transaction(database, async (connection) => {
+    const { rows } = await connection.query<RepositoryRow>(
+      'UPDATE repositories SET auto_merge = $2, updated_at = now() WHERE id = $1 RETURNING *',
+      [id, enabled],
+    )
+    const row = found(rows[0], id)
+    await recordEvents(connection, [
+      {
+        ticketId: null,
+        kind: 'repository.policy',
+        data: { repositoryId: id, autoMerge: enabled },
+      },
+    ])
+    return toRepository(row)
+  })
 }

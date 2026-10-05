@@ -8,6 +8,10 @@ import type { Queryable } from './database.ts'
 
 interface Row {
   id: number
+  purpose: 'step' | 'merge'
+  merge_requested_at: Date | null
+  merge_succeeded_at: Date | null
+  merge_error: string | null
   ticket_id: number
   number: number
   attempt_id: number
@@ -22,10 +26,24 @@ interface Row {
   created_at: Date
   decided_at: Date | null
 }
-const select = `SELECT d.*, t.number, t.workflow_name, t.workflow_version, a.step_id, (a.status = 'waiting' AND a.waiting_for = 'decision') AS pending FROM decision_log d JOIN tickets t ON t.id = d.ticket_id JOIN attempts a ON a.id = d.attempt_id`
+const select = `SELECT d.*, t.number, t.workflow_name, t.workflow_version, a.step_id,
+  ((d.purpose = 'step' AND a.status = 'waiting' AND a.waiting_for = 'decision') OR
+    (d.purpose = 'merge' AND d.final_option IS NULL
+     AND d.input->>'band' = 'confirm' AND d.input->'answer'->>'choice' = 'merge'
+     AND EXISTS (SELECT 1 FROM attempts waiting WHERE waiting.ticket_id = t.id
+       AND waiting.status = 'waiting' AND waiting.waiting_for = 'pull-request-merge')
+     AND EXISTS (SELECT 1 FROM merge_gates g JOIN repositories r ON r.id = t.repository_id
+       WHERE g.ticket_id = t.id AND d.head_commit = g.evaluation->'facts'->>'head'
+       AND r.auto_merge AND g.evaluation->>'ready' = 'true' AND g.evaluation->'needsOwner' = '[]'::jsonb))
+  ) AS pending FROM decision_log d JOIN tickets t ON t.id = d.ticket_id JOIN attempts a ON a.id = d.attempt_id`
+
 function record(row: Row): DecisionRecord {
   return {
     ...row.input,
+    purpose: row.purpose,
+    mergeRequestedAt: row.merge_requested_at?.toISOString() ?? null,
+    mergeSucceededAt: row.merge_succeeded_at?.toISOString() ?? null,
+    mergeError: row.merge_error,
     id: row.id,
     ticketId: row.ticket_id,
     ticketNumber: row.number,
@@ -88,7 +106,7 @@ export async function finishDecision(
   choice: string,
 ): Promise<void> {
   const { rows } = await database.query<{ input: DecisionInput }>(
-    'SELECT input FROM decision_log WHERE attempt_id = $1 AND final_option IS NULL',
+    "SELECT input FROM decision_log WHERE attempt_id = $1 AND purpose = 'step' AND final_option IS NULL",
     [attemptId],
   )
   const input = rows[0]?.input
@@ -100,7 +118,7 @@ export async function finishDecision(
   if (!Object.hasOwn(input.options, choice))
     throw new FactoryError('invalid', 'Choose one of the decision options')
   await database.query(
-    `UPDATE decision_log SET final_option = $2, decided_by = 'owner', overridden = $3, decided_at = now() WHERE attempt_id = $1`,
+    `UPDATE decision_log SET final_option = $2, decided_by = 'owner', overridden = $3, decided_at = now() WHERE attempt_id = $1 AND purpose = 'step'`,
     [
       attemptId,
       choice,

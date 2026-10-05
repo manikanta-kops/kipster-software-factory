@@ -1,9 +1,9 @@
-import { retainArtifact } from '../artifacts/storage.ts'
-import { artifactHome } from './database.ts'
+import {
+  withPreparedArtifacts,
+  type PreparedArtifact,
+} from './artifact-preparation.ts'
 import type { DecisionInput } from '../domain/decisions.ts'
 import { insertDecision, finishDecision } from './decisions.ts'
-import { isAbsolute } from 'node:path'
-import { detectMediaType } from '../artifacts/media-type.ts'
 // Tickets and their attempts and artifacts. Every write locks the ticket row, asks the
 // pure lifecycle what happens, applies the answer and records events in one transaction.
 import { FactoryError } from '../domain/errors.ts'
@@ -204,73 +204,81 @@ export async function createTicket(
   database: Database,
   input: NewTicket,
 ): Promise<Ticket> {
+  return transaction(database, (connection) =>
+    createTicketInTransaction(connection, input),
+  )
+}
+
+export async function createTicketInTransaction(
+  connection: Connection,
+  input: NewTicket,
+  requireCapabilities = true,
+): Promise<Ticket> {
   const { workflow, version, source } = input.workflow
   const title = input.title.trim()
   if (title === '') throw new FactoryError('invalid', 'Give the ticket a title')
 
-  return transaction(database, async (connection) => {
-    const repository = await getRepository(connection, input.repository)
-    if (!repository) {
-      throw new FactoryError(
-        'invalid',
-        `No repository ${input.repository} is registered`,
-      )
-    }
-    if (repository.status !== 'ready') {
-      throw new FactoryError(
-        'conflict',
-        `${repository.slug} is ${repository.status}${repository.lastError ? ` (${repository.lastError})` : ''}; tickets can start once it is ready`,
-      )
-    }
-    checkCapabilities(workflow, repository)
+  const repository = await getRepository(connection, input.repository)
+  if (!repository) {
+    throw new FactoryError(
+      'invalid',
+      `No repository ${input.repository} is registered`,
+    )
+  }
+  if (repository.status !== 'ready') {
+    throw new FactoryError(
+      'conflict',
+      `${repository.slug} is ${repository.status}${repository.lastError ? ` (${repository.lastError})` : ''}; tickets can start once it is ready`,
+    )
+  }
+  if (requireCapabilities) checkCapabilities(workflow, repository)
 
-    await connection.query(
-      `INSERT INTO workflow_versions (name, version, source, definition)
+  await connection.query(
+    `INSERT INTO workflow_versions (name, version, source, definition)
        VALUES ($1, $2, $3, $4)
        ON CONFLICT (name, version) DO NOTHING`,
-      [workflow.name, version, source, JSON.stringify(workflow)],
-    )
-    const { rows } = await connection.query<{ number: number }>(
-      "SELECT nextval('ticket_numbers')::integer AS number",
-    )
-    const number = (rows[0] as { number: number }).number
-    const opening = startTicket(workflow)
-    const status = ticketStatus({ status: opening.status, next: null })
-    const inserted = await connection.query<{ id: number }>(
-      `INSERT INTO tickets (number, repository_id, workflow_name, workflow_version,
+    [workflow.name, version, source, JSON.stringify(workflow)],
+  )
+  const { rows } = await connection.query<{ number: number }>(
+    "SELECT nextval('ticket_numbers')::integer AS number",
+  )
+  const number = (rows[0] as { number: number }).number
+  const opening = startTicket(workflow)
+  const status = ticketStatus({ status: opening.status, next: null })
+  const inserted = await connection.query<{ id: number }>(
+    `INSERT INTO tickets (number, repository_id, workflow_name, workflow_version,
                             title, body, branch, current_step, status)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
        RETURNING id`,
-      [
+    [
+      number,
+      repository.id,
+      workflow.name,
+      version,
+      title,
+      input.body ?? '',
+      branchName(number, title),
+      opening.stepId,
+      status,
+    ],
+  )
+  const ticketId = (inserted.rows[0] as { id: number }).id
+  const events: NewEvent[] = [
+    {
+      ticketId,
+      kind: 'ticket.created',
+      data: {
         number,
-        repository.id,
-        workflow.name,
+        repository: repository.slug,
+        workflow: workflow.name,
         version,
-        title,
-        input.body ?? '',
-        branchName(number, title),
-        opening.stepId,
         status,
-      ],
-    )
-    const ticketId = (inserted.rows[0] as { id: number }).id
-    const events: NewEvent[] = [
-      {
-        ticketId,
-        kind: 'ticket.created',
-        data: {
-          number,
-          repository: repository.slug,
-          workflow: workflow.name,
-          version,
-          status,
-        },
       },
-    ]
-    await insertOpening(connection, ticketId, opening, events)
-    await recordEvents(connection, events)
-    return (await getTicket(connection, number)) as Ticket
-  })
+    },
+  ]
+  await insertOpening(connection, ticketId, opening, events)
+  await recordEvents(connection, events)
+  return (await getTicket(connection, number)) as Ticket
 }
 
 /**
@@ -361,26 +369,37 @@ export async function completeAttempt(
     !/^[0-9a-f]{40}([0-9a-f]{24})?$/.test(completion.headCommit)
   )
     throw new Error('Invalid commit object ID')
-  return transaction(database, async (connection) => {
-    const locked = await lockByAttempt(connection, attemptId)
-    openAttemptOf(locked, attemptId)
-    const transition = afterResult(locked.workflow, locked.attempts, parsed)
-    const events: NewEvent[] = []
-    await insertArtifacts(
-      connection,
-      locked.id,
-      attemptId,
-      parsed.artifacts,
-      events,
-    )
-    return apply(
-      connection,
-      locked,
-      transition,
-      { summary: parsed.summary, ...completion },
-      events,
-    )
-  })
+  return withPreparedArtifacts(
+    database,
+    attemptId,
+    parsed.artifacts,
+    (artifacts) =>
+      transaction(database, async (connection) => {
+        const locked = await lockByAttempt(connection, attemptId)
+        openAttemptOf(locked, attemptId)
+        const transition = afterResult(locked.workflow, locked.attempts, parsed)
+        const events: NewEvent[] = []
+        await insertArtifacts(
+          connection,
+          locked.id,
+          attemptId,
+          artifacts,
+          events,
+        )
+        if (parsed.outcome === 'merged')
+          await connection.query(
+            'DELETE FROM base_syncs WHERE ticket_id = $1',
+            [locked.id],
+          )
+        return apply(
+          connection,
+          locked,
+          transition,
+          { summary: parsed.summary, ...completion },
+          events,
+        )
+      }),
+  )
 }
 
 /** Logs the model outcome and applies routing or parks for an owner in one transaction. */
@@ -660,6 +679,13 @@ export async function resolveAsk(
       locked.attempts,
       input.resolution,
     )
+    if (
+      input.resolution.action === 'retry' ||
+      input.resolution.action === 'move'
+    )
+      await connection.query('DELETE FROM base_syncs WHERE ticket_id = $1', [
+        locked.id,
+      ])
     const note = input.note?.trim() ?? ''
     const events: NewEvent[] = [
       {
@@ -747,19 +773,25 @@ export async function addAttemptArtifacts(
     summary: 'Executor evidence',
     artifacts,
   })
-  await transaction(database, async (connection) => {
-    const locked = await lockByAttempt(connection, attemptId)
-    const events: NewEvent[] = []
-    await insertArtifacts(
-      connection,
-      locked.id,
-      attemptId,
-      parsed.artifacts,
-      events,
-      observation.commit,
-    )
-    await recordEvents(connection, events)
-  })
+  await withPreparedArtifacts(
+    database,
+    attemptId,
+    parsed.artifacts,
+    (prepared) =>
+      transaction(database, async (connection) => {
+        const locked = await lockByAttempt(connection, attemptId)
+        const events: NewEvent[] = []
+        await insertArtifacts(
+          connection,
+          locked.id,
+          attemptId,
+          prepared,
+          events,
+          observation.commit,
+        )
+        await recordEvents(connection, events)
+      }),
+  )
 }
 
 // Lifecycle plumbing
@@ -979,24 +1011,16 @@ async function insertArtifacts(
   connection: Connection,
   ticketId: number,
   attemptId: number,
-  artifacts: readonly ArtifactInput[],
+  artifacts: readonly PreparedArtifact[],
   events: NewEvent[],
   observedCommit?: string,
 ): Promise<void> {
-  for (const input of artifacts) {
-    const home = artifactHome(connection)
-    const artifact = home ? await retainArtifact(home, ticketId, input) : input
-    let mediaType =
-      artifact.content !== undefined
+  for (const artifact of artifacts) {
+    const mediaType =
+      artifact.mediaType ??
+      (artifact.content !== undefined
         ? 'text/markdown'
-        : 'application/octet-stream'
-    if (artifact.path && isAbsolute(artifact.path)) {
-      try {
-        mediaType = await detectMediaType(artifact.path)
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
-      }
-    }
+        : 'application/octet-stream')
     const { rows } = await connection.query<{ id: number }>(
       `INSERT INTO artifacts (ticket_id, attempt_id, kind, title, content, path, media_type, scenario, scenario_result, observed_commit)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING id`,

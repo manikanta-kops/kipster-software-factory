@@ -217,7 +217,7 @@ for (const scenario of [
       commit: decision.facts.headCommit,
       state: 'passed',
     })
-    assert.equal(decision.facts.ticket.title, 'Fix cart total')
+    assert.equal(decision.facts.ticket?.title, 'Fix cart total')
     assert.equal(JSON.stringify(sent ?? {}).includes('AGENT PROSE'), false)
     assert.equal(JSON.stringify(sent ?? {}).includes('AGENT ARTIFACT'), false)
     if (scenario === 'acted')
