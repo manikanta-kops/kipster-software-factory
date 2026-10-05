@@ -345,11 +345,9 @@ test('workflows render steps and loops, with direct hash links and back navigati
   page,
   factory,
 }) => {
-  await page.goto(`${factory.url}/#/workflows/large-feature`)
-  await expect(
-    page.getByRole('heading', { name: 'large-feature' }),
-  ).toBeVisible()
-  await expect(page.getByText('after 2 rounds → maintain-pr')).toBeVisible()
+  await page.goto(`${factory.url}/#/workflows/feature`)
+  await expect(page.getByRole('heading', { name: 'feature' })).toBeVisible()
+  await expect(page.getByText('after 2 rounds → you')).toBeVisible()
   await page.getByRole('link', { name: /^bug / }).click()
   await expect(page).toHaveURL(/#\/workflows\/bug$/)
   const diagram = page.getByRole('figure', { name: 'bug workflow' })
@@ -363,9 +361,7 @@ test('workflows render steps and loops, with direct hash links and back navigati
   await diagram.getByText('Show all loops').click()
   await expect(diagram.locator('path.edge.back')).not.toHaveCount(2)
   await page.goBack()
-  await expect(
-    page.getByRole('heading', { name: 'large-feature' }),
-  ).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'feature' })).toBeVisible()
 })
 
 test('empty attention keeps the quiet home message', async ({

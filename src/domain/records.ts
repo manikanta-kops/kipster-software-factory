@@ -31,6 +31,7 @@ export type OpenStatus = (typeof OPEN_STATUSES)[number]
 export const WAITING_FOR = [
   'human',
   'decision',
+  'other-repo',
   'ask',
   'pull-request-merge',
   'pull-request-checks',
@@ -69,6 +70,7 @@ export const EVENT_KINDS = [
   'repository.ready',
   'repository.failed',
   'ticket.created',
+  'ticket.linked',
   'ticket.status',
   'ticket.pull-request',
   'attempt.queued',
@@ -196,4 +198,25 @@ export interface FactoryEvent {
   readonly kind: EventKind
   readonly data: Readonly<Record<string, unknown>>
   readonly createdAt: string
+}
+
+export interface TicketLink {
+  readonly id: number
+  readonly attemptId: number
+  readonly request: {
+    readonly repository: string
+    readonly title: string
+    readonly body: string
+    readonly workflow: string
+  }
+  readonly original: Pick<
+    Ticket,
+    'id' | 'number' | 'title' | 'repository' | 'status' | 'pullRequestUrl'
+  >
+  readonly linked: Pick<
+    Ticket,
+    'id' | 'number' | 'title' | 'repository' | 'status' | 'pullRequestUrl'
+  >
+  readonly mergeCommit: string | null
+  readonly resolvedAt: string | null
 }

@@ -10,6 +10,7 @@ import type {
   HumanChoice,
   Repository,
   Ticket,
+  TicketLink,
 } from '../domain/records.ts'
 import type { Next } from '../domain/routing.ts'
 
@@ -27,6 +28,7 @@ export type {
   Ticket,
   TicketAskReason,
   TicketStatus,
+  TicketLink,
   Waiting,
   WaitingFor,
 } from '../domain/records.ts'
@@ -102,6 +104,8 @@ export interface TicketsResponse {
 export interface CreateTicketRequest {
   /** The repository's `owner/name`. */
   readonly repository: string
+  /** Other registered repositories available as read-only context. */
+  readonly dependencies?: readonly string[] | undefined
   /** A workflow name; the ticket keeps the library's current version of it. */
   readonly workflow: string
   readonly title: string
@@ -124,6 +128,8 @@ export interface TicketWorkflowSummary {
 
 // GET /api/tickets/:number, and the answer to every ticket action
 export interface TicketResponse {
+  readonly dependencies?: readonly Repository[]
+  readonly links?: readonly TicketLink[]
   readonly mergeGate?: GateSnapshot | null
   readonly evidenceIndex?: readonly ScenarioEvidence[]
   readonly decisions?: readonly DecisionRecord[]

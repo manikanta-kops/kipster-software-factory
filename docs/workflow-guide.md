@@ -24,7 +24,7 @@ failure seen in practice.
   scenarios the tester can run. For UI, a clickable prototype beats prose.
 - **Questions that running something can answer are the agent's.** Only product
   and taste questions reach a human.
-- **Thin vertical slices.** Each ticket or phase should fit in one fresh
+- **Thin vertical slices.** Each ticket should fit in one fresh
   session and work end to end.
 
 ## Flow
@@ -61,3 +61,20 @@ failure seen in practice.
 - **Show only what needs a person.** Done work collapses out of the way.
 - **Draw a workflow as a list with loops.** Back-edges are labelled loops;
   everything else follows the order.
+
+## Work across repositories
+
+- **Read dependencies, change the target.** Select registered dependencies as
+  read-only reference material. Each agent session receives their current default
+  branch paths and commits; dependency edits fail to the owner and are restored.
+- **Request the needed change.** A builder uses `needs-other-repo` with a target,
+  title and body explaining the change and why it is needed. The system opens a
+  linked ticket with its own workflow (default `feature`) and plan approval.
+- **Resume on confirmed merge.** The original parks without an executor slot and
+  starts a fresh builder attempt after the linked ticket finishes with a confirmed
+  merged PR. That attempt receives the original builder explanation, full request,
+  PR URL and merge commit. Linked tickets are polled at the merge-poll interval.
+  A cancelled link
+  or an invalid request asks the owner.
+- **Keep cancellation local.** Cancelling the original does not cancel linked
+  work. The ticket page states this before cancellation.

@@ -61,6 +61,7 @@ export async function startFactory(
       scheduler = await startScheduler({
         database,
         events,
+        library: loaded.library,
         home: options.home ?? defaultHome(),
         config: engineConfig.parse(options),
       })

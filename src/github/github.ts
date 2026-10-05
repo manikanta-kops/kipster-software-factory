@@ -3,6 +3,7 @@ import { inspectFeedback, type PullRequestFeedback } from './feedback.ts'
 import { run } from '../executors/process.ts'
 
 export interface PullRequest {
+  mergeCommit?: { oid: string } | null
   headRefOid?: string
   baseRefOid?: string
   baseRefName?: string
@@ -120,7 +121,7 @@ export function createGitHub(command: typeof run = run): GitHub {
             '--repo',
             repository,
             '--json',
-            'url,state,headRefOid,baseRefOid,baseRefName,isDraft,mergeable',
+            'url,state,headRefOid,baseRefOid,baseRefName,isDraft,mergeable,mergeCommit',
           ],
           { signal },
         ),

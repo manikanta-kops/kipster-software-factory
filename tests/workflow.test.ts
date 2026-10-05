@@ -187,14 +187,6 @@ describe('parseWorkflow', () => {
   test('validates action parameters', () => {
     assertError(
       workflow(`
-  - id: split
-    kind: system
-    action: split
-`),
-      /with\.workflow/,
-    )
-    assertError(
-      workflow(`
   - id: triage
     kind: system
     action: decide

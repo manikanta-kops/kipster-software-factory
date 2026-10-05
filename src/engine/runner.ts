@@ -1,3 +1,6 @@
+import { DependencyChangedError } from '../workspace/dependencies.ts'
+import { dependencySession } from './dependencies.ts'
+import { requestOtherRepository } from './ticket-links.ts'
 import { setArtifactHome } from '../store/database.ts'
 import {
   newEvidenceFile,
@@ -39,6 +42,7 @@ export interface RunnerOptions {
   github: GitHub
   decisions?: DecisionDependencies
   execute: AgentExecutor
+  library?: import('../library/library.ts').Library
 }
 export async function runAttempt(
   options: RunnerOptions,
@@ -64,7 +68,7 @@ async function executeAttempt(
   context: AttemptContext,
   signal: AbortSignal,
 ): Promise<void> {
-  const { database, home, config, workspaces, execute } = options
+  const { database, home, config, workspaces } = options
   const { ticket, step, attempt } = context
   let { repository } = context
   const detail = await getTicketDetail(database, ticket.number)
@@ -185,7 +189,9 @@ async function executeAttempt(
         String(retry + 1),
       )
       await mkdir(directory, { recursive: true })
+      const session = await dependencySession(options, detail, signal)
       const prompt = await buildPrompt({
+        dependencies: session.dependencies,
         step,
         detail,
         cwd,
@@ -201,10 +207,18 @@ async function executeAttempt(
       ])
       let executionError: unknown
       try {
-        await execute({ config: selected, cwd, prompt, directory, log, signal })
+        await session.execute({
+          config: selected,
+          cwd,
+          prompt,
+          directory,
+          log,
+          signal,
+        })
       } catch (error) {
         executionError = error
       }
+      if (executionError instanceof DependencyChangedError) throw executionError
       signal.throwIfAborted()
       let result
       try {
@@ -237,6 +251,15 @@ async function executeAttempt(
         (await git(['status', '--porcelain']))
       )
         throw new Error('Builder left uncommitted changes')
+      if (result.outcome === 'needs-other-repo') {
+        await requestOtherRepository(
+          options,
+          attempt.id,
+          result,
+          await git(['rev-parse', 'HEAD']),
+        )
+        return
+      }
       const artifacts = result.artifacts
       await completeAttempt(
         database,

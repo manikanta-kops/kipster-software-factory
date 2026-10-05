@@ -1,3 +1,5 @@
+import { pollLinkedTickets } from './ticket-links.ts'
+import type { Library } from '../library/library.ts'
 import { invalidateMergeGate } from '../store/merge-gates.ts'
 import { pruneEvidence, adoptEvidence } from '../store/evidence.ts'
 import { refreshMergeGate } from './merge-gate.ts'
@@ -39,6 +41,7 @@ export interface SchedulerOptions {
   database: Database
   events: EventSignal
   home: string
+  library?: Library
   config?: EngineConfig
   execute?: AgentExecutor
   github?: GitHub
@@ -65,6 +68,7 @@ export async function startScheduler(
     workspaces,
     github,
     execute: options.execute ?? executeAgent,
+    ...(options.library ? { library: options.library } : {}),
   }
   const report =
     options.onError ?? ((error: unknown) => console.error('Scheduler:', error))
@@ -122,6 +126,7 @@ export async function startScheduler(
       )
       await runAttempt(
         {
+          ...(options.library ? { library: options.library } : {}),
           database,
           home: workspaces.home,
           config,
@@ -181,6 +186,11 @@ export async function startScheduler(
     }
     if (Date.now() >= nextMergePoll) {
       nextMergePoll = Date.now() + (options.mergePollMs ?? 60_000)
+      await pollLinkedTickets(
+        runnerOptions,
+        AbortSignal.any([lifetime.signal, AbortSignal.timeout(30_000)]),
+        report,
+      ).catch(report)
       for (const context of await listWaitingForMerge(
         database,
         'pull-request-checks',

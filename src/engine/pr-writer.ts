@@ -1,3 +1,4 @@
+import { dependencySession } from './dependencies.ts'
 import { newEvidenceFile } from '../artifacts/storage.ts'
 import { scenarioIndex } from '../domain/evidence.ts'
 import { mkdir, writeFile } from 'node:fs/promises'
@@ -22,7 +23,7 @@ export async function writePullRequest(
   head: string,
   signal: AbortSignal,
 ): Promise<string> {
-  const { database, home, config, execute } = options
+  const { database, home, config } = options
   const { ticket, attempt, repository, step } = context
   const detail = (await getTicketDetail(database, ticket.number))!
   const evidence = detail.artifacts.filter(
@@ -62,7 +63,9 @@ Only evidence at this exact commit counts. If the workflow has no tester, state 
       `writer-${retry}`,
     )
     await mkdir(directory, { recursive: true })
+    const session = await dependencySession(options, detail, signal)
     const prompt = await buildPrompt({
+      dependencies: session.dependencies,
       step: {
         id: step.id,
         kind: 'agent',
@@ -89,7 +92,7 @@ Only evidence at this exact commit counts. If the workflow has no tester, state 
     await addAttemptArtifacts(database, attempt.id, [
       { kind: 'log', title: `writer run ${retry}`, path: log },
     ])
-    await execute({
+    await session.execute({
       config: config.agents.roles.writer ?? config.agents.default,
       cwd,
       directory,
