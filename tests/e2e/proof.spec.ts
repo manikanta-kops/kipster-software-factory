@@ -47,7 +47,6 @@ test('open running logs refresh, closed logs stop polling, and completion loads 
   await request.post('/__test/update-log', {
     data: { url: factory.url, finish: true },
   })
-  await toggle.click()
   await expect(log).toContainText('Agent finished')
   const completedCount = fetched.length
   await page.clock.fastForward(6000)
