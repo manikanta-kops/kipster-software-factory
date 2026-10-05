@@ -11,6 +11,7 @@ import {
   finishPostMergeCheck,
 } from '../../src/store/post-merge.ts'
 import { listWaitingForMerge } from '../../src/store/tickets.ts'
+import { decide, linkOtherRepository } from '../../src/store/tickets.ts'
 import { decisionWorkflow, confirmDecision } from '../helpers/decisions.ts'
 import { recordDecisionOutcome } from '../../src/store/tickets.ts'
 // Only this test server exposes fixture creation; production API routes are unchanged.
@@ -165,6 +166,54 @@ router.post('/__test/fixtures', async (c) => {
       fixture.tickets.proofPassed,
     ))!
     await setAutoMerge(fixture.database, detail.ticket.repository.id, true)
+  }
+  let linkedTickets: { original: number; linked: number } | null = null
+  if (c.req.query('links') === 'true') {
+    const original = await createTicket(fixture.database, {
+      repository: 'kipster/demo-shop',
+      workflow: await builtInWorkflow('quick-change'),
+      title: 'Use the library API',
+      dependencies: ['kipster/legacy-api'],
+    })
+    const claimed = await claimAttempts(fixture.database, 100)
+    const context = claimed.find((item) => item.ticket.id === original.id)!
+    await markRunning(fixture.database, context.attempt.id, 'codex')
+    await completeAttempt(fixture.database, context.attempt.id, {
+      outcome: 'done',
+      summary: 'Plan ready',
+      artifacts: [
+        { kind: 'plan', title: 'Plan', content: 'Use the library API.' },
+      ],
+    })
+    let detail = (await getTicketDetail(fixture.database, original.number))!
+    await decide(fixture.database, {
+      ticketNumber: original.number,
+      attemptId: detail.ticket.waiting!.attemptId,
+      choice: 'approved',
+    })
+    const build = (await claimAttempts(fixture.database, 100)).find(
+      (item) => item.ticket.id === original.id,
+    )!
+    await markRunning(fixture.database, build.attempt.id, 'codex')
+    const link = await linkOtherRepository(
+      fixture.database,
+      build.attempt.id,
+      {
+        outcome: 'needs-other-repo',
+        summary: 'Need the API first',
+        artifacts: [],
+        otherRepository: {
+          repository: 'kipster/invalid-kit',
+          title: 'Expose the library API',
+          body: 'The caller needs a new API.',
+          workflow: 'quick-change',
+        },
+      },
+      await builtInWorkflow('quick-change'),
+      'a'.repeat(40),
+    )
+    detail = (await getTicketDetail(fixture.database, link.linked.number))!
+    linkedTickets = { original: original.number, linked: detail.ticket.number }
   }
   const fixtureEvents = listenForEvents(fixture.database)
   await fixtureEvents.ready
@@ -343,6 +392,7 @@ router.post('/__test/fixtures', async (c) => {
   return c.json({
     url,
     tickets: fixture.tickets,
+    linkedTickets,
     artifactTicket: artifactTicketNumber,
     decisionTicket,
   })

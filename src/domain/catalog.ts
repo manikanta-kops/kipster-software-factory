@@ -92,6 +92,24 @@ const slug = z
   .string()
   .regex(/^[a-z][a-z0-9-]*$/, 'use lowercase letters, digits and hyphens')
 
+export const otherRepositoryRequestSchema = z.strictObject({
+  repository: z
+    .string()
+    .trim()
+    .regex(/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/, 'use owner/name')
+    .refine(
+      (value) =>
+        value.split('/').every((part) => part !== '.' && part !== '..'),
+      'use owner/name',
+    ),
+  title: z.string().trim().min(1).max(200),
+  body: z.string().trim().min(1).max(100_000),
+  workflow: slug.default('feature'),
+})
+export type OtherRepositoryRequest = z.infer<
+  typeof otherRepositoryRequestSchema
+>
+
 const confidence = z.number().min(0).max(1)
 
 export const decideParams = z.strictObject({
@@ -108,8 +126,6 @@ export const decideParams = z.strictObject({
     })
     .default({ act: 0.9, confirm: 0.6 }),
 })
-
-export const splitParams = z.strictObject({ workflow: slug })
 
 const noParams = z.strictObject({})
 
@@ -149,17 +165,6 @@ export const actions = {
       'Merges when the repository policy allows it, otherwise waits for a human.',
     params: noParams,
     contract: fixed('merged', ['merged', 'changes-needed', 'rejected']),
-  },
-  split: {
-    summary:
-      'Creates one child ticket per planned phase, each running the named workflow.',
-    params: splitParams,
-    contract: fixed('done', ['done']),
-  },
-  'wait-children': {
-    summary: 'Waits until every child ticket has finished or been deferred.',
-    params: noParams,
-    contract: fixed('done', ['done', 'deferred']),
   },
 } as const satisfies Record<string, Action>
 

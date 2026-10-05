@@ -197,6 +197,9 @@ export function createApp({
     }
     const ticket = await createTicket(database, {
       repository: input.repository,
+      ...(input.dependencies === undefined
+        ? {}
+        : { dependencies: input.dependencies }),
       workflow: entry,
       title: input.title,
       ...(input.body === undefined ? {} : { body: input.body }),
@@ -341,6 +344,8 @@ export function createApp({
         }
       : null
     return {
+      dependencies: detail.dependencies,
+      links: detail.links,
       mergeGate,
       evidenceIndex: scenarioIndex(
         detail.artifacts,

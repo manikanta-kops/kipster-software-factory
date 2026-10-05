@@ -70,6 +70,8 @@ export const api = {
   tickets: (signal: AbortSignal) => get<TicketsResponse>('/tickets', signal),
   ticket: (number: number, signal: AbortSignal) =>
     get<TicketResponse>(`/tickets/${number}`, signal),
+  cancel: (number: number, body: { reason?: string }) =>
+    post<TicketResponse>(`/tickets/${number}/cancel`, body),
   createTicket: (body: CreateTicketRequest) =>
     post<TicketResponse>('/tickets', body),
   createRepository: (body: CreateRepositoryRequest) =>

@@ -23,6 +23,10 @@ export const createRepositoryRequest = z.strictObject({
 
 export const createTicketRequest = z.strictObject({
   repository: text.min(1),
+  dependencies: z
+    .array(text.regex(REPOSITORY_SLUG, 'use owner/name'))
+    .max(50)
+    .optional(),
   workflow: text.min(1),
   title: text.min(1).max(200),
   body: z.string().max(100_000).optional(),

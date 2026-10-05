@@ -30,6 +30,7 @@ export function NewTicket() {
   const [workflow, setWorkflow] = useState('')
   const [title, setTitle] = useState('')
   const [body, setBody] = useState('')
+  const [dependencies, setDependencies] = useState<string[]>([])
   const selectedRepository = repositories.data?.repositories.find(
     (item) => item.slug === repository,
   )
@@ -79,7 +80,13 @@ export function NewTicket() {
           onSubmit={(event) => {
             event.preventDefault()
             if (canCreate)
-              create.mutate({ repository, workflow, title: title.trim(), body })
+              create.mutate({
+                repository,
+                workflow,
+                title: title.trim(),
+                body,
+                ...(dependencies.length ? { dependencies } : {}),
+              })
           }}
         >
           <label htmlFor="repository">Repository</label>
@@ -90,6 +97,9 @@ export function NewTicket() {
             onChange={(event) => {
               setRepository(event.target.value)
               setWorkflow('')
+              setDependencies((items) =>
+                items.filter((item) => item !== event.target.value),
+              )
             }}
           >
             <option value="">Choose a repository</option>
@@ -159,6 +169,37 @@ export function NewTicket() {
               )
             })}
           </fieldset>
+          {repository &&
+            repositories.data?.repositories.some(
+              (item) => item.slug !== repository,
+            ) && (
+              <fieldset className="workflow-choices">
+                <legend>Read-only dependencies</legend>
+                <p className="muted">
+                  Agents can read these repositories at their current
+                  default-branch commit. Changes require a separate linked
+                  ticket.
+                </p>
+                {repositories.data?.repositories
+                  .filter((item) => item.slug !== repository)
+                  .map((item) => (
+                    <label key={item.id} className="workflow-choice">
+                      <input
+                        type="checkbox"
+                        checked={dependencies.includes(item.slug)}
+                        onChange={(event) =>
+                          setDependencies((items) =>
+                            event.target.checked
+                              ? [...items, item.slug]
+                              : items.filter((slug) => slug !== item.slug),
+                          )
+                        }
+                      />
+                      <span>{item.slug}</span>
+                    </label>
+                  ))}
+              </fieldset>
+            )}
           <label htmlFor="title">Title</label>
           <input
             id="title"

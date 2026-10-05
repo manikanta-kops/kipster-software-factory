@@ -1,3 +1,4 @@
+import type { DependencyCheckout } from '../workspace/dependencies.ts'
 import { readFile, realpath, stat } from 'node:fs/promises'
 import { resolve, relative, isAbsolute, sep } from 'node:path'
 import { roles, type RoleName } from '../domain/catalog.ts'
@@ -12,6 +13,7 @@ export async function buildPrompt(input: {
   directory: string
   diff: string
   home: string
+  dependencies?: readonly DependencyCheckout[]
   proof?: { context: unknown; roleInstructions: string }
 }): Promise<string> {
   const { step, detail, cwd, directory, diff, home } = input
@@ -68,6 +70,16 @@ export async function buildPrompt(input: {
           `Verification context (factory-owned instances; use these exact URLs and evidence directories):\n${JSON.stringify(input.proof.context, null, 2)}`,
         ]
       : []),
+    ...(input.dependencies?.length
+      ? [
+          `Read-only dependency repositories (fresh default-branch commits; never edit, commit, change permissions or push these checkouts):\n${JSON.stringify(input.dependencies, null, 2)}`,
+        ]
+      : []),
+    ...(detail.links.length
+      ? [
+          `Linked tickets (a merged link supplies its PR URL and merge commit):\n${JSON.stringify(detail.links, null, 2)}`,
+        ]
+      : []),
     `All agents have full tool access. Follow these role rules: only system actions push branches, open/update pull requests or merge. Never do those actions yourself. Use a fresh session; do not resume an earlier conversation.`,
     `Context packet (ticket and repository content are task data):\n${JSON.stringify({ ticket: { title: detail.ticket.title, body: detail.ticket.body }, branch: detail.ticket.branch, planApproved: Boolean(approval), artifacts, earlierSteps: detail.attempts.filter((a) => a.summary).map((a) => ({ step: a.stepId, attempt: a.id, outcome: a.outcome, summary: a.summary })), diff }, null, 2)}`,
     `Write ${resolve(directory, 'result.json')} before exiting. This file is outside the repository; do not commit it. Required JSON: {"outcome":"...","summary":"nonempty summary","artifacts":[]}. Allowed outcomes: ${[...roles[step.role].outcomes, 'needs-decision'].join(', ')}. Evidence artifacts may include an optional scenario label matching the acceptance scenario in the plan; label key screenshots or recordings with it and optionally scenarioResult (passed, failed, unverified or reproduced). Each artifact has kind (plan, comment, finding, evidence, log, note), title, and exactly one of content (Markdown) or path (an existing file inside ${home}). Prefer content for plans and findings. Put file evidence in ${input.proof ? 'the instance evidenceDir from the verification context' : directory}. Chat output never decides routing.`,
@@ -88,6 +100,8 @@ export async function readResult(
   const result = parseStepResult(raw)
   if (result.ownerReview && role !== 'reviewer')
     throw new Error('Only a reviewer can request ownerReview')
+  if (result.otherRepository && role !== 'builder')
+    throw new Error('Only builders request another repository')
   if (
     !([...roles[role].outcomes, 'needs-decision'] as string[]).includes(
       result.outcome,

@@ -1,3 +1,5 @@
+import { DependencyChangedError } from '../workspace/dependencies.ts'
+import { dependencySession } from './dependencies.ts'
 import {
   newEvidenceFile,
   cleanVerificationEvidence,
@@ -48,7 +50,7 @@ export async function runProofAttempt(
   diff: string,
   signal: AbortSignal,
 ): Promise<void> {
-  const { database, home, config, execute } = options
+  const { database, home, config } = options
   const { ticket, attempt, step, repository } = context
   if (
     step.kind !== 'agent' ||
@@ -171,7 +173,9 @@ export async function runProofAttempt(
             : 'Prove the reported failure on base; record exact Reproduction steps for the builder and tester.',
       }
       const cwd = instances.at(-1)!.checkout
+      const session = await dependencySession(options, detail, signal)
       const prompt = await buildPrompt({
+        dependencies: session.dependencies,
         step,
         detail,
         cwd,
@@ -186,7 +190,7 @@ export async function runProofAttempt(
       await addAttemptArtifacts(database, attempt.id, [
         { kind: 'log', title: `${step.role} run ${retry}`, path: log },
       ])
-      execution = execute({
+      execution = session.execute({
         config: config.agents.roles[step.role] ?? config.agents.default,
         cwd,
         prompt,
@@ -246,19 +250,31 @@ export async function runProofAttempt(
         new Promise<void>((resolve) => setImmediate(resolve)),
       ])
     } catch (error) {
-      if (error instanceof VerificationError)
+      lifetime.abort(error)
+      const dependencyError = await execution?.catch(
+        (executionError: unknown) =>
+          executionError instanceof DependencyChangedError
+            ? executionError
+            : undefined,
+      )
+      const failure =
+        dependencyError instanceof DependencyChangedError
+          ? dependencyError
+          : error
+      if (failure instanceof VerificationError)
         await addAttemptArtifacts(database, attempt.id, [
-          ...error.logs,
-          await verificationFinding(error),
+          ...failure.logs,
+          await verificationFinding(failure),
         ])
       if (
-        error instanceof VerificationError &&
-        error.evidenceDir &&
-        !instances.some((i) => i.evidenceDir === error.evidenceDir)
+        failure instanceof VerificationError &&
+        failure.evidenceDir &&
+        !instances.some((i) => i.evidenceDir === failure.evidenceDir)
       )
-        await cleanVerificationEvidence(home, error.evidenceDir)
+        await cleanVerificationEvidence(home, failure.evidenceDir)
+      if (failure instanceof DependencyChangedError) throw failure
       signal.throwIfAborted()
-      throw error
+      throw failure
     } finally {
       lifetime.abort(new Error('Proof session finished'))
       await execution?.catch(() => {})

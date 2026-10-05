@@ -48,11 +48,46 @@ System steps take an `action` and its parameters under `with`:
 | decide            | one per option; no success outcome     |
 | maintain-pr       | ready, conflict, ci-failed, base-moved |
 | merge             | merged, changes-needed, rejected       |
-| split             | done                                   |
-| wait-children     | done, deferred                         |
 
 Agent and system steps can also report `needs-decision`, which always pauses
 the ticket for you unless routed.
+
+## Builder requests for another repository
+
+`needs-other-repo` has factory behaviour before ordinary outcome routing. The
+builder's `result.json` adds `otherRepository`:
+
+```json
+{
+  "outcome": "needs-other-repo",
+  "summary": "The caller needs the library API first.",
+  "artifacts": [],
+  "otherRepository": {
+    "repository": "owner/library",
+    "title": "Expose the library API",
+    "body": "Describe the needed change and why the original ticket needs it.",
+    "workflow": "feature"
+  }
+}
+```
+
+Repository, title and body are required and nonempty. `workflow` is optional,
+with default `feature`; it must be a loaded workflow. Only builders can report
+this request, and other outcomes must omit `otherRepository`. The target must be
+another registered, ready repository with the workflow's capabilities. Invalid
+results get the normal one fresh retry, then ask the owner; unregistered or
+unavailable targets and workflows ask immediately. No link is opened on failure.
+
+The system creates the linked ticket and parks the original builder attempt in
+one transaction, unique per result attempt. The linked ticket follows its own
+workflow, including its approval steps, and receives the original repository as
+a read-only dependency. A confirmed merged PR on a done linked ticket queues the
+same builder step in a fresh attempt with the original summary, request title/body,
+PR URL and merge commit. Terminal links are checked at the merge-poll interval;
+event wakes do not trigger extra polls. A cancelled
+link, or completion without a confirmed merged PR, asks the owner. The parked
+attempt survives restart and consumes no executor slot. Cancelling the original
+does not cancel linked tickets.
 
 ## Defaults for unrouted outcomes
 
