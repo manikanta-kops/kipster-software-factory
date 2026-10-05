@@ -16,6 +16,7 @@ export async function buildPrompt(input: {
   dependencies?: readonly DependencyCheckout[]
   trusted: TrustedInstructions
   proof?: { context: unknown }
+  resultValidationError?: string | undefined
 }): Promise<string> {
   const { step, detail, directory, diff, home, trusted } = input
   const base = await readFile(
@@ -101,7 +102,12 @@ export async function buildPrompt(input: {
           )}`,
         ]
       : []),
-    `Write ${resolve(directory, 'result.json')} before exiting. This file is outside the repository; do not commit it. Required JSON: {"outcome":"...","summary":"nonempty summary","artifacts":[]}. Allowed outcomes: ${[...roles[step.role].outcomes, 'needs-decision'].join(', ')}. Evidence artifacts may include an optional scenario label matching the acceptance scenario in the plan; label key screenshots or recordings with it and optionally scenarioResult (passed, failed, unverified or reproduced). Each artifact has kind (plan, comment, finding, evidence, log, note), title, and exactly one of content (Markdown) or path (an existing file inside ${home}). Prefer content for plans and findings. Put file evidence in ${input.proof ? 'the instance evidenceDir from the verification context' : directory}. Chat output never decides routing.`,
+    ...(input.resultValidationError
+      ? [
+          `Previous result validation failed:\n${JSON.stringify(input.resultValidationError.slice(0, 4000))}\nThis is the one fresh retry. Correct the result contract and perform this role again using the current context. For proof, use only the newly supplied instances and evidence directories; earlier evidence does not prove this run.`,
+        ]
+      : []),
+    `Write ${resolve(directory, 'result.json')} before exiting. This file is outside the repository; do not commit it. Required JSON: {"outcome":"...","summary":"nonempty summary","artifacts":[]}. Allowed outcomes: ${[...roles[step.role].outcomes, 'needs-decision'].join(', ')}. Evidence artifacts may include an optional scenario label matching the acceptance scenario in the plan; label key screenshots or recordings with it and optionally scenarioResult (passed, failed, unverified or reproduced). Each artifact has kind (plan, comment, finding, evidence, log, note), a nonempty title of at most 200 characters, and exactly one of content (Markdown) or path (an existing file inside ${home}). Prefer content for plans and findings. Put file evidence in ${input.proof ? 'the instance evidenceDir from the verification context' : directory}. Chat output never decides routing.`,
   ]
     .filter(Boolean)
     .join('\n\n')

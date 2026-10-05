@@ -283,7 +283,9 @@ schema: kind (`plan`, `comment`, `finding`, `evidence`, `log`, `note`), title, a
 exactly one of Markdown `content` or a `path` to an existing file under the
 factory home. Symlink escapes are rejected. File artifacts are copied into `evidence/<ticket-id>/` before recording, so scratch and worktree cleanup cannot erase evidence.
 A successful planner must include a plan artifact. Missing or invalid results
-get one fresh CLI retry in a separate directory; a second invalid result fails
+get one fresh CLI retry in a separate directory with the previous validation
+failure in its prompt; proof retries still receive fresh instances and must
+capture new evidence. A second invalid result fails
 the attempt and opens a human ask. Timeouts fail immediately. Chat text is never
 parsed for routing. Logs survive failures and cancellation.
 
@@ -293,10 +295,11 @@ parsed for routing. Logs survive failures and cancellation.
 the action pins and merges `origin/<defaultBranch>` into the ticket branch.
 It never rebases or force-pushes. A conflict is aborted and reports `conflict`
 with a finding listing the files for the builder. After a clean merge, a prior
-tester execution must be a passing verdict for the exact resulting HEAD;
-otherwise `base-moved` routes back to testing. This check also catches a restart
+tester or reviewer execution must be a passing verdict for the exact resulting HEAD;
+otherwise `base-moved` routes back to testing, or review when there is no tester.
+This check also catches a restart
 after the merge committed but before its outcome was recorded. Workflows without
-a tester can still publish. A branch with no commits ahead asks the owner.
+a tester can still publish after refreshing any prior review. A branch with no commits ahead asks the owner.
 
 Before publishing a new head, `engine/pr-writer.ts` runs the writer in a fresh
 session using the writer's configured CLI and kit instructions. Its one inline

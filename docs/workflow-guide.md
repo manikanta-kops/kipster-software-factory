@@ -65,6 +65,8 @@ review after testing, with two review rounds before asking you.
 
 `maintain-pr.with.ciSettleMinutes` defaults to 3: absent checks wait briefly after
 a push so late CI can register and use the `ci-failed` route.
+Base synchronization invalidates prior tester and reviewer verdicts. Route
+`base-moved` to testing, or to review for a workflow without a tester.
 `maintain-pr.with.maxBaseSyncs` defaults to 3: repeated base advances then park
 for you with a summary. Only re-syncs from a base-moved PR wait count. Builder
 or tester work breaks the streak; initial publication and feedback rebuilds do

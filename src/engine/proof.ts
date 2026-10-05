@@ -120,6 +120,7 @@ export async function runProofAttempt(
           { surface: 'head', commit: head },
         ]
 
+  let resultValidationError: string | undefined
   for (let retry = 1; retry <= 2; retry++) {
     signal.throwIfAborted()
     const directory = join(
@@ -185,6 +186,7 @@ export async function runProofAttempt(
         home,
         trusted,
         proof: { context: proof },
+        resultValidationError,
       })
       await writeFile(join(directory, 'prompt.md'), prompt)
       const log = await newEvidenceFile(home, ticket.id)
@@ -213,7 +215,11 @@ export async function runProofAttempt(
         result = await readResult(directory, step.role, home)
         await validateProof(result, step.role, instances, home)
       } catch (error) {
-        await writeFile(join(directory, 'result-error.txt'), String(error))
+        resultValidationError = String(error)
+        await writeFile(
+          join(directory, 'result-error.txt'),
+          resultValidationError,
+        )
         if (retry === 1) continue
         throw new Error(
           `Invalid or missing proof result after two runs: ${String(error)}`,

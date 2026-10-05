@@ -231,6 +231,8 @@ test('quick-change: approval, two builds, review loop, PR, merge wait and termin
   const waiting = await until(
     () => f.detail(ticket.number),
     (d) => d.ticket.waiting?.for === 'pull-request-merge',
+    // Two builds, two reviews and publication share this deadline under load.
+    30_000,
   )
   assert.equal(waiting.attempts.filter((a) => a.stepId === 'build').length, 2)
   assert.equal(f.requests.length, 1)
@@ -371,6 +373,18 @@ test('agent prompts use default-branch role instructions and context index, neve
   }
   assert.ok(role('reviewer').every((p) => p.includes('TRUSTED REVIEWER RULE')))
   assert.ok(role('builder').every((p) => !p.includes('TRUSTED REVIEWER RULE')))
+  const builtinInstructions = (name: string) =>
+    role(name).map((prompt) => prompt.split('Repository context index')[0]!)
+  for (const prompt of builtinInstructions('builder')) {
+    assert.match(prompt, /forbidden paths/)
+    assert.match(prompt, /leave it untouched/)
+    assert.match(prompt, /conflict prevents completing[\s\S]*needs-decision/)
+  }
+  for (const prompt of builtinInstructions('reviewer'))
+    assert.match(
+      prompt,
+      /explicitly forbidden paths[\s\S]*serious scope[\s\S]*changes-needed/,
+    )
   assert.deepEqual(f.errors, [])
 })
 
@@ -406,6 +420,15 @@ test('invalid result can recover on the one fresh retry', async (t) => {
   )
   assert.equal(f.invocations.length, 2)
   assert.notEqual(f.invocations[0], f.invocations[1])
+  const first = await readFile(join(f.invocations[0]!, 'prompt.md'), 'utf8')
+  const second = await readFile(join(f.invocations[1]!, 'prompt.md'), 'utf8')
+  const failure = await readFile(
+    join(f.invocations[0]!, 'result-error.txt'),
+    'utf8',
+  )
+  assert.doesNotMatch(first, /Previous result validation failed:/)
+  assert.ok(second.includes(JSON.stringify(failure.slice(0, 4000))))
+  assert.match(second, /Previous result validation failed:/)
 })
 
 async function assertDead(pidFile: string) {

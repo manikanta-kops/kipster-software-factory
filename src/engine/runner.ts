@@ -180,6 +180,7 @@ async function executeAttempt(
     const selected = config.agents.roles[step.role] ?? config.agents.default
     const before = await git(['rev-parse', 'HEAD'])
     const trusted = await loadTrustedInstructions(cwd, base, step.role, signal)
+    let resultValidationError: string | undefined
     for (let retry = 0; retry < 2; retry++) {
       signal.throwIfAborted()
       const directory = join(
@@ -199,6 +200,7 @@ async function executeAttempt(
         diff,
         home,
         trusted,
+        resultValidationError,
       })
       await writeFile(join(directory, 'prompt.md'), prompt)
       const log = await newEvidenceFile(home, ticket.id)
@@ -225,7 +227,11 @@ async function executeAttempt(
       try {
         result = await readResult(directory, step.role, home)
       } catch (error) {
-        await writeFile(join(directory, 'result-error.txt'), String(error))
+        resultValidationError = String(error)
+        await writeFile(
+          join(directory, 'result-error.txt'),
+          resultValidationError,
+        )
         if (retry === 0) continue
         throw new Error(
           `Invalid or missing result.json after two runs: ${String(error)}`,
