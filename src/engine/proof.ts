@@ -1,3 +1,5 @@
+import { DependencyChangedError } from '../workspace/dependencies.ts'
+import { dependencySession } from './dependencies.ts'
 import {
   newEvidenceFile,
   cleanVerificationEvidence,
@@ -48,7 +50,7 @@ export async function runProofAttempt(
   diff: string,
   signal: AbortSignal,
 ): Promise<void> {
-  const { database, home, config, execute } = options
+  const { database, home, config } = options
   const { ticket, attempt, step, repository } = context
   if (
     step.kind !== 'agent' ||
@@ -171,7 +173,9 @@ export async function runProofAttempt(
             : 'Prove the reported failure on base; record exact Reproduction steps for the builder and tester.',
       }
       const cwd = instances.at(-1)!.checkout
+      const session = await dependencySession(options, detail, signal)
       const prompt = await buildPrompt({
+        dependencies: session.dependencies,
         step,
         detail,
         cwd,
@@ -186,7 +190,7 @@ export async function runProofAttempt(
       await addAttemptArtifacts(database, attempt.id, [
         { kind: 'log', title: `${step.role} run ${retry}`, path: log },
       ])
-      execution = execute({
+      execution = session.execute({
         config: config.agents.roles[step.role] ?? config.agents.default,
         cwd,
         prompt,
@@ -257,6 +261,7 @@ export async function runProofAttempt(
         !instances.some((i) => i.evidenceDir === error.evidenceDir)
       )
         await cleanVerificationEvidence(home, error.evidenceDir)
+      if (error instanceof DependencyChangedError) throw error
       signal.throwIfAborted()
       throw error
     } finally {

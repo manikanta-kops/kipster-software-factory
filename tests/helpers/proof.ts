@@ -25,6 +25,7 @@ import { builtInWorkflow, createTestStore } from './store.ts'
 
 export async function proofFixture(
   input: {
+    dependency?: boolean
     workflow?: string
     script?: object
     fixed?: boolean
@@ -87,8 +88,18 @@ export async function proofFixture(
   await markRepositoryReady(store.database, repository.id, {
     kit: (await loadKit(source, base)).state,
   })
+  if (input.dependency) {
+    const dependencyRemote = join(root, 'reference.git')
+    await run('git', ['clone', '--bare', source, dependencyRemote])
+    const reference = await createRepository(store.database, {
+      slug: 'fixture/reference',
+      cloneUrl: dependencyRemote,
+    })
+    await markRepositoryReady(store.database, reference.id)
+  }
   const ticket = await createTicket(store.database, {
     repository: repository.slug,
+    ...(input.dependency ? { dependencies: ['fixture/reference'] } : {}),
     workflow: await builtInWorkflow(input.workflow ?? 'bug'),
     title: 'Checkout returns an error',
     body: 'POST /checkout with an empty JSON object returns HTTP 500 Checkout failed. Expected HTTP 200 Order placed. Prove the failure and fix.',
@@ -172,7 +183,10 @@ export async function proofFixture(
     commit,
     close: async (retain = false) => {
       await store.close()
-      if (!retain) await rm(root, { recursive: true, force: true })
+      if (!retain) {
+        if (input.dependency) await run('chmod', ['-R', 'u+w', root])
+        await rm(root, { recursive: true, force: true })
+      }
     },
   }
 }

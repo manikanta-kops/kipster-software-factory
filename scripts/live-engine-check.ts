@@ -21,6 +21,8 @@ await run('git', ['switch', '-c', 'kipster/0-engine-smoke-check'], { cwd })
 const initial = await run('git', ['rev-parse', 'HEAD'], { cwd })
 const now = new Date().toISOString()
 const detail: TicketDetail = {
+  dependencies: [],
+  links: [],
   ticket: {
     id: 0,
     number: 0,
