@@ -231,6 +231,8 @@ test('quick-change: approval, two builds, review loop, PR, merge wait and termin
   const waiting = await until(
     () => f.detail(ticket.number),
     (d) => d.ticket.waiting?.for === 'pull-request-merge',
+    // Two builds, two reviews and publication share this deadline under load.
+    30_000,
   )
   assert.equal(waiting.attempts.filter((a) => a.stepId === 'build').length, 2)
   assert.equal(f.requests.length, 1)
@@ -406,6 +408,15 @@ test('invalid result can recover on the one fresh retry', async (t) => {
   )
   assert.equal(f.invocations.length, 2)
   assert.notEqual(f.invocations[0], f.invocations[1])
+  const first = await readFile(join(f.invocations[0]!, 'prompt.md'), 'utf8')
+  const second = await readFile(join(f.invocations[1]!, 'prompt.md'), 'utf8')
+  const failure = await readFile(
+    join(f.invocations[0]!, 'result-error.txt'),
+    'utf8',
+  )
+  assert.doesNotMatch(first, /Previous result validation failed:/)
+  assert.ok(second.includes(JSON.stringify(failure.slice(0, 4000))))
+  assert.match(second, /Previous result validation failed:/)
 })
 
 async function assertDead(pidFile: string) {

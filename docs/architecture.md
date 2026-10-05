@@ -283,7 +283,9 @@ schema: kind (`plan`, `comment`, `finding`, `evidence`, `log`, `note`), title, a
 exactly one of Markdown `content` or a `path` to an existing file under the
 factory home. Symlink escapes are rejected. File artifacts are copied into `evidence/<ticket-id>/` before recording, so scratch and worktree cleanup cannot erase evidence.
 A successful planner must include a plan artifact. Missing or invalid results
-get one fresh CLI retry in a separate directory; a second invalid result fails
+get one fresh CLI retry in a separate directory with the previous validation
+failure in its prompt; proof retries still receive fresh instances and must
+capture new evidence. A second invalid result fails
 the attempt and opens a human ask. Timeouts fail immediately. Chat text is never
 parsed for routing. Logs survive failures and cancellation.
 

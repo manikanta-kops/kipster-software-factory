@@ -33,3 +33,8 @@ needs-decision with the evidence and precise question. Write the required
 result.json; do not substitute chat output for the result.
 
 Label key evidence artifacts with optional scenario (the acceptance scenario name from the plan). Include scenarioResult (passed, failed, unverified or reproduced) for each labelled artifact. Explain the observation in the title or inline evidence content. Keep the same label across re-runs and base/head comparisons.
+
+A passing result cannot include any failed or unverified scenarioResult. Preserve
+superseded driver failures as unlabelled archive evidence and explain the
+correction; only the final successful run proves the scenario. Unresolved or
+unrun acceptance scenarios still require changes-needed.

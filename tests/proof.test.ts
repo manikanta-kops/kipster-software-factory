@@ -163,6 +163,70 @@ async function resolveAskAfterReview(
   })
 }
 
+for (const rejection of ['unverified', 'title'] as const) {
+  test(`a fresh proof retry receives ${rejection} validation failure and proves new instances`, async (t) => {
+    const f = await fixture(t, {
+      workflow: 'feature',
+      script: {
+        builder: [{ commit: true, fixed: true }],
+        tester: [{ proof: true }],
+      },
+    })
+    await f.next('plan')
+    await f.approve()
+    await f.next('build')
+    const execute = f.options.execute
+    let runs = 0
+    f.options.execute = async (invocation) => {
+      runs++
+      if (runs === 2)
+        assert.match(
+          invocation.prompt,
+          rejection === 'unverified'
+            ? /Previous result validation failed:[\s\S]*A passing proof cannot contain failed or unverified scenario results/
+            : /Previous result validation failed:[\s\S]*artifacts.0.title: Too big/,
+        )
+      else
+        assert.doesNotMatch(
+          invocation.prompt,
+          /Previous result validation failed:/,
+        )
+      assert.match(
+        invocation.prompt,
+        /a nonempty title of at most 200 characters/,
+      )
+      await execute(invocation)
+      if (runs === 1) {
+        const path = join(invocation.directory, 'result.json')
+        const result = JSON.parse(await readFile(path, 'utf8'))
+        if (rejection === 'unverified')
+          result.artifacts.push({
+            ...result.artifacts[0],
+            title: 'Superseded locator attempt',
+            scenarioResult: 'unverified',
+          })
+        else result.artifacts[0].title = 'x'.repeat(201)
+        await writeFile(path, JSON.stringify(result))
+      }
+    }
+    const passed = await f.next('test')
+    assert.equal(runs, 2)
+    assert.equal(passed.outcome, 'passed')
+    const testing = f.invocations.filter((i) =>
+      i.prompt.startsWith('You are an independent tester'),
+    )
+    assert.notEqual(testing[0]!.directory, testing[1]!.directory)
+    assert.notEqual(
+      proofContext(testing[0]!.prompt).instances[0]!.checkout,
+      proofContext(testing[1]!.prompt).instances[0]!.checkout,
+    )
+    const detail = await f.detail()
+    assert.equal(detail.attempts.filter((a) => a.stepId === 'test').length, 1)
+    assert.ok(detail.artifacts.some((a) => a.title === 'tester run 2'))
+    await cleaned(f)
+  })
+}
+
 test('bug reproduced on base → fixed → tester proves failing base and passing head; steps reach both later sessions', async (t) => {
   const f = await fixture(t, {
     script: {
