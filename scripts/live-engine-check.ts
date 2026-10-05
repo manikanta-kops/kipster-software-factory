@@ -7,6 +7,7 @@ import { engineConfig } from '../src/config.ts'
 import { buildPrompt, readResult } from '../src/engine/prompt.ts'
 import { executeAgent } from '../src/executors/cli.ts'
 import { run } from '../src/executors/process.ts'
+import { loadTrustedInstructions } from '../src/kit/kit.ts'
 import type { TicketDetail } from '../src/store/tickets.ts'
 
 const source =
@@ -54,9 +55,9 @@ for (const role of ['planner', 'builder'] as const) {
   const prompt = await buildPrompt({
     step,
     detail,
-    cwd,
     directory,
     home,
+    trusted: await loadTrustedInstructions(cwd, initial, role),
     diff: await run('git', ['diff', '--stat', `${initial}...HEAD`], { cwd }),
   })
   await writeFile(join(directory, 'prompt.md'), prompt)

@@ -22,7 +22,7 @@ import {
   recordAttemptHeadCommit,
 } from '../store/tickets.ts'
 import { run } from '../executors/process.ts'
-import { loadKit } from '../kit/kit.ts'
+import { loadKit, loadTrustedInstructions } from '../kit/kit.ts'
 import {
   startVerification,
   VerificationError,
@@ -83,10 +83,12 @@ export async function runProofAttempt(
         content: await git(['show', `${base}:${path}`]),
       })),
   )
-  const rolePath = `.kipster/roles/${step.role}.md`
-  const roleInstructions = paths.includes(rolePath)
-    ? await git(['show', `${base}:${rolePath}`])
-    : ''
+  const trusted = await loadTrustedInstructions(
+    repositoryPath,
+    base,
+    step.role,
+    signal,
+  )
   const reproducerSteps = new Set(
     detail.workflow.steps
       .filter((s) => s.kind === 'agent' && s.role === 'reproducer')
@@ -178,11 +180,11 @@ export async function runProofAttempt(
         dependencies: session.dependencies,
         step,
         detail,
-        cwd,
         directory,
         diff,
         home,
-        proof: { context: proof, roleInstructions },
+        trusted,
+        proof: { context: proof },
       })
       await writeFile(join(directory, 'prompt.md'), prompt)
       const log = await newEvidenceFile(home, ticket.id)

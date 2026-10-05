@@ -219,8 +219,10 @@ fetch; workflows needing missing capabilities remain gated by the store.
 
 ### Prompt and result contract
 
-`engine/prompt.ts` combines `roles/<role>.md`, step `instructions`, an optional
-repository `.kipster/roles/<role>.md`, and a context packet. The packet includes
+`engine/prompt.ts` combines `roles/<role>.md`, step `instructions`, the
+repository's optional `.kipster/roles/<role>.md` and `.kipster/context/index.md`
+(both from the fetched default branch, the index capped at 8,000 characters), and
+a context packet. The packet includes
 the title/body, latest plan before human approval (labelled unapproved until
 approval), prior step summaries and findings with attempt IDs, human comments
 and notes, branch and diff statistics. Each role runs in a new CLI session.
@@ -357,7 +359,8 @@ The complete kit, harness and consumer contract is in [docs/kit.md](kit.md).
 `.kipster/kit.yml` declares version 1, optional setup, deterministic check, and an
 optional verify block (start, ready, ports, database, timeoutSeconds). Verification
 README and structured feature maps are validated alongside the block. Optional
-roles/<role>.md prompt additions continue unchanged. The onboarder receives the
+roles/<role>.md prompt additions and the context/index.md map are read from the
+trusted default branch for every role. The onboarder receives the
 kit guide in its prompt. The cache fetch refreshes the default branch, kit status
 and capabilities together; an invalid kit clears capabilities with a diagnostic.
 

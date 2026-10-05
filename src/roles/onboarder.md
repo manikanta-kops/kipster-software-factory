@@ -6,6 +6,10 @@ repository cannot answer.
 Write a complete .kipster kit following the factory's docs/kit.md contract supplied
 in your prompt. Include kit.yml, verify/README.md and feature maps for the app's
 features. Keep repository-specific role additions under roles/<role>.md.
+Write context/index.md: a short map of the repository's documentation, one
+relative link per document with one line saying when to read it. Link existing
+documents rather than copying them; add focused context documents only for
+knowledge agents need that the repository does not yet record.
 Each feature map has exactly four sections: Sub-features; How to get to it (user
 point of view); Driving it; Gotchas. Every driving row pairs a user action, the
 exact command and the observable result. Record how you checked each map and what

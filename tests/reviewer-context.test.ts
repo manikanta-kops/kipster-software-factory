@@ -3,6 +3,7 @@ import { readFile, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { test } from 'node:test'
 import { buildPrompt } from '../src/engine/prompt.ts'
+import { loadTrustedInstructions } from '../src/kit/kit.ts'
 import { addAttemptArtifacts } from '../src/store/tickets.ts'
 import { autoMergeFixture } from './helpers/auto-merge.ts'
 
@@ -40,7 +41,12 @@ test('reviewer can audit retained tester evidence after instance scratch cleanup
       routes: {},
     },
     detail,
-    cwd: f.cwd,
+    trusted: await loadTrustedInstructions(
+      f.cwd,
+      'origin/main',
+      'reviewer',
+      f.signal,
+    ),
     directory: f.home,
     diff: 'Activity caption and focused browser test',
     home: f.home,
