@@ -594,6 +594,37 @@ describe('ticket status', () => {
 })
 
 describe('step results', () => {
+  test('owner review is a typed, bounded reason on a passed result', () => {
+    const result = parseStepResult({
+      outcome: 'passed',
+      summary: 'Correct',
+      ownerReview: { reason: ' Changes public contract ' },
+    })
+    assert.deepEqual(result.ownerReview, { reason: 'Changes public contract' })
+    for (const ownerReview of [
+      true,
+      'Owner please',
+      {},
+      { reason: ' ' },
+      { reason: 'x'.repeat(1001) },
+      { reason: 'Auth changes', extra: true },
+    ])
+      assert.throws(() =>
+        parseStepResult({ outcome: 'passed', summary: 'Correct', ownerReview }),
+      )
+    assert.throws(() =>
+      parseStepResult({
+        outcome: 'changes-needed',
+        summary: 'Wrong',
+        ownerReview: { reason: 'Auth changes' },
+      }),
+    )
+    assert.equal(
+      parseStepResult({ outcome: 'passed', summary: 'Owner please' })
+        .ownerReview,
+      undefined,
+    )
+  })
   test('accepts content or path artifacts', () => {
     assert.deepEqual(
       parseStepResult({

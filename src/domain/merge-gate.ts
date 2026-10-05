@@ -2,6 +2,7 @@ export interface VerdictFact {
   status: string
   outcome: string | null
   commit: string | null
+  ownerReview?: { reason: string } | null
 }
 export interface CheckFact {
   name: string
@@ -18,6 +19,8 @@ export interface MergeFacts {
   behind: number
   tester: VerdictFact | null
   hasTester: boolean
+  reviewer?: VerdictFact | null
+  hasReviewer?: boolean
   reproducer: VerdictFact | null
   hasReproducer: boolean
   ci: 'pending' | 'passed' | 'failed' | 'none' | 'head-changed'
@@ -122,10 +125,16 @@ export function evaluateMergeGate(
   const current = (v: VerdictFact | null, outcome: string) =>
     v?.status === 'finished' && v.outcome === outcome && v.commit === facts.head
   if (!facts.hasTester) {
-    blockers.push('Untested workflow')
     needsOwner.push('Untested workflow')
   } else if (!current(facts.tester, 'passed'))
     blockers.push('Tester verdict is not passing at the current head')
+  if (!facts.hasReviewer) needsOwner.push('Unreviewed workflow')
+  else if (!current(facts.reviewer ?? null, 'passed'))
+    blockers.push('Reviewer verdict is not passing at the current head')
+  else if (facts.reviewer?.ownerReview)
+    needsOwner.push(
+      `Reviewer requests owner review: ${facts.reviewer.ownerReview.reason}`,
+    )
   if (facts.hasReproducer && !current(facts.reproducer, 'reproduced'))
     blockers.push('Reproduction is not confirmed at the current head')
   if (facts.localHead !== facts.head)

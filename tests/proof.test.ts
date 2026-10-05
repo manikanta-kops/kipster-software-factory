@@ -541,6 +541,7 @@ test('bug merge gate requires the exact tester-confirmed reproduction at the cur
   })
   f.options.github.checks = async () => ({ state: 'passed', failures: [] })
   f.options.github.feedback = async () => []
+  await f.next('review')
   await f.next('maintain-pr')
   const { getMergeGate } = await import('../src/store/merge-gates.ts')
   const gate = (await getMergeGate(f.store.database, f.ticket.id))!.latest

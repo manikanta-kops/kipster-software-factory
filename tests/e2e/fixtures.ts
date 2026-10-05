@@ -10,21 +10,30 @@ interface FactoryFixture {
 }
 export const test = base.extend<{
   factory: FactoryFixture
+  withAutoMerge: boolean
   withLinks: boolean
   withArtifacts: boolean
   withDecisions: boolean
   verdict: 'changes-needed' | 'unobserved' | 'default'
 }>({
+  withAutoMerge: [false, { option: true }],
   withLinks: [false, { option: true }],
   withDecisions: [false, { option: true }],
   withArtifacts: [false, { option: true }],
   verdict: ['default', { option: true }],
   factory: async (
-    { request, withArtifacts, verdict, withDecisions, withLinks },
+    {
+      request,
+      withArtifacts,
+      verdict,
+      withDecisions,
+      withAutoMerge,
+      withLinks,
+    },
     runTest,
   ) => {
     const response = await request.post(
-      `/__test/fixtures?artifacts=${withArtifacts}&decisions=${withDecisions}&verdict=${verdict}&links=${withLinks}`,
+      `/__test/fixtures?artifacts=${withArtifacts}&decisions=${withDecisions}&verdict=${verdict}&autoMerge=${withAutoMerge}&links=${withLinks}`,
     )
     expect(response.ok()).toBeTruthy()
     const fixture = (await response.json()) as FactoryFixture

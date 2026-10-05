@@ -192,3 +192,8 @@ export interface OptionRequest {
   readonly attemptId: number
   readonly option: string
 }
+
+// POST /api/repositories/:id/auto-merge
+export interface AutoMergeRequest {
+  readonly enabled: boolean
+}

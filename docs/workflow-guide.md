@@ -49,6 +49,33 @@ failure seen in practice.
   diff statistics and test results, never from an agent's description of its
   own change.
 
+Repository auto-merge is off by default. Turn it on in Repositories to let the
+system merge when the live gate is ready with no owner reasons and the latest
+independent tester and reviewer both passed at the exact PR head. Every merge
+re-checks fresh facts and uses a head-matched squash merge. No model judges
+merge safety; TypeSafe remains optional for workflow `decide` steps.
+
+Migrations, kit and CI changes, untested or unreviewed workflows, and invalid
+trusted kits retain owner merging. The reviewer can also pass with a typed
+`ownerReview: { reason: "…" }` for correct changes involving auth/permissions,
+data deletion or rewrites, public contracts, security-sensitive code or weakened
+tests. Publication proceeds normally, and the gate shows the reviewer's reason
+for your review. The flag is validated; prose cannot set it. Bug fixes include a
+review after testing, with two review rounds before asking you.
+
+`maintain-pr.with.ciSettleMinutes` defaults to 3: absent checks wait briefly after
+a push so late CI can register and use the `ci-failed` route.
+`maintain-pr.with.maxBaseSyncs` defaults to 3: repeated base advances then park
+for you with a summary. Only re-syncs from a base-moved PR wait count. Builder
+or tester work breaks the streak; initial publication and feedback rebuilds do
+not count. Merge, retry or move resets it as well.
+
+After any PR merge, background checks watch the merge commit on the default
+branch. Repositories with no CI use the kit check in a disposable checkout.
+Failures create one bug ticket per merge commit and link it from the original
+timeline; other tickets continue running. Kit infrastructure failures retry
+three times, then report an unavailable check with the reason.
+
 ## Learning
 
 - **Lessons become checks.** A repeated mistake becomes a test, lint or script,

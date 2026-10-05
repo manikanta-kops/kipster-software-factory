@@ -1,3 +1,5 @@
+import { actions } from '../domain/catalog.ts'
+import { settledCI } from '../domain/auto-merge.ts'
 import { evaluateMergeGate, type VerdictFact } from '../domain/merge-gate.ts'
 import type { TicketDetail, AttemptContext } from '../store/tickets.ts'
 import { getTicketDetail } from '../store/tickets.ts'
@@ -66,6 +68,7 @@ export async function refreshMergeGate(
         ),
     )
   const tester = latest('tester')
+  const reviewer = latest('reviewer')
   const reproducer = latest('reproducer')
   const verdict = (attempt: typeof tester): VerdictFact | null =>
     attempt
@@ -73,6 +76,7 @@ export async function refreshMergeGate(
           status: attempt.status,
           outcome: attempt.outcome,
           commit: attempt.headCommit,
+          ...(attempt.ownerReview ? { ownerReview: attempt.ownerReview } : {}),
         }
       : null
   const reproduction = verdict(reproducer)
@@ -85,22 +89,49 @@ export async function refreshMergeGate(
     tester.outcome === 'passed'
   )
     reproduction.commit = tester.headCommit
+  const published = detail.attempts.findLast(
+    (a) =>
+      a.headCommit === head &&
+      a.waitingSince &&
+      context.workflow.steps.some(
+        (s) =>
+          s.id === a.stepId &&
+          s.kind === 'system' &&
+          s.action === 'maintain-pr',
+      ),
+  )
+  const publishStep = context.workflow.steps.find(
+    (s) => s.id === published?.stepId,
+  )
+  const ci =
+    published && publishStep?.kind === 'system'
+      ? settledCI(
+          checks,
+          published.waitingSince!,
+          actions['maintain-pr'].params.parse(publishStep.with).ciSettleMinutes,
+          Date.now(),
+        ).state
+      : checks.state
   const facts = {
     observationError: pr.headRefOid ? null : 'GitHub PR head is unavailable',
     baseBranchMatches: pr.baseRefName === branch,
     head,
     localHead,
     base,
-    behind: Number(behind),
+    behind: Math.max(Number(behind), pr.behind ?? 0),
     hasTester: context.workflow.steps.some(
       (s) => s.kind === 'agent' && s.role === 'tester',
     ),
     tester: verdict(tester),
+    hasReviewer: context.workflow.steps.some(
+      (s) => s.kind === 'agent' && s.role === 'reviewer',
+    ),
+    reviewer: verdict(reviewer),
     hasReproducer: context.workflow.steps.some(
       (s) => s.kind === 'agent' && s.role === 'reproducer',
     ),
     reproducer: reproduction,
-    ci: checks.state,
+    ci,
     checks: checks.checks ?? [],
     feedback: [
       ...new Set(

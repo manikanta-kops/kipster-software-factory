@@ -1,3 +1,16 @@
+import { mergePolicy } from '../../src/domain/auto-merge.ts'
+import { getMergeGate } from '../../src/store/merge-gates.ts'
+import {
+  markMergeRequested,
+  markMergeResult,
+} from '../../src/store/auto-merge.ts'
+import { setAutoMerge } from '../../src/store/repositories.ts'
+import {
+  recordMergedPR,
+  pendingPostMergeChecks,
+  finishPostMergeCheck,
+} from '../../src/store/post-merge.ts'
+import { listWaitingForMerge } from '../../src/store/tickets.ts'
 import { decide, linkOtherRepository } from '../../src/store/tickets.ts'
 import { decisionWorkflow, confirmDecision } from '../helpers/decisions.ts'
 import { recordDecisionOutcome } from '../../src/store/tickets.ts'
@@ -40,6 +53,7 @@ const fixtures = new Map<
     disconnect: () => void
     updateLog: (finish: boolean) => Promise<void>
     gate: (state: string) => Promise<void>
+    autoMerge: () => Promise<void>
     prune: () => Promise<void>
   }
 >()
@@ -146,6 +160,13 @@ router.post('/__test/fixtures', async (c) => {
     )
     decisionTicket = created.number
   }
+  if (c.req.query('autoMerge') === 'true') {
+    const detail = (await getTicketDetail(
+      fixture.database,
+      fixture.tickets.proofPassed,
+    ))!
+    await setAutoMerge(fixture.database, detail.ticket.repository.id, true)
+  }
   let linkedTickets: { original: number; linked: number } | null = null
   if (c.req.query('links') === 'true') {
     const original = await createTicket(fixture.database, {
@@ -222,9 +243,59 @@ router.post('/__test/fixtures', async (c) => {
   }
   fixtures.set(url, {
     disconnect,
+    autoMerge: async () => {
+      const detail = (await getTicketDetail(
+        fixture.database,
+        fixture.tickets.proofPassed,
+      ))!
+      const gate = (await getMergeGate(fixture.database, detail.ticket.id))!
+        .latest
+      const context = (await listWaitingForMerge(fixture.database)).find(
+        (ctx) => ctx.ticket.id === detail.ticket.id,
+      )!
+      if (mergePolicy(true, gate) !== 'merge')
+        throw new Error('Gate requires owner or more proof')
+      if (!(await markMergeRequested(fixture.database, context, gate)))
+        throw new Error('Merge has not been authorized')
+      await markMergeResult(fixture.database, detail.ticket.id, gate.facts.head)
+      await recordMergedPR(
+        fixture.database,
+        context,
+        {
+          url: detail.ticket.pullRequestUrl!,
+          state: 'MERGED',
+          headRefOid: gate.facts.head,
+          mergeCommit: { oid: 'd'.repeat(40) },
+        },
+        true,
+      )
+      await completeAttempt(
+        fixture.database,
+        context.attempt.id,
+        { outcome: 'merged', summary: 'Merged by factory', artifacts: [] },
+        { headCommit: gate.facts.head },
+      )
+      const check = (await pendingPostMergeChecks(fixture.database))[0]!
+      await finishPostMergeCheck(
+        fixture.database,
+        check,
+        'failed',
+        {
+          state: 'failed',
+          failures: [
+            {
+              name: 'Default branch test',
+              url: '',
+              excerpt:
+                'Fixture proves the failure path without breaking a real branch.',
+            },
+          ],
+        },
+        await builtInWorkflow('bug'),
+      )
+    },
     gate: async (state) => {
-      const { getMergeGate, saveMergeGate } =
-        await import('../../src/store/merge-gates.ts')
+      const { saveMergeGate } = await import('../../src/store/merge-gates.ts')
       const { evaluateMergeGate } =
         await import('../../src/domain/merge-gate.ts')
       const detail = (await getTicketDetail(
@@ -263,6 +334,15 @@ router.post('/__test/fixtures', async (c) => {
                   ]
                 : [],
             behind: state === 'behind' ? 2 : 0,
+            hasReviewer: state !== 'unreviewed',
+            reviewer: {
+              status: 'finished',
+              outcome: 'passed',
+              commit: facts.head,
+              ...(state === 'reviewer-owner'
+                ? { ownerReview: { reason: 'Changes public API behavior' } }
+                : {}),
+            },
           },
           new Date().toISOString(),
         ),
@@ -316,6 +396,11 @@ router.post('/__test/fixtures', async (c) => {
     artifactTicket: artifactTicketNumber,
     decisionTicket,
   })
+})
+router.post('/__test/auto-merge', async (c) => {
+  const { url } = await c.req.json<{ url: string }>()
+  await fixtures.get(url)?.autoMerge()
+  return c.json({ ok: true })
 })
 router.post('/__test/gate', async (c) => {
   const { url, state } = await c.req.json<{ url: string; state: string }>()

@@ -18,7 +18,11 @@ import { type Step, stepContract, type Workflow } from '../domain/workflow.ts'
 import type { Library } from '../library/library.ts'
 import type { Database } from '../store/database.ts'
 import type { EventSignal } from '../store/events.ts'
-import { createRepository, listRepositories } from '../store/repositories.ts'
+import {
+  createRepository,
+  listRepositories,
+  setAutoMerge,
+} from '../store/repositories.ts'
 import {
   cancelTicket,
   createTicket,
@@ -149,6 +153,16 @@ export function createApp({
     return c.json<RepositoryResponse>({ repository }, 201)
   })
 
+  app.post('/api/repositories/:id{[0-9]+}/auto-merge', async (c) => {
+    const input = await body(c, z.strictObject({ enabled: z.boolean() }))
+    return c.json<RepositoryResponse>({
+      repository: await setAutoMerge(
+        database,
+        Number(c.req.param('id')),
+        input.enabled,
+      ),
+    })
+  })
   app.get('/api/decisions', async (c) =>
     c.json<DecisionsResponse>({
       decisions: await listDecisions(database),

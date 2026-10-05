@@ -251,7 +251,8 @@ instructs the agent to write `result.json` beside it:
 }
 ```
 
-All three keys are required. Outcomes must belong to the role's catalog contract
+All three keys are required; a passed reviewer may also supply the typed
+`ownerReview` field described below. Outcomes must belong to the role's catalog contract
 or be `needs-decision`. Summary is nonempty. Artifacts use the existing lifecycle
 schema: kind (`plan`, `comment`, `finding`, `evidence`, `log`, `note`), title, and
 exactly one of Markdown `content` or a `path` to an existing file under the
@@ -290,8 +291,7 @@ immediately takes one check snapshot. Pending checks are subsequently polled
 without an executor slot. The GitHub adapter queries the exact SHA via `gh api`,
 paginates checks, and checks branch protection/rulesets for required checks not
 yet reported. Required checks must pass (GitHub also accepts neutral/skipped
-runs). Without required checks, all reported checks are considered; no checks
-continues immediately. A changed local/remote head asks the owner rather than
+runs). Without required checks, all reported checks are considered; no checks waits for `ciSettleMinutes` (default 3) after the push before treating the repository as having no CI. A changed local/remote head asks the owner rather than
 accepting another commit's green CI. Failed checks report `ci-failed` with names,
 links and at most 2,000 characters of log per check. Actions logs come from
 `gh run view --job --log-failed`; other providers use their supplied summary/text,
@@ -312,6 +312,8 @@ Configure `maintain-pr` through `with`, for example:
 ```yaml
 with:
   ciTimeoutMinutes: 60
+  ciSettleMinutes: 3
+  maxBaseSyncs: 3
 ```
 
 The timeout defaults to 60 minutes and reports `needs-decision` to the owner.
@@ -319,7 +321,7 @@ Evidence stays on the ticket until hosted attachments are configured in a later 
 the CI waiting value and the description cache. No step fields are added.
 
 `merge` parks as `pull-request-merge`. Polling reports `merged` or `rejected`
-when the owner merges or closes it. For an open PR it also reads paginated reviews,
+when the factory or owner merges it, or the owner closes it. For an open PR it also reads paginated reviews,
 issue comments and inline review comments via `gh`. A current change-requesting
 review from a human, or a new owner comment, reports `changes-needed`; feedback
 becomes comment artifacts with source links for the builder. The owner is the
@@ -328,8 +330,7 @@ operator (including organization repositories). Bots and factory-marked content
 (`<!-- kipster-factory -->`) are ignored; author identity alone cannot distinguish
 a human from the factory using the same CLI login. Comment artifacts carry source
 IDs so retries/restarts and later merge waits do not replay consumed feedback.
-Superseded/dismissed change requests are ignored. The factory never invokes
-`gh pr merge`. Other system actions explicitly fail to a human in this slice.
+Superseded/dismissed change requests are ignored. Only the system merge policy described below may invoke `gh pr merge`. Other system actions explicitly fail to a human in this slice.
 
 `tests/pull-requests.test.ts` uses real PostgreSQL, local bare remotes, a fake
 writer and a stub GitHub interface to cover clean/conflicting merges, stale
@@ -496,7 +497,8 @@ and body, fetched origin/default base and ticket HEAD, changed paths with added
 and removed line counts (null for binary files), latest tester/reproducer/reviewer
 verdicts with status and commit, and exact-head CI state when available. Agent
 summaries and artifacts are excluded. Unknown CI stays null. This is descriptive
-input, not a merge gate; Wave 2 must enforce hard rules before using decisions.
+input for workflow judgements; it does not authorize a merge. The separate
+merge policy uses hard rules and independent tester/reviewer verdicts.
 
 `domain/decisions.ts` applies inclusive confidence bands (defaults act 0.9,
 confirm 0.6). High confidence routes the selected option; medium confidence parks
@@ -523,11 +525,11 @@ workflow version and step so different threshold configurations are not mixed.
 ## Merge gate (Slice 4, Wave 1)
 
 `domain/merge-gate.ts` evaluates facts without I/O. Readiness requires a passing
-latest independent tester at the PR head, the current reproduction comparison
+latest independent tester at the PR head when the workflow has a tester, the current reproduction comparison
 for bug workflows, no base commits missing from that head, green required CI (or
 explicitly no checks), no unconsumed owner feedback or current change request,
 no queued/running work, and an open, non-draft, conflict-free PR. Unknown facts
-and failed observations block. Untested workflows always need the owner. Hard
+and failed observations block. Untested workflows have a needs-owner reason, without a readiness blocker. Hard
 path rules are separate from readiness: the kit, CI and migrations always need
 human review. Custom migration globs only add rules and are loaded from the
 fetched default-branch kit. Rename/deletion paths are included. Missing kits use
@@ -539,7 +541,7 @@ new queued/running work and later commit observations to prevent cached green
 facts from hiding a rebuild. GitHub errors invalidate readiness while terminal
 PR detection can still finish a ticket. The UI separates per-check CI facts from
 the writer's historical description. A previous green head remains visible.
-Readiness does not grant automatic merging; the owner still merges every PR.
+Readiness is one input to the opt-in automatic merge policy below.
 
 A reproducer's original verdict remains at its base commit. A successful bug
 tester records `reproductionAttemptId` identifying the reproduction it repeated
@@ -549,10 +551,64 @@ verdict, and rejects a different/newer reproduction or tester. Independent proof
 repository checks and approved unverified scenarios remain distinct facts. This
 slice has no structured approval data; the UI and writer say it is unavailable.
 
+## Automatic merges and post-merge checks (Slice 4, Wave 2)
+
+Repositories store `autoMerge` in PostgreSQL, off by default. The Repositories
+page updates it through `POST /api/repositories/:id/auto-merge`; no config file or
+environment variable enables it. With the setting off, the owner merges through
+GitHub as before. There is no model or TypeSafe call on the merge path; `decide`
+and its decision log remain available for workflow judgements.
+
+The system merges only when the fresh gate is ready with no needs-owner reasons
+and the latest independent tester and reviewer verdicts both passed at the exact
+PR head. Workflows without a tester or reviewer need the owner (`Untested
+workflow` / `Unreviewed workflow`). Kit, CI and migration paths and invalid
+trusted kits always prevent a factory merge.
+
+A reviewer can pass with `ownerReview: { reason: "…" }` in its result. The field
+is validated, accepted only for a passed reviewer verdict, and stored on that
+attempt. At that head the gate shows the reason as a needs-owner condition.
+Prose never sets the flag. Reviewers use it for correct changes involving auth,
+permissions, data deletion/rewrites, public contracts, sensitive security code or
+weakened tests. A flagged pass still proceeds through publication normally. Bug
+workflows now review after testing, with changes-needed routed to the fixer and
+limit 2.
+
+Immediately before acting, the system fetches and evaluates fresh Git, store
+and GitHub facts; a stored green gate is never authorization. The head must
+still match, and `gh pr merge --squash --match-head-commit` enforces it at GitHub.
+`merge_requests` records the authorized head and gate before the call. Transient
+errors remain retryable with fresh facts. If GitHub reports that requested head
+merged after a crash or lost response, the factory reconciles the request,
+clears the error and records a factory merge. The timeline records the rule
+authorization, factory/owner actor and merge commit.
+
+`post_merge_checks` owns one job per repository/merge commit, including owner
+merges. Bounded background jobs inspect all reported GitHub checks on the exact
+merge commit, independently of PR-only requirements, without occupying executor
+slots or holding the scheduler loop. They allow three
+minutes for check registration. If PR CI existed but no default-branch checks
+appear, they wait up to an hour, then use the kit's deterministic check. A
+repository with no CI uses the merged kit's setup/check in the verification
+harness's disposable exact-commit checkout, without starting an app. Missing or
+invalid kits are recorded as unavailable. GitHub API errors remain retryable;
+kit infrastructure failures are persisted and bounded to three attempts, then
+recorded as unavailable with the reason. Setup/check failures open a bug. Failing checks open one `bug` ticket in the same repository with check
+excerpts, PR and merge commit, and add a linked note to the original timeline.
+Bug creation and job completion share a transaction, preventing duplicate bugs
+across retries or restarts. The job table has no general ticket-link semantics.
+
+`maintain-pr` counts consecutive base re-syncs. `maxBaseSyncs` defaults to 3;
+when the base moves again at the bound, the ticket parks for the owner before
+another merge or re-test. Only re-syncs queued from a base-moved PR wait count;
+initial publication and maintenance after feedback rebuilds do not. Starting
+builder or tester work breaks the streak. A merged PR or an owner retry/move
+also resets the count.
+
 ## Durable evidence (Slice 4, Wave 1)
 
 Recorded file artifacts are copied to `home/evidence/<ticket-id>/<unique-file>`
-before their rows are committed. Sources and destinations are contained in home
+before the ticket-locking transaction opens. Newly copied, unreferenced files are removed if preparation or the transaction fails; existing owned live logs are preserved. If a commit acknowledgement is lost, referenced evidence survives; uncertain copies are preserved when the database cannot confirm their state. Sources and destinations are contained in home
 with symlink resolution. Engine/harness logs are written directly to their owned
 stable files so live logs remain live. Proof records each file's actual base/head
 `observedCommit` separately from the attempt verdict; agents cannot provide this

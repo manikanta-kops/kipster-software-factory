@@ -1,4 +1,6 @@
 import { refreshMergeGate, freshFeedback } from './merge-gate.ts'
+import { settledCI } from '../domain/auto-merge.ts'
+import { baseSyncCount, beginBaseSync } from '../store/auto-merge.ts'
 import { actions } from '../domain/catalog.ts'
 import type { ArtifactInput } from '../domain/lifecycle.ts'
 import { run } from '../executors/process.ts'
@@ -28,6 +30,32 @@ export async function maintainPullRequest(
     throw new Error('Cannot sync a dirty ticket worktree')
   // The workspace preparation fetched origin. Pin the base so another ticket's fetch cannot change this merge.
   const base = await git(['rev-parse', `origin/${repository.defaultBranch}`])
+  const params = actions['maintain-pr'].params.parse(
+    context.step.kind === 'system' ? context.step.with : {},
+  )
+  const missingBase =
+    Number(await git(['rev-list', '--count', `HEAD..${base}`])) > 0
+  const detail = (await getTicketDetail(database, ticket.number))!
+  const previous = detail.attempts.findLast((a) => a.id < attempt.id)
+  const resync =
+    previous?.status === 'finished' &&
+    ['pull-request-checks', 'pull-request-merge'].includes(
+      previous.waitingFor ?? '',
+    ) &&
+    previous.next?.to === 'step' &&
+    previous.next.stepId === attempt.stepId
+  if (
+    missingBase &&
+    resync &&
+    !(await beginBaseSync(database, ticket.id, params.maxBaseSyncs))
+  ) {
+    await completeAttempt(database, attempt.id, {
+      outcome: 'needs-decision',
+      summary: `Stopped after ${params.maxBaseSyncs} consecutive base re-syncs. Review the branch and retry to reset the bound.`,
+      artifacts: [],
+    })
+    return
+  }
   try {
     await git([
       '-c',
@@ -80,7 +108,6 @@ export async function maintainPullRequest(
     return
   }
   const head = await git(['rev-parse', 'HEAD'])
-  const detail = (await getTicketDetail(database, ticket.number))!
   const testerSteps = new Set(
     context.workflow.steps
       .filter((s) => s.kind === 'agent' && s.role === 'tester')
@@ -179,7 +206,9 @@ export async function pollPullRequestChecks(
       { outcome, summary, artifacts },
       { headCommit: head },
     )
-  const { ciTimeoutMinutes } = actions['maintain-pr'].params.parse(step.with)
+  const { ciTimeoutMinutes, ciSettleMinutes } = actions[
+    'maintain-pr'
+  ].params.parse(step.with)
   if (
     Date.now() - Date.parse(attempt.waitingSince!) >=
     ciTimeoutMinutes * 60_000
@@ -202,11 +231,11 @@ export async function pollPullRequestChecks(
     )
     return
   }
-  const checks = await github.checks(
-    repository.slug,
-    ticket.pullRequestUrl,
-    head,
-    signal,
+  const checks = settledCI(
+    await github.checks(repository.slug, ticket.pullRequestUrl, head, signal),
+    attempt.waitingSince!,
+    ciSettleMinutes,
+    Date.now(),
   )
   await refreshMergeGate(options, context, signal, { checks })
   signal.throwIfAborted()
@@ -266,6 +295,21 @@ export async function pollPullRequestBase(
   })
   if (Number(missing) === 0) return false
   signal.throwIfAborted()
+  const maintenance = [...detail.attempts]
+    .reverse()
+    .map((a) => workflow.steps.find((s) => s.id === a.stepId))
+    .find((s) => s?.kind === 'system' && s.action === 'maintain-pr')!
+  const { maxBaseSyncs } = actions['maintain-pr'].params.parse(
+    maintenance.kind === 'system' ? maintenance.with : {},
+  )
+  if ((await baseSyncCount(database, ticket.id)) >= maxBaseSyncs) {
+    await completeAttempt(database, attempt.id, {
+      outcome: 'needs-decision',
+      summary: `Stopped after ${maxBaseSyncs} consecutive base re-syncs. Base origin/${branch} moved again; review and retry to reset the bound.`,
+      artifacts: [],
+    })
+    return true
+  }
   // Polling never merges or starts a writer outside the scheduler's execution limit.
   await requeuePullRequestMaintenance(
     database,

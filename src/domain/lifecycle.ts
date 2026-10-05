@@ -47,6 +47,7 @@ export interface StepResult {
   readonly outcome: string
   readonly summary: string
   readonly artifacts: readonly ArtifactInput[]
+  readonly ownerReview?: { readonly reason: string } | undefined
 }
 
 export const artifactInputSchema = z
@@ -71,7 +72,14 @@ export const stepResultSchema = z
     outcome: z.string().min(1),
     summary: z.string().trim().min(1),
     artifacts: z.array(artifactInputSchema).default([]),
+    ownerReview: z
+      .strictObject({ reason: z.string().trim().min(1).max(1000) })
+      .optional(),
     otherRepository: otherRepositoryRequestSchema.optional(),
+  })
+  .refine((result) => !result.ownerReview || result.outcome === 'passed', {
+    message: 'ownerReview requires a passing reviewer verdict',
+    path: ['ownerReview'],
   })
   .refine(
     (result) =>
@@ -198,10 +206,12 @@ export function parseStepResult(value: unknown): StepResult {
 export function afterResult(
   workflow: Workflow,
   history: readonly AttemptState[],
-  result: Pick<StepResult, 'outcome' | 'summary'>,
+  result: Pick<StepResult, 'outcome' | 'summary' | 'ownerReview'>,
 ): Transition {
   const attempt = openAttempt(history)
   const step = stepOf(workflow, attempt.stepId)
+  if (result.ownerReview && (step.kind !== 'agent' || step.role !== 'reviewer'))
+    throw new FactoryError('invalid', 'Only a reviewer can request ownerReview')
   if (step.kind === 'human') {
     throw new FactoryError(
       'conflict',

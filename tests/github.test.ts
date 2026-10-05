@@ -286,3 +286,160 @@ test('PR fact adapter compares the head against today’s base tip, including me
   assert.equal(pr.behind, 4)
   assert.equal(pr.mergeable, 'UNKNOWN')
 })
+
+test('factory merge is squash and atomically matches the decided head', async () => {
+  const head = 'a'.repeat(40)
+  const github = createGitHub(async (command, args) => {
+    assert.equal(command, 'gh')
+    assert.deepEqual(args, [
+      'pr',
+      'merge',
+      'https://github.com/acme/shop/pull/3',
+      '--repo',
+      'acme/shop',
+      '--squash',
+      '--match-head-commit',
+      head,
+    ])
+    return ''
+  })
+  await github.merge(
+    'acme/shop',
+    'https://github.com/acme/shop/pull/3',
+    head,
+    new AbortController().signal,
+  )
+})
+test('post-merge check queries the merge commit without a PR-head guard and paginates all reported checks', async () => {
+  const head = 'b'.repeat(40)
+  let page = 0
+  const github = createGitHub(async (_command, args) => {
+    if (args.includes('graphql')) {
+      page++
+      const query = args.find((arg) => arg.startsWith('query='))!
+      assert.equal(query.includes('$number'), false)
+      assert.equal(query.includes('pullRequest('), false)
+      assert.ok(args.includes(`sha=${head}`))
+      return JSON.stringify({
+        data: {
+          repository: {
+            object: {
+              statusCheckRollup: {
+                contexts: {
+                  nodes: [
+                    {
+                      kind: 'CheckRun',
+                      name: page === 1 ? 'Required CI' : 'Other CI',
+                      status: 'COMPLETED',
+                      conclusion: 'SUCCESS',
+                    },
+                  ],
+                  pageInfo: { hasNextPage: page === 1, endCursor: 'next' },
+                },
+              },
+            },
+          },
+        },
+      })
+    }
+    return JSON.stringify([
+      [
+        {
+          type: 'required_status_checks',
+          parameters: { required_status_checks: [{ context: 'Required CI' }] },
+        },
+      ],
+    ])
+  })
+  const checks = await github.commitChecks(
+    'acme/shop',
+    'next',
+    head,
+    new AbortController().signal,
+  )
+  assert.equal(page, 2)
+  assert.equal(checks.state, 'passed')
+  assert.equal(
+    checks.checks!.find((c) => c.name === 'Required CI')!.required,
+    false,
+  )
+})
+
+test('post-merge with no reported checks ignores PR-only required contexts', async () => {
+  let ruleRequests = 0
+  const github = createGitHub(async (_command, args) => {
+    if (!args.includes('graphql')) {
+      ruleRequests++
+      return JSON.stringify([
+        [
+          {
+            type: 'required_status_checks',
+            parameters: { required_status_checks: [{ context: 'PR-only CI' }] },
+          },
+        ],
+      ])
+    }
+    return JSON.stringify({
+      data: { repository: { object: { statusCheckRollup: null } } },
+    })
+  })
+  const checks = await github.commitChecks(
+    'acme/shop',
+    'next',
+    'b'.repeat(40),
+    new AbortController().signal,
+  )
+  assert.equal(checks.state, 'none')
+  assert.deepEqual(checks.checks, [])
+  assert.equal(ruleRequests, 0)
+})
+
+test('post-merge watches optional failures as well as required checks', async () => {
+  const github = createGitHub(async (_command, args) =>
+    args.includes('graphql')
+      ? JSON.stringify({
+          data: {
+            repository: {
+              object: {
+                statusCheckRollup: {
+                  contexts: {
+                    nodes: [
+                      {
+                        kind: 'CheckRun',
+                        name: 'Required',
+                        status: 'COMPLETED',
+                        conclusion: 'SUCCESS',
+                      },
+                      {
+                        kind: 'CheckRun',
+                        name: 'Regression',
+                        status: 'COMPLETED',
+                        conclusion: 'FAILURE',
+                        text: 'Broken after merge',
+                      },
+                    ],
+                    pageInfo: { hasNextPage: false },
+                  },
+                },
+              },
+            },
+          },
+        })
+      : JSON.stringify([
+          [
+            {
+              type: 'required_status_checks',
+              parameters: { required_status_checks: [{ context: 'Required' }] },
+            },
+          ],
+        ]),
+  )
+  const checks = await github.commitChecks(
+    'acme/shop',
+    'next',
+    'a'.repeat(40),
+    new AbortController().signal,
+  )
+  assert.equal(checks.state, 'failed')
+  assert.equal(checks.failures[0]!.name, 'Regression')
+})

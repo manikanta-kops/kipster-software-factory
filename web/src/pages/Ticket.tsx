@@ -306,11 +306,19 @@ function Timeline({ detail }: { detail: TicketResponse }) {
         item: attempt,
         time: attempt.finishedAt ?? attempt.startedAt ?? attempt.createdAt,
       })),
-    ...(showAll ? detail.events : []).map((event) => ({
-      type: 'event' as const,
-      item: event,
-      time: event.createdAt,
-    })),
+    ...detail.events
+      .filter(
+        (event) =>
+          showAll ||
+          event.kind === 'pull-request.merge-requested' ||
+          event.kind === 'pull-request.merged' ||
+          event.kind === 'post-merge.checked',
+      )
+      .map((event) => ({
+        type: 'event' as const,
+        item: event,
+        time: event.createdAt,
+      })),
   ].sort((a, b) => b.time.localeCompare(a.time) || b.item.id - a.item.id)
   return (
     <section aria-labelledby="timeline-heading">
@@ -365,6 +373,12 @@ function ActionPanel({ detail }: { detail: TicketResponse }) {
 }
 
 function StandardActionPanel({ detail }: { detail: TicketResponse }) {
+  const repositories = useQuery(repositoriesQuery)
+  const autoMerge = repositories.data?.repositories.find(
+    (repository) => repository.id === detail.ticket.repository.id,
+  )?.autoMerge
+  const factoryMerge =
+    autoMerge && detail.mergeGate && !detail.mergeGate.latest.needsOwner.length
   const { ticket, workflow, artifacts } = detail
   const waiting = ticket.waiting!
   const client = useQueryClient()
@@ -416,11 +430,17 @@ function StandardActionPanel({ detail }: { detail: TicketResponse }) {
   const plan = artifacts.filter((artifact) => artifact.kind === 'plan').at(-1)
   return (
     <section className="action-panel" aria-labelledby="action-heading">
-      <h2 id="action-heading">{attention(ticket)}</h2>
+      <h2 id="action-heading">
+        {factoryMerge && waiting.for === 'pull-request-merge'
+          ? 'Factory merge pending'
+          : attention(ticket)}
+      </h2>
       {waiting.summary && <p>{waiting.summary}</p>}
       {waiting.for === 'pull-request-merge' ? (
         <p>
-          Review the pull request and merge it when you’re ready.{' '}
+          {factoryMerge
+            ? 'The factory will merge after re-checking the current proof, review and checks.'
+            : 'Review the pull request and merge it when you’re ready.'}{' '}
           <PullRequest url={ticket.pullRequestUrl} />
         </p>
       ) : (
@@ -639,7 +659,25 @@ function EventEntry({ event }: { event: FactoryEvent }) {
         </span>
         <Time value={event.createdAt} />
       </div>
-      {summary && <p>{summary}</p>}
+      {summary && (
+        <p>
+          {event.kind === 'post-merge.checked' &&
+          typeof event.data['bugTicketNumber'] === 'number' ? (
+            <>
+              Post-merge breakage:{' '}
+              <a
+                className="text-link"
+                href={`#/tickets/${event.data['bugTicketNumber']}`}
+              >
+                bug ticket #{event.data['bugTicketNumber']}
+              </a>{' '}
+              opened for {String(event.data['mergeCommit'])}.
+            </>
+          ) : (
+            summary
+          )}
+        </p>
+      )}
       <details>
         <summary>Event details</summary>
         <pre>{JSON.stringify(event.data, null, 2)}</pre>

@@ -109,6 +109,12 @@ export async function otherRepositoriesFixture() {
     )
   }
   const github: GitHub = {
+    async merge() {
+      throw new Error('Fixture must never merge')
+    },
+    async commitChecks() {
+      return { state: 'none', failures: [] }
+    },
     async maintain() {
       throw new Error('Fixture must never publish')
     },
