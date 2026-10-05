@@ -49,7 +49,7 @@ export const engineConfig = z.object({
 export type EngineConfig = z.infer<typeof engineConfig>
 export type AgentConfig = z.infer<typeof agentConfig>
 
-const configFile = z.object({
+const configFile = z.strictObject({
   ...engineConfig.shape,
   databaseUrl: z.string().min(1),
   port: z.int().min(1).max(65_535).default(DEFAULT_PORT),

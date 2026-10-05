@@ -13,10 +13,20 @@ export const SECRET_SERVICE = 'kipster-software-factory'
 export type SecretBackend =
   'keychain' | 'secret-service' | 'credential-manager' | 'file'
 export interface Secrets {
-  get(name: string): Promise<string | null>
+  get(name: string, signal?: AbortSignal): Promise<string | null>
   set(name: string, value: string): Promise<SecretBackend>
   list(): Promise<{ name: string; backend: SecretBackend }[]>
   remove(name: string): Promise<void>
+}
+// Native credential prompts may ignore the signal; stop waiting even if the read continues.
+function untilAborted<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const abort = () => reject(signal.reason)
+    signal.addEventListener('abort', abort, { once: true })
+    promise
+      .then(resolve, reject)
+      .finally(() => signal.removeEventListener('abort', abort))
+  })
 }
 function validName(name: string) {
   if (!/^[a-z][a-z0-9._-]*$/.test(name))
@@ -73,14 +83,19 @@ export function secretStore(
       'OS credential store unavailable; using secrets.json (mode 0600) in the factory home.',
     )
   return {
-    async get(name) {
+    async get(name, signal) {
       validName(name)
       const values = await read()
       if (Object.hasOwn(values, name)) return values[name] ?? null
       if (backend === 'file') return null
       try {
-        return (await (await entry(name)).getPassword()) ?? null
+        signal?.throwIfAborted()
+        const reading = (await entry(name)).getPassword(signal)
+        return (
+          (await (signal ? untilAborted(reading, signal) : reading)) ?? null
+        )
       } catch {
+        signal?.throwIfAborted()
         fallback()
         return null
       }

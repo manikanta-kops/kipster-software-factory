@@ -95,24 +95,6 @@ export async function setup(options: {
       )
     }
   }
-  console.log(
-    'Optional: TypeSafe powers decision steps, such as judging whether a pull request is safe to auto-merge. Skip it and those decisions come to you.',
-  )
-  let key: string | undefined
-  if (options.typeSafeStdin) key = await pipedSecret()
-  else if (interactive && !options.skipTypeSafe)
-    key = await hiddenInput('TypeSafe key (hidden; Enter skips): ')
-  if (key?.trim()) {
-    await validateTypeSafeKey(key)
-    const backend = await secretStore(options.home, options.secretBackend).set(
-      'typesafe',
-      key,
-    )
-    console.log(`TypeSafe key validated and saved in ${backend}.`)
-  } else
-    console.log(
-      'TypeSafe skipped; decision steps will ask the owner unless a key is already stored.',
-    )
   await mkdir(options.home, { recursive: true, mode: 0o700 })
   const temporary = `${path}.${randomUUID()}`
   try {
@@ -125,5 +107,28 @@ export async function setup(options: {
   } finally {
     await unlink(temporary).catch(() => {})
   }
-  console.log('Configuration saved. Start the factory with kf serve.')
+  console.log('Configuration saved.')
+  console.log(
+    'Optional: TypeSafe powers decision steps, such as judging whether a pull request is safe to auto-merge. Skip it and those decisions come to you.',
+  )
+  let key: string | undefined
+  if (options.typeSafeStdin) key = await pipedSecret()
+  else if (interactive && !options.skipTypeSafe)
+    key = await hiddenInput('TypeSafe key (hidden; Enter skips): ')
+  if (key?.trim()) {
+    await validateTypeSafeKey(key).catch((error: Error) => {
+      throw new Error(
+        `${error.message}. The configuration is saved; store a key later with kf secret set typesafe.`,
+      )
+    })
+    const backend = await secretStore(options.home, options.secretBackend).set(
+      'typesafe',
+      key,
+    )
+    console.log(`TypeSafe key validated and saved in ${backend}.`)
+  } else
+    console.log(
+      'TypeSafe skipped; decision steps will ask the owner unless a key is already stored.',
+    )
+  console.log('Start the factory with kf serve.')
 }

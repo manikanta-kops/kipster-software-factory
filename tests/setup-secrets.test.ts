@@ -84,7 +84,7 @@ test('non-interactive setup migrates real PostgreSQL and preserves fields on re-
       port: 4701,
       concurrency: 4,
       agents: { default: { cli: 'claude' } },
-      futureSetting: { retain: true },
+      stepTimeoutMinutes: 90,
     }),
   )
   const toolPath = join(home, 'test-tools')
@@ -120,7 +120,7 @@ test('non-interactive setup migrates real PostgreSQL and preserves fields on re-
   const config = JSON.parse(await readFile(join(home, 'config.json'), 'utf8'))
   assert.equal(config.port, 4702)
   assert.equal(config.concurrency, 4)
-  assert.deepEqual(config.futureSetting, { retain: true })
+  assert.equal(config.stepTimeoutMinutes, 90)
   assert.equal(config.agents.default.cli, 'claude')
   assert.equal((await readConfig(home)).port, 4702)
   const second = await command(
@@ -156,5 +156,14 @@ test('non-interactive setup migrates real PostgreSQL and preserves fields on re-
   assert.deepEqual(
     JSON.parse(await readFile(join(home, 'config.json'), 'utf8')),
     config,
+  )
+})
+
+test('an aborted OS credential read throws instead of reporting a missing secret', async (t) => {
+  const home = await mkdtemp(join(tmpdir(), 'ksf-secret-abort-'))
+  t.after(() => rm(home, { recursive: true, force: true }))
+  await assert.rejects(
+    secretStore(home).get('ksf-test-absent', AbortSignal.abort()),
+    { name: 'AbortError' },
   )
 })

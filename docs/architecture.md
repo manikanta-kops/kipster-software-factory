@@ -482,6 +482,10 @@ use .env files or environment variables. A secret is read at the moment of use,
 passed explicitly only to its client, and never added to executor environments,
 prompts, events, artifacts, logs or API responses. SDK logging is disabled, and
 remote error bodies are replaced with safe status/category messages.
+Agents run unsandboxed under the same user, so the file fallback (like
+config.json) is readable by them; prefer the OS store. Engine key reads stop
+waiting after 10 seconds, so a blocked credential prompt sends the decision to
+the owner instead of holding an executor slot.
 
 ## Typed decisions (Slice 4)
 

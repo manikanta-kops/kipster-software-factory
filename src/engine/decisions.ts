@@ -54,10 +54,19 @@ export async function runDecision(
   let answer = null
   let band: 'acted' | 'confirm' | 'owner' | 'no-key' | 'error' = 'no-key'
   let reason: string | null = 'No TypeSafe key: run kf secret set typesafe'
+  let key: string | null = null
   try {
-    const key = await (
-      options.decisions?.secrets ?? secretStore(options.home)
-    ).get('typesafe')
+    // An OS credential prompt can block indefinitely; the owner decides instead.
+    key = await (options.decisions?.secrets ?? secretStore(options.home)).get(
+      'typesafe',
+      AbortSignal.any([signal, AbortSignal.timeout(10_000)]),
+    )
+  } catch {
+    signal.throwIfAborted()
+    band = 'error'
+    reason = 'Cannot read the typesafe secret from the credential store'
+  }
+  try {
     if (key) {
       answer = await askTypeSafe(
         key,
