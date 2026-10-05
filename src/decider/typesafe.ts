@@ -48,6 +48,8 @@ export async function validateTypeSafeKey(
   try {
     await client(apiKey, transport).models.list()
   } catch (error) {
+    // Remote errors can contain credentials; keep their cause out of diagnostics.
+    // eslint-disable-next-line preserve-caught-error
     throw new Error(typeSafeError(error))
   }
 }

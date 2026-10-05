@@ -29,15 +29,18 @@ export function secretStore(
   warn: (message: string) => void = console.warn,
 ): Secrets {
   const path = join(home, 'secrets.json')
-  const read = async (): Promise<Record<string, string>> => {
+  const read = async (): Promise<Record<string, string | null>> => {
     try {
-      return JSON.parse(await readFile(path, 'utf8')) as Record<string, string>
+      return JSON.parse(await readFile(path, 'utf8')) as Record<
+        string,
+        string | null
+      >
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === 'ENOENT') return {}
       throw new Error('Cannot read the file secret store.', { cause: error })
     }
   }
-  const write = async (values: Record<string, string>) => {
+  const write = async (values: Record<string, string | null>) => {
     await mkdir(home, { recursive: true, mode: 0o700 })
     const temporary = `${path}.${randomUUID()}`
     try {
@@ -66,7 +69,7 @@ export function secretStore(
     async get(name) {
       validName(name)
       const values = await read()
-      if (Object.hasOwn(values, name)) return values[name]!
+      if (Object.hasOwn(values, name)) return values[name] ?? null
       if (backend === 'file') return null
       try {
         return (await (await entry(name)).getPassword()) ?? null
@@ -111,10 +114,13 @@ export function secretStore(
           fallback()
         }
       }
-      for (const name of Object.keys(values)) names.set(name, 'file')
+      for (const [name, value] of Object.entries(values)) {
+        if (value === null) names.delete(name)
+        else names.set(name, 'file')
+      }
       return [...names]
         .sort(([a], [b]) => a.localeCompare(b))
-        .map(([name, backend]) => ({ name, backend }))
+        .map(([name, heldBy]) => ({ name, backend: heldBy }))
     },
     async remove(name) {
       validName(name)
@@ -123,9 +129,17 @@ export function secretStore(
         try {
           await (await entry(name)).deleteCredential()
         } catch {
-          throw new Error(
-            'Cannot remove the OS credential; unlock the credential store and retry.',
+          if (!Object.hasOwn(values, name))
+            throw new Error(
+              'Cannot remove the OS credential; unlock the credential store and retry.',
+            )
+          // A tombstone prevents an inaccessible older OS copy from resurfacing later.
+          values[name] = null
+          await write(values)
+          warn(
+            'File secret removed. OS credential store unavailable; any OS copy can only be deleted once the store is available. Re-run remove then.',
           )
+          return
         }
       }
       if (Object.hasOwn(values, name)) {

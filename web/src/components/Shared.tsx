@@ -37,6 +37,8 @@ export const askReasons: Record<TicketAskReason, string> = {
 export function attention(ticket: Ticket) {
   const waiting = ticket.waiting
   if (waiting?.for === 'pull-request-merge') return 'Merge the pull request'
+  if (waiting?.for === 'decision')
+    return `Choose an option at ${waiting.stepId}`
   if (waiting?.for === 'human')
     return waiting.stepId.includes('plan')
       ? 'Review and approve the plan'

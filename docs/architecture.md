@@ -482,3 +482,35 @@ use .env files or environment variables. A secret is read at the moment of use,
 passed explicitly only to its client, and never added to executor environments,
 prompts, events, artifacts, logs or API responses. SDK logging is disabled, and
 remote error bodies are replaced with safe status/category messages.
+
+## Typed decisions (Slice 4)
+
+The system `decide` action asks one SDK Choice question using its catalog `with`
+parameters. `engine/decision-facts.ts` is the single state builder: ticket title
+and body, fetched origin/default base and ticket HEAD, changed paths with added
+and removed line counts (null for binary files), latest tester/reproducer/reviewer
+verdicts with status and commit, and exact-head CI state when available. Agent
+summaries and artifacts are excluded. Unknown CI stays null. This is descriptive
+input, not a merge gate; Wave 2 must enforce hard rules before using decisions.
+
+`domain/decisions.ts` applies inclusive confidence bands (defaults act 0.9,
+confirm 0.6). High confidence routes the selected option; medium confidence parks
+as `decision` for one-click acceptance or another option; low confidence asks the
+owner, displaying probabilities as information only. Missing keys or exhausted
+SDK errors use the same owner controls, never fail a ticket. Cancellation and
+shutdown signals still stop execution normally. The pinned SDK always receives
+an explicit key, base URL, logging setting and `jev-1.13.0`; the log retains the
+model version actually returned. SDK retries default to two after the initial
+request, with a 10-second timeout per attempt and cancellable backoff.
+
+Migration 006 adds a decision log, one row per attempt. Its JSON input preserves
+question, options, thresholds, facts, model response, usage, band, safe fallback
+reason and elapsed request time; final choice, decider, override and timestamps
+are recorded separately. Logging and routing/parking share a ticket-locked
+transaction. An owner answer closes the original system attempt, uses the same
+pure option routing and limits as the model, and cannot answer a stale attempt.
+Parked decisions survive restart. Cancelled pending decisions stay in the log
+but do not appear as needing an answer. Ticket responses add `decisions`; the
+option endpoint is separate from the existing human approval endpoint. The
+Decisions page lists the latest 100 outcomes with all-time counts grouped by
+workflow version and step so different threshold configurations are not mixed.

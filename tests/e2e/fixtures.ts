@@ -5,17 +5,23 @@ interface FactoryFixture {
   url: string
   tickets: DemoTickets
   artifactTicket: number | null
+  decisionTicket: number | null
 }
 export const test = base.extend<{
   factory: FactoryFixture
   withArtifacts: boolean
+  withDecisions: boolean
   verdict: 'changes-needed' | 'unobserved' | 'default'
 }>({
+  withDecisions: [false, { option: true }],
   withArtifacts: [false, { option: true }],
   verdict: ['default', { option: true }],
-  factory: async ({ request, withArtifacts, verdict }, runTest) => {
+  factory: async (
+    { request, withArtifacts, verdict, withDecisions },
+    runTest,
+  ) => {
     const response = await request.post(
-      `/__test/fixtures?artifacts=${withArtifacts}&verdict=${verdict}`,
+      `/__test/fixtures?artifacts=${withArtifacts}&decisions=${withDecisions}&verdict=${verdict}`,
     )
     expect(response.ok()).toBeTruthy()
     const fixture = (await response.json()) as FactoryFixture

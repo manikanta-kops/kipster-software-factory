@@ -1,3 +1,4 @@
+import { DecisionsPage } from './pages/Decisions.tsx'
 import { useEffect, useRef } from 'react'
 import { Logo } from './components/Logo.tsx'
 import { NeedsYou } from './pages/NeedsYou.tsx'
@@ -52,6 +53,12 @@ export function App() {
           >
             Repositories
           </a>
+          <a
+            href="#/decisions"
+            aria-current={path === '/decisions' ? 'page' : undefined}
+          >
+            Decisions
+          </a>
           <a href="#/workflows" aria-current={onWorkflows ? 'page' : undefined}>
             Workflows
           </a>
@@ -77,6 +84,8 @@ export function App() {
           <TicketPage key={ticket[1]} number={Number(ticket[1])} />
         ) : path === '/repositories' ? (
           <Repositories />
+        ) : path === '/decisions' ? (
+          <DecisionsPage />
         ) : onWorkflows ? (
           <Workflows selected={path.split('/')[2]} />
         ) : (

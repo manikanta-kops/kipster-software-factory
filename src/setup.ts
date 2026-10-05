@@ -33,6 +33,8 @@ export async function setup(options: {
     >
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== 'ENOENT')
+      // Invalid JSON diagnostics can include private configuration content.
+      // eslint-disable-next-line preserve-caught-error
       throw new Error(
         'Cannot read existing config.json; it has been preserved.',
       )

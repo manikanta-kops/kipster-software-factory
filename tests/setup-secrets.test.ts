@@ -6,7 +6,8 @@ import { tmpdir } from 'node:os'
 import { fileURLToPath } from 'node:url'
 import { test } from 'node:test'
 import { readConfig } from '../src/config.ts'
-import { createTestStore } from './helpers/store.ts'
+import { createTestDatabase } from './helpers/database.ts'
+import { openDatabase } from '../src/store/database.ts'
 import { secretStore } from '../src/secrets/store.ts'
 const cli = fileURLToPath(new URL('../src/cli.ts', import.meta.url))
 function command(
@@ -61,8 +62,15 @@ test('CLI secret set, list, update and remove stay on the file backend and never
   assert.equal((await command(['secret', 'set', 'empty', ...args])).code, 1)
 })
 test('non-interactive setup migrates real PostgreSQL and preserves fields on re-run', async (t) => {
-  const store = await createTestStore()
-  t.after(() => store.close())
+  const testDatabase = await createTestDatabase()
+  const store = {
+    url: testDatabase.url,
+    database: openDatabase(testDatabase.url),
+  }
+  t.after(async () => {
+    await store.database.end()
+    await testDatabase.drop()
+  })
   const home = await mkdtemp(join(tmpdir(), 'ksf-setup-'))
   t.after(() => rm(home, { recursive: true, force: true }))
   await writeFile(
@@ -89,6 +97,10 @@ test('non-interactive setup migrates real PostgreSQL and preserves fields on re-
     'file',
   ])
   assert.equal(first.code, 0, first.output)
+  const migrations = await store.database.query(
+    'SELECT version FROM schema_migrations',
+  )
+  assert.ok(migrations.rows.length >= 6)
   const config = JSON.parse(await readFile(join(home, 'config.json'), 'utf8'))
   assert.equal(config.port, 4702)
   assert.equal(config.concurrency, 4)
