@@ -758,9 +758,21 @@ for (const path of [
     // Avoid a same-file kit merge conflict; bring the trusted baseline into this branch first.
     if (path === '.kipster/kit.yml') {
       await run('git', ['fetch', 'origin'], { cwd: f.cwd })
-      await run('git', ['merge', '-s', 'ours', '--no-edit', 'origin/main'], {
-        cwd: f.cwd,
-      })
+      await run(
+        'git',
+        [
+          '-c',
+          'user.name=Fixture',
+          '-c',
+          'user.email=fixture@example.test',
+          'merge',
+          '-s',
+          'ours',
+          '--no-edit',
+          'origin/main',
+        ],
+        { cwd: f.cwd },
+      )
     }
     await f.publish()
     const [waiting] = await listWaitingForMerge(
