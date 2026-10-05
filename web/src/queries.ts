@@ -9,6 +9,10 @@ import { api } from './api.ts'
 export const queryClient = new QueryClient({
   defaultOptions: { queries: { staleTime: 30_000, retry: 1 } },
 })
+export const decisionsQuery = queryOptions({
+  queryKey: ['decisions'],
+  queryFn: ({ signal }) => api.decisions(signal),
+})
 export const ticketsQuery = queryOptions({
   queryKey: ['tickets'],
   queryFn: ({ signal }) => api.tickets(signal),
@@ -37,6 +41,7 @@ export function useLiveEvents() {
       api.events(
         (event) => {
           if (event.ticketNumber !== null) {
+            void client.invalidateQueries({ queryKey: ['decisions'] })
             void client.invalidateQueries({ queryKey: ['tickets'] })
             void client.invalidateQueries({
               queryKey: ['ticket', event.ticketNumber],

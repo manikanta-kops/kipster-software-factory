@@ -1,5 +1,7 @@
 import { retainArtifact } from '../artifacts/storage.ts'
 import { artifactHome } from './database.ts'
+import type { DecisionInput } from '../domain/decisions.ts'
+import { insertDecision, finishDecision } from './decisions.ts'
 import { isAbsolute } from 'node:path'
 import { detectMediaType } from '../artifacts/media-type.ts'
 // Tickets and their attempts and artifacts. Every write locks the ticket row, asks the
@@ -8,6 +10,8 @@ import { FactoryError } from '../domain/errors.ts'
 import {
   afterCancel,
   afterDecision,
+  afterTypedDecision,
+  waitForDecision,
   afterFailure,
   afterInterruption,
   afterPullRequestBaseAdvance,
@@ -375,6 +379,103 @@ export async function completeAttempt(
       transition,
       { summary: parsed.summary, ...completion },
       events,
+    )
+  })
+}
+
+/** Logs the model outcome and applies routing or parks for an owner in one transaction. */
+export async function recordDecisionOutcome(
+  database: Database,
+  attemptId: number,
+  input: DecisionInput,
+): Promise<void> {
+  await transaction(database, async (connection) => {
+    const locked = await lockByAttempt(connection, attemptId)
+    const attempt = openAttemptOf(locked, attemptId)
+    waitForDecision(locked.workflow, locked.attempts)
+    await insertDecision(connection, locked.id, attemptId, input)
+    const events: NewEvent[] = []
+    if (input.band === 'acted') {
+      const summary = `Model chose ${input.answer!.choice} (${input.answer!.confidence} confidence)`
+      const transition = afterResult(locked.workflow, locked.attempts, {
+        outcome: input.answer!.choice,
+        summary,
+      })
+      events.push({
+        ticketId: locked.id,
+        kind: 'decision.made',
+        data: {
+          attemptId,
+          stepId: attempt.stepId,
+          choice: input.answer!.choice,
+          decidedBy: 'model',
+        },
+      })
+      await apply(
+        connection,
+        locked,
+        transition,
+        { summary, headCommit: input.facts.headCommit },
+        events,
+      )
+    } else {
+      await connection.query(
+        `UPDATE attempts SET status = 'waiting', waiting_for = 'decision', waiting_since = now(), summary = $2, head_commit = $3 WHERE id = $1`,
+        [
+          attemptId,
+          input.reason ??
+            (input.band === 'confirm'
+              ? 'Confirm the proposed option or choose another.'
+              : 'Choose an option; the model probabilities are information only.'),
+          input.facts.headCommit,
+        ],
+      )
+      events.push({
+        ticketId: locked.id,
+        kind: 'attempt.waiting',
+        data: { attemptId, stepId: attempt.stepId, waitingFor: 'decision' },
+      })
+      await setTicketStatus(
+        connection,
+        locked,
+        'needs-you',
+        attempt.stepId,
+        events,
+      )
+      await recordEvents(connection, events)
+    }
+  })
+}
+export async function decideOption(
+  database: Database,
+  input: { ticketNumber: number; attemptId: number; option: string },
+): Promise<Moved> {
+  return transaction(database, async (connection) => {
+    const locked = await lockTicket(connection, { number: input.ticketNumber })
+    const attempt = openAttemptOf(locked, input.attemptId)
+    const transition = afterTypedDecision(
+      locked.workflow,
+      locked.attempts,
+      input.option,
+    )
+    await finishDecision(connection, input.attemptId, input.option)
+    return apply(
+      connection,
+      locked,
+      transition,
+      { summary: `Owner chose ${input.option}`, executor: 'human' },
+      [
+        {
+          ticketId: locked.id,
+          kind: 'decision.made',
+          data: {
+            attemptId: input.attemptId,
+            stepId: attempt.stepId,
+            choice: input.option,
+            decidedBy: 'owner',
+          },
+        },
+      ],
     )
   })
 }

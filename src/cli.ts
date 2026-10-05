@@ -1,3 +1,6 @@
+import { setup, parsePort } from './setup.ts'
+import { hiddenInput, pipedSecret } from './secrets/input.ts'
+import { secretStore } from './secrets/store.ts'
 import { parseArgs } from 'node:util'
 import { DEFAULT_PORT, defaultHome, readConfig } from './config.ts'
 import { BUILT_IN_WORKFLOWS, loadLibrary } from './library/library.ts'
@@ -8,6 +11,8 @@ import { migrate } from './store/migrate.ts'
 const usage = `Usage: kf <command> [options]
 
 Commands:
+  setup     Guided installation; re-run to update current settings
+  secret    set <name>, list, or remove <name> (values stay in the secret store)
   serve     Migrate the database, load workflows and serve the factory
   migrate   Apply pending database migrations
   check     Validate a directory of workflow files (default: built-in workflows)
@@ -17,6 +22,10 @@ Options:
   --database-url <url>  Use this database instead of the one in config.json
   --port <number>       Port to serve on (default: ${DEFAULT_PORT})
   --no-scheduler       Serve demo data or UI work without executing tickets
+  --non-interactive    Setup without prompts (current values are defaults)
+  --skip-typesafe      Skip the optional TypeSafe setup
+  --typesafe-stdin     Validate and save a TypeSafe key read from stdin
+  --secret-backend file  Use the file backend explicitly (for tests/headless installs)
   --workflows <dir>     Workflow directory (default: built-in workflows)`
 
 async function main(argv: string[]): Promise<number> {
@@ -29,6 +38,10 @@ async function main(argv: string[]): Promise<number> {
       port: { type: 'string' },
       workflows: { type: 'string' },
       'no-scheduler': { type: 'boolean' },
+      'non-interactive': { type: 'boolean' },
+      'skip-typesafe': { type: 'boolean' },
+      'typesafe-stdin': { type: 'boolean' },
+      'secret-backend': { type: 'string' },
       help: { type: 'boolean', short: 'h' },
     },
   })
@@ -51,6 +64,48 @@ async function main(argv: string[]): Promise<number> {
   }
 
   const home = values.home ?? defaultHome()
+  if (
+    values['secret-backend'] !== undefined &&
+    values['secret-backend'] !== 'file'
+  )
+    throw new Error(
+      '--secret-backend accepts file only; the default uses the OS credential store.',
+    )
+  const secretBackend =
+    values['secret-backend'] === 'file' ? ('file' as const) : undefined
+  if (command === 'setup') {
+    await setup({
+      home,
+      databaseUrl: values['database-url'],
+      port: values.port,
+      nonInteractive: values['non-interactive'],
+      skipTypeSafe: values['skip-typesafe'],
+      typeSafeStdin: values['typesafe-stdin'],
+      secretBackend,
+    })
+    return 0
+  }
+  if (command === 'secret') {
+    const [, action, name] = positionals
+    const secrets = secretStore(home, secretBackend)
+    if (action === 'list' && !name) {
+      const entries = await secrets.list()
+      console.log(
+        entries.length
+          ? entries.map((item) => `${item.name}\t${item.backend}`).join('\n')
+          : 'No secrets stored.',
+      )
+    } else if (action === 'set' && name && positionals.length === 3) {
+      const value = process.stdin.isTTY
+        ? await hiddenInput(`Value for ${name} (hidden): `)
+        : await pipedSecret()
+      console.log(`${name}: saved in ${await secrets.set(name, value)}.`)
+    } else if (action === 'remove' && name && positionals.length === 3) {
+      await secrets.remove(name)
+      console.log(`${name}: removed.`)
+    } else throw new Error('Usage: kf secret set <name> | list | remove <name>')
+    return 0
+  }
   const settings = async () => {
     const port = values.port === undefined ? undefined : parsePort(values.port)
     const databaseUrl = values['database-url']
@@ -104,14 +159,6 @@ async function main(argv: string[]): Promise<number> {
 
   console.error(`Unknown command "${command}".\n\n${usage}`)
   return 2
-}
-
-function parsePort(value: string): number {
-  const port = Number(value)
-  if (!Number.isInteger(port) || port < 1 || port > 65_535) {
-    throw new Error(`--port must be a number from 1 to 65535, not "${value}"`)
-  }
-  return port
 }
 
 try {

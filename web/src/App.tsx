@@ -1,3 +1,4 @@
+import { DecisionsPage } from './pages/Decisions.tsx'
 import { useEffect, useRef, useState } from 'react'
 import { Logo } from './components/Logo.tsx'
 import { NeedsYou } from './pages/NeedsYou.tsx'
@@ -61,6 +62,12 @@ export function App() {
             >
               Workflows
             </a>
+            <a
+              href="#/decisions"
+              aria-current={path === '/decisions' ? 'page' : undefined}
+            >
+              Decisions
+            </a>
           </nav>
           <output
             className={`status ${live}`}
@@ -91,6 +98,8 @@ export function App() {
           />
         ) : path === '/repositories' ? (
           <Repositories />
+        ) : path === '/decisions' ? (
+          <DecisionsPage />
         ) : onWorkflows ? (
           <Workflows selected={path.split('/')[2]} />
         ) : (

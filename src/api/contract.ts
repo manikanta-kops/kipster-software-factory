@@ -1,5 +1,7 @@
 import type { GateSnapshot } from '../domain/merge-gate.ts'
 import type { ScenarioEvidence } from '../domain/evidence.ts'
+import type { DecisionRecord, DecisionStepCounts } from '../domain/decisions.ts'
+export type { DecisionRecord } from '../domain/decisions.ts'
 // Response shapes shared by the server and the web app. Change by addition only.
 import type {
   Artifact,
@@ -124,6 +126,7 @@ export interface TicketWorkflowSummary {
 export interface TicketResponse {
   readonly mergeGate?: GateSnapshot | null
   readonly evidenceIndex?: readonly ScenarioEvidence[]
+  readonly decisions?: readonly DecisionRecord[]
   readonly ticket: Ticket
   readonly workflow: TicketWorkflowSummary
   /** Oldest first; the last one is open unless the ticket has ended. */
@@ -171,4 +174,15 @@ export type EventMessage = FactoryEvent
 
 export interface EventStreamReady {
   readonly lastEventId: number
+}
+
+// GET /api/decisions: recent outcomes and all-time counts for each saved workflow step.
+export interface DecisionsResponse {
+  readonly decisions: readonly DecisionRecord[]
+  readonly steps: readonly DecisionStepCounts[]
+}
+// POST /api/tickets/:number/option
+export interface OptionRequest {
+  readonly attemptId: number
+  readonly option: string
 }

@@ -3,6 +3,7 @@ import {
   newEvidenceFile,
   cleanVerificationEvidence,
 } from '../artifacts/storage.ts'
+import { runDecision, type DecisionDependencies } from './decisions.ts'
 import { maintainPullRequest } from './pull-requests.ts'
 import { runProofAttempt } from './proof.ts'
 import { loadKit } from '../kit/kit.ts'
@@ -36,6 +37,7 @@ export interface RunnerOptions {
   config: EngineConfig
   workspaces: Workspaces
   github: GitHub
+  decisions?: DecisionDependencies
   execute: AgentExecutor
 }
 export async function runAttempt(
@@ -83,6 +85,10 @@ async function executeAttempt(
   const git = (args: string[]) => run('git', args, { cwd, signal })
   const base = `origin/${repository.defaultBranch}`
   const diff = await git(['diff', '--stat', `${base}...HEAD`])
+  if (step.kind === 'system' && step.action === 'decide') {
+    await runDecision(options, { ...context, repository }, detail, cwd, signal)
+    return
+  }
   if (step.kind === 'system' && step.action === 'verify-kit') {
     const headCommit = await git(['rev-parse', 'HEAD'])
     let instance: Awaited<ReturnType<typeof startVerification>> | undefined

@@ -21,7 +21,11 @@ export function databaseUrl(database: Database): string {
 }
 
 export function openDatabase(connectionString: string): Database {
-  const pool = new Pool({ connectionString, max: 10 })
+  const pool = new Pool({
+    connectionString,
+    max: 10,
+    connectionTimeoutMillis: 10_000,
+  })
   urls.set(pool, connectionString)
   return pool
 }

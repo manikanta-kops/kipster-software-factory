@@ -80,11 +80,28 @@ database, build the web app and serve:
 
 ```sh
 npm run build
-npm run kf -- serve --database-url postgresql://localhost/factory
+npm run kf -- setup
+npm start
 ```
 
-Or put `{"databaseUrl": "…", "port": 4600}` in `~/.kipster-factory/config.json`
-and run `npm start`. Browsers on other origins may call the API only if they are
+`kf setup` asks for the database URL and port, tests the connection, applies
+migrations, and checks Git, GitHub authentication, Codex and Claude. Re-run it to
+update settings; other configuration fields are retained. TypeSafe is optional:
+its key powers decision steps (for example judging whether a PR is safe to
+auto-merge). Skip it and those decisions come to you.
+
+For scripts, use `npm run kf -- setup --non-interactive --database-url <url>
+--port 4600 --skip-typesafe`. Use `--home <directory>` on setup and serve for a
+separate factory. Add `--typesafe-stdin` to validate a key supplied through stdin.
+
+Manage secrets with `npm run kf -- secret set <name>`, `secret list`, and
+`secret remove <name>`. Set reads hidden terminal input or piped stdin; list
+shows names and backends only. Secrets use the OS credential store, with a
+mode-0600 `secrets.json` fallback if it is unavailable. No environment variables
+or .env files configure integrations. `--secret-backend file` explicitly chooses
+the file store for headless installations and tests. Only macOS Keychain has been
+tested; Linux Secret Service is supported but unverified, and Windows validation
+is deferred. Browsers on other origins may call the API only if they are
 listed in `allowedOrigins` (default: the Vite dev server and the Tauri shell).
 
 ## Develop

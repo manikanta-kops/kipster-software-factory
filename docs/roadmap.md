@@ -96,6 +96,9 @@ factory's local evidence workflow continues to work without storage hosting.
 
 ## Slice 5: Larger work
 
+Optional hosted evidence uploads through `publish-evidence` with a configured
+storage target; local evidence remains the default.
+
 `split` and `wait-children` run phases as child tickets. `needs-other-repo`
 opens a linked ticket in another repository. Read-only dependency repositories.
 

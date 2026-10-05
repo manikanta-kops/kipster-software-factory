@@ -1867,6 +1867,7 @@ main > section:has(.repository-form) {
     order: 3;
     width: 100%;
     margin-left: -10px;
+    flex-wrap: wrap;
   }
   main {
     padding: 0 16px 72px;
@@ -1939,4 +1940,32 @@ main > section:has(.repository-form) {
   margin: 0;
   border: 0;
   color: var(--ink);
+}
+
+.decision-options {
+  display: grid;
+  gap: 1rem;
+  margin-top: 1rem;
+}
+.decision-details pre {
+  overflow: auto;
+  max-height: 24rem;
+}
+.decision-table {
+  overflow-x: auto;
+}
+.decision-table table {
+  width: 100%;
+  border-collapse: collapse;
+}
+.decision-table th,
+.decision-table td {
+  text-align: left;
+  padding: 0.75rem;
+  border-bottom: 1px solid var(--hair);
+}
+
+.decision-details p {
+  margin-bottom: 0.5rem;
+  overflow-wrap: anywhere;
 }

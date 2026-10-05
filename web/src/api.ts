@@ -2,6 +2,8 @@ import type {
   CreateRepositoryRequest,
   CreateTicketRequest,
   DecisionRequest,
+  DecisionsResponse,
+  OptionRequest,
   ErrorResponse,
   EventMessage,
   RepositoriesResponse,
@@ -54,6 +56,10 @@ async function post<T>(path: string, body: unknown): Promise<T> {
 }
 
 export const api = {
+  decisions: (signal: AbortSignal) =>
+    get<DecisionsResponse>('/decisions', signal),
+  decideOption: (number: number, body: OptionRequest) =>
+    post<TicketResponse>(`/tickets/${number}/option`, body),
   workflows: (signal: AbortSignal) =>
     get<WorkflowsResponse>('/workflows', signal),
   repositories: (signal: AbortSignal) =>

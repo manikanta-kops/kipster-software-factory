@@ -68,7 +68,7 @@ export async function readConfig(home: string): Promise<FactoryConfig> {
     text = await readFile(path, 'utf8')
   } catch {
     throw new Error(
-      `No configuration at ${path}. Create it with {"databaseUrl": "postgresql://…"}.`,
+      `No configuration at ${path}. Run kf setup --home <directory> to configure the factory.`,
     )
   }
   const parsed = configFile.safeParse(JSON.parse(text))
