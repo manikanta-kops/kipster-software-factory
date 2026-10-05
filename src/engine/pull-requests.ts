@@ -13,9 +13,30 @@ import {
   setPullRequestUrl,
   waitForPullRequestMerge,
   type AttemptContext,
+  type TicketDetail,
 } from '../store/tickets.ts'
 import type { RunnerOptions } from './runner.ts'
 import { writePullRequest } from './pr-writer.ts'
+
+function hasStaleReview(
+  detail: TicketDetail,
+  context: AttemptContext,
+  head: string,
+) {
+  const reviewer = detail.attempts.findLast(
+    (a) =>
+      a.waitingFor === null &&
+      context.workflow.steps.some(
+        (s) => s.id === a.stepId && s.kind === 'agent' && s.role === 'reviewer',
+      ),
+  )
+  return (
+    !!reviewer &&
+    (reviewer.status !== 'finished' ||
+      reviewer.outcome !== 'passed' ||
+      reviewer.headCommit !== head)
+  )
+}
 
 export async function maintainPullRequest(
   options: RunnerOptions,
@@ -122,18 +143,22 @@ export async function maintainPullRequest(
     head,
   )
   // Also catches a restart after the merge was committed but before the result was saved.
-  if (hasVerdict && !verdictCurrent) {
+  if (
+    (hasVerdict && !verdictCurrent) ||
+    hasStaleReview(detail, context, head)
+  ) {
+    const role = hasVerdict && !verdictCurrent ? 'tester' : 'reviewer'
     await completeAttempt(
       database,
       attempt.id,
       {
         outcome: 'base-moved',
-        summary: `The latest tester verdict is not current for ${head}; re-test before publishing.`,
+        summary: `The latest ${role} verdict is not current for ${head}; ${role === 'tester' ? 're-test' : 'review again'} before publishing.`,
         artifacts: [
           {
             kind: 'finding',
             title: 'Verification needs a new verdict',
-            content: `The branch includes origin/${repository.defaultBranch} at ${base}. Re-test ${head}; the previous verdict does not cover this commit.`,
+            content: `The branch includes origin/${repository.defaultBranch} at ${base}. Refresh the ${role} verdict at ${head}; the previous verdict does not cover this commit.`,
           },
         ],
       },
@@ -293,7 +318,9 @@ export async function pollPullRequestBase(
     cwd,
     signal,
   })
-  if (Number(missing) === 0) return false
+  const missingBase = Number(missing) > 0
+  const head = await run('git', ['rev-parse', 'HEAD'], { cwd, signal })
+  if (!missingBase && !hasStaleReview(detail, context, head)) return false
   signal.throwIfAborted()
   const maintenance = [...detail.attempts]
     .reverse()
@@ -302,7 +329,10 @@ export async function pollPullRequestBase(
   const { maxBaseSyncs } = actions['maintain-pr'].params.parse(
     maintenance.kind === 'system' ? maintenance.with : {},
   )
-  if ((await baseSyncCount(database, ticket.id)) >= maxBaseSyncs) {
+  if (
+    missingBase &&
+    (await baseSyncCount(database, ticket.id)) >= maxBaseSyncs
+  ) {
     await completeAttempt(database, attempt.id, {
       outcome: 'needs-decision',
       summary: `Stopped after ${maxBaseSyncs} consecutive base re-syncs. Base origin/${branch} moved again; review and retry to reset the bound.`,
@@ -314,7 +344,9 @@ export async function pollPullRequestBase(
   await requeuePullRequestMaintenance(
     database,
     attempt.id,
-    `Base origin/${branch} advanced to ${base}; queued maintain-pr to synchronize and refresh verification before merge.`,
+    missingBase
+      ? `Base origin/${branch} advanced to ${base}; queued maintain-pr to synchronize and refresh verification before merge.`
+      : `The latest reviewer verdict does not cover ${head}; queued maintain-pr to refresh review before merge.`,
   )
   return true
 }

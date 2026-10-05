@@ -156,9 +156,10 @@ Action notes:
 
 - `maintain-pr` is the only way a pull request gets published. Put it before
   `merge`.
-- After `maintain-pr` merges the base, a tester verdict must match the new
-  commit. Route `base-moved` back to the tester step. Without a tester, it is
-  not reported.
+- After `maintain-pr` merges the base, prior tester and reviewer verdicts must
+  match the new commit. Route `base-moved` back to the tester step, followed by
+  review. Without a tester, route it to review. With neither prior verdict,
+  it is not reported. A saved workflow without this route asks the owner.
 - `merge` merges by itself only when the owner turned on auto-merge for the
   repository, the latest `tester` and `reviewer` both passed at the exact pull
   request head, and no rule needs the owner. Migrations, kit and CI changes
@@ -222,8 +223,8 @@ These come from failures seen in practice. Follow them unless the request
 explicitly says otherwise, and then say which rule you broke and why.
 
 - **Prove, do not claim.** A workflow that changes product code should have a
-  `tester` before `maintain-pr`. Without one, the merge gate never reports the
-  pull request ready.
+  `tester` before `maintain-pr`. Without one, a ready merge gate still requires
+  the owner with the reason `Untested workflow`.
 - **Nothing judges its own work.** Testing and review are separate steps from
   building.
 - **Reproduce before fixing.** Bug workflows start with a `reproducer`.
@@ -343,7 +344,8 @@ steps:
 ```
 
 `quick-change` is `feature` without the tester, for repositories with no
-verify kit. `onboard-repo` is write-kit (onboarder), verify-kit (limit 3,
+verify kit. Its `maintain-pr` routes `base-moved` back to `review`.
+`onboard-repo` is write-kit (onboarder), verify-kit (limit 3,
 `failed` back to write-kit), approve-kit, maintain-pr, merge.
 
 An example that branches with `decide`: the planner writes a plan, then the

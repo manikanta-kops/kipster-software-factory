@@ -295,10 +295,11 @@ parsed for routing. Logs survive failures and cancellation.
 the action pins and merges `origin/<defaultBranch>` into the ticket branch.
 It never rebases or force-pushes. A conflict is aborted and reports `conflict`
 with a finding listing the files for the builder. After a clean merge, a prior
-tester execution must be a passing verdict for the exact resulting HEAD;
-otherwise `base-moved` routes back to testing. This check also catches a restart
+tester or reviewer execution must be a passing verdict for the exact resulting HEAD;
+otherwise `base-moved` routes back to testing, or review when there is no tester.
+This check also catches a restart
 after the merge committed but before its outcome was recorded. Workflows without
-a tester can still publish. A branch with no commits ahead asks the owner.
+a tester can still publish after refreshing any prior review. A branch with no commits ahead asks the owner.
 
 Before publishing a new head, `engine/pr-writer.ts` runs the writer in a fresh
 session using the writer's configured CLI and kit instructions. Its one inline

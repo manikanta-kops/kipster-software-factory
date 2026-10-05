@@ -5,6 +5,7 @@ import type {
   TicketResponse,
   WorkflowSummary,
 } from '../../../src/api/contract.ts'
+import { mergePolicy } from '../../../src/domain/auto-merge.ts'
 import { api } from '../api.ts'
 import { attention, ErrorMessage, PullRequest } from '../components/Shared.tsx'
 import {
@@ -46,17 +47,40 @@ export function NeedsYou({
   const repositories = useQuery(repositoriesQuery)
   const now = useNow()
   const all = query.data?.tickets ?? []
-  const needsYou = all.filter(
+  const waiting = all.filter(
     (ticket) => ticket.status === 'needs-you' && matches(filter, ticket),
   )
   const details = useQueries({
-    queries: needsYou.map((ticket) => ticketQuery(ticket.number)),
+    queries: waiting.map((ticket) => ticketQuery(ticket.number)),
   })
+  const detailByNumber = new Map(
+    waiting.map((ticket, index) => [ticket.number, details[index]?.data]),
+  )
+  const factoryMerges = new Set(
+    waiting
+      .filter((ticket) => {
+        const gate = detailByNumber.get(ticket.number)?.mergeGate?.latest
+        const enabled = repositories.data?.repositories.find(
+          (repository) => repository.id === ticket.repository.id,
+        )?.autoMerge
+        return (
+          ticket.waiting?.for === 'pull-request-merge' &&
+          !!gate &&
+          mergePolicy(!!enabled, gate) === 'merge'
+        )
+      })
+      .map((ticket) => ticket.number),
+  )
+  const needsYou = waiting.filter((ticket) => !factoryMerges.has(ticket.number))
   if (query.isPending) return <p className="muted">Loading tickets…</p>
   if (query.isError) return <ErrorMessage error={query.error} />
   const visible = all.filter((ticket) => matches(filter, ticket))
   const moving = visible
-    .filter((ticket) => ['queued', 'running'].includes(ticket.status))
+    .filter(
+      (ticket) =>
+        ['queued', 'running'].includes(ticket.status) ||
+        factoryMerges.has(ticket.number),
+    )
     .sort(
       (a, b) => Number(a.status === 'queued') - Number(b.status === 'queued'),
     )
@@ -101,11 +125,11 @@ export function NeedsYou({
               <i aria-hidden="true" />
               Needs you
             </h2>
-            {needsYou.map((ticket, index) => (
+            {needsYou.map((ticket) => (
               <DecisionCard
                 key={ticket.id}
                 ticket={ticket}
-                detail={details[index]?.data}
+                detail={detailByNumber.get(ticket.number)}
                 now={now}
               />
             ))}
@@ -126,6 +150,7 @@ export function NeedsYou({
               <MovingRow
                 key={ticket.id}
                 ticket={ticket}
+                factoryMerge={factoryMerges.has(ticket.number)}
                 workflow={workflows.data?.workflows.find(
                   (item) => item.name === ticket.workflow.name,
                 )}
@@ -253,10 +278,12 @@ function DecisionCard({
 
 function MovingRow({
   ticket,
+  factoryMerge,
   workflow,
   now,
 }: {
   ticket: Ticket
+  factoryMerge: boolean
   workflow: WorkflowSummary | undefined
   now: number
 }) {
@@ -276,7 +303,9 @@ function MovingRow({
           <span className="row-title">{ticket.title}</span>
           <span className="row-sub">
             <RepositoryTag repository={ticket.repository} />
-            <span className="row-doing">{doing(ticket, step)}</span>
+            <span className="row-doing">
+              {factoryMerge ? 'Factory merge pending' : doing(ticket, step)}
+            </span>
             <span className="muted">{since(ticket.updatedAt, now)}</span>
           </span>
         </span>

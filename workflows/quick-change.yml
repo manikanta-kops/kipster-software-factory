@@ -27,6 +27,7 @@ steps:
     routes:
       conflict: build
       ci-failed: build
+      base-moved: review
 
   - id: merge
     kind: system

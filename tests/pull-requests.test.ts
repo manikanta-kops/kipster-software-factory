@@ -26,6 +26,7 @@ import {
   resolveAsk,
 } from '../src/store/tickets.ts'
 import { isLatestTesterVerdictCurrent } from '../src/store/verdicts.ts'
+import { getMergeGate as getSavedMergeGate } from '../src/store/merge-gates.ts'
 import { createTestStore } from './helpers/store.ts'
 import { Workspaces } from '../src/workspace/workspaces.ts'
 import { runAttempt, type RunnerOptions } from '../src/engine/runner.ts'
@@ -42,7 +43,12 @@ function entry(workflow: Workflow) {
   const source = JSON.stringify(workflow)
   return { workflow, source, version: workflowVersion(source) }
 }
-async function fixture(t: TestContext, tester = false, timeout = 60) {
+async function fixture(
+  t: TestContext,
+  tester = false,
+  timeout = 60,
+  reviewer = false,
+) {
   const root = await mkdtemp(join(tmpdir(), 'factory-pr-'))
   const home = join(root, 'home')
   const source = join(root, 'source')
@@ -95,6 +101,17 @@ async function fixture(t: TestContext, tester = false, timeout = 60) {
               },
             ]
           : []),
+        ...(reviewer
+          ? [
+              {
+                id: 'review',
+                kind: 'agent' as const,
+                role: 'reviewer' as const,
+                needs: [],
+                routes: {},
+              },
+            ]
+          : []),
         {
           id: 'publish',
           kind: 'system',
@@ -104,7 +121,7 @@ async function fixture(t: TestContext, tester = false, timeout = 60) {
             ciTimeoutMinutes: timeout,
             ciSettleMinutes: 0,
           },
-          routes: {},
+          routes: reviewer ? { 'base-moved': tester ? 'test' : 'review' } : {},
         },
         {
           id: 'merge',
@@ -191,6 +208,15 @@ async function fixture(t: TestContext, tester = false, timeout = 60) {
       store.database,
       context.attempt.id,
       { outcome: 'passed', summary: 'Exact commit verified', artifacts: [] },
+      { headCommit: head },
+    )
+  }
+  if (reviewer) {
+    const context = await next()
+    await completeAttempt(
+      store.database,
+      context.attempt.id,
+      { outcome: 'passed', summary: 'Exact commit reviewed', artifacts: [] },
       { headCommit: head },
     )
   }
@@ -360,6 +386,57 @@ test('base advances during owner merge wait: queue the previous maintenance step
   assert.equal(f.writers(), 2)
   assert.equal((await f.detail()).attempts.at(-2)!.outcome, 'ready')
 })
+
+for (const alreadyPublished of [false, true]) {
+  test(`a reviewed workflow without a tester refreshes stale review after base sync, already published: ${alreadyPublished}`, async (t) => {
+    const f = await fixture(t, false, 60, true)
+    f.setChecks({ state: 'none', failures: [] })
+    await f.publish()
+    await runAttempt(f.options, await f.next(), signal)
+    const [waiting] = await listWaitingForMerge(f.store.database)
+    await f.advanceBase()
+    if (alreadyPublished) {
+      await f.options.workspaces.prepareRepository(waiting!.repository, signal)
+      await run(
+        'git',
+        [
+          '-c',
+          'user.name=Fixture',
+          '-c',
+          'user.email=fixture@example.test',
+          'merge',
+          '--no-edit',
+          'origin/main',
+        ],
+        { cwd: f.cwd },
+      )
+      await run('git', ['push', 'origin', f.ticket.branch], { cwd: f.cwd })
+    }
+    await pollPullRequestBase(f.options, waiting!, signal)
+    await f.publish()
+    const synced = await f.detail()
+    const maintained = synced.attempts.at(-2)!
+    assert.equal(maintained.outcome, 'base-moved')
+    assert.equal(synced.ticket.currentStep, 'review')
+    assert.equal(f.writers(), 1, 'stale review must prevent publication')
+    const head = await run('git', ['rev-parse', 'HEAD'], { cwd: f.cwd })
+    assert.notEqual(head, f.head)
+    const review = await f.next()
+    await completeAttempt(
+      f.store.database,
+      review.attempt.id,
+      { outcome: 'passed', summary: 'Synced commit reviewed', artifacts: [] },
+      { headCommit: head },
+    )
+    await f.publish()
+    const refreshed = await f.detail()
+    assert.equal(f.writers(), 2)
+    assert.equal(refreshed.ticket.currentStep, 'merge')
+    const gate = await getSavedMergeGate(f.store.database, f.ticket.id)
+    assert.equal(gate?.latest.ready, true)
+    assert.deepEqual(gate?.latest.needsOwner, ['Untested workflow'])
+  })
+}
 
 test('base movement invalidates a tester verdict; retry cannot reuse it after merge was saved', async (t) => {
   const f = await fixture(t, true)

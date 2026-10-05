@@ -31,6 +31,48 @@ test('repository auto-merge starts off, toggles through the API and survives rel
 
 test.describe('rule-based auto-merge', () => {
   test.use({ withAutoMerge: true })
+  test('Today keeps a factory merge moving and restores attention for owner reasons or disabled auto-merge', async ({
+    page,
+    request,
+    factory,
+  }) => {
+    const detail = (await (
+      await request.get(
+        `${factory.url}/api/tickets/${factory.tickets.proofPassed}`,
+      )
+    ).json()) as TicketResponse
+    const title = detail.ticket.title
+    await page.goto(`${factory.url}/#/`)
+    const needsYou = page.getByRole('region', {
+      name: 'Needs you',
+      exact: true,
+    })
+    const moving = page.getByRole('region', { name: 'Moving', exact: true })
+    const factoryRow = moving.getByRole('link', { name: new RegExp(title) })
+    await expect(factoryRow).toContainText('Factory merge pending')
+    await expect(
+      needsYou.getByRole('link', { name: title, exact: true }),
+    ).toHaveCount(0)
+    await request.post('/__test/gate', {
+      data: { url: factory.url, state: 'reviewer-owner' },
+    })
+    await expect(
+      needsYou.getByRole('link', { name: title, exact: true }),
+    ).toBeVisible()
+    await expect(factoryRow).toHaveCount(0)
+    await request.post('/__test/gate', {
+      data: { url: factory.url, state: 'ready' },
+    })
+    await expect(factoryRow).toContainText('Factory merge pending')
+    await request.post(
+      `${factory.url}/api/repositories/${detail.ticket.repository.id}/auto-merge`,
+      { data: { enabled: false } },
+    )
+    await expect(
+      needsYou.getByRole('link', { name: title, exact: true }),
+    ).toBeVisible()
+    await expect(factoryRow).toHaveCount(0)
+  })
   test('system merge records factory actor and breakage links to one bug without model controls', async ({
     page,
     request,
