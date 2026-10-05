@@ -524,7 +524,6 @@ test('bug merge gate requires the exact tester-confirmed reproduction at the cur
   const reproduced = await f.next('reproduce')
   await f.next('fix')
   const tested = await f.next('test')
-  await f.next('review')
   const url = 'https://github.com/fixture/proof/pull/1'
   f.options.github.maintain = async () => ({ url, state: 'OPEN' })
   f.options.github.inspect = async () => ({
