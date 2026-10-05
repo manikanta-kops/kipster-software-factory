@@ -1,0 +1,18 @@
+name: decision-fixture
+description: Exercise typed decision routing without publishing anything.
+steps:
+  - id: classify
+    kind: system
+    action: decide
+    with:
+      question: Does this change need further owner review?
+      options:
+        proceed: The change is small and supported by current independent proof.
+        review: Proof is missing or the change needs owner judgement.
+    routes:
+      proceed: accept
+      review: inspect
+  - id: accept
+    kind: human
+  - id: inspect
+    kind: human

@@ -1,3 +1,4 @@
+import { DecisionReview, DecisionDetails } from '../components/Decision.tsx'
 import { useEffect, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import type {
@@ -219,6 +220,15 @@ function Timeline({ detail }: { detail: TicketResponse }) {
 }
 
 function ActionPanel({ detail }: { detail: TicketResponse }) {
+  const typed = detail.decisions?.find(
+    (item) => item.attemptId === detail.ticket.waiting?.attemptId,
+  )
+  if (detail.ticket.waiting?.for === 'decision' && typed)
+    return <DecisionReview decision={typed} />
+  return <StandardActionPanel detail={detail} />
+}
+
+function StandardActionPanel({ detail }: { detail: TicketResponse }) {
   const { ticket, workflow, artifacts } = detail
   const waiting = ticket.waiting!
   const client = useQueryClient()
@@ -458,6 +468,11 @@ function AttemptEntry({
           </span>
         )}
       </div>
+      {detail.decisions
+        ?.filter((item) => item.attemptId === attempt.id)
+        .map((item) => (
+          <DecisionDetails key={item.id} decision={item} />
+        ))}
       {attempt.summary && <MarkdownBody>{attempt.summary}</MarkdownBody>}
       {attempt.error && <p className="error">{attempt.error}</p>}
       {artifacts.map((artifact) => (

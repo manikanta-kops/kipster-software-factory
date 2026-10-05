@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { after, before, describe, test } from 'node:test'
 import { BUILT_IN_WORKFLOWS, loadLibrary } from '../src/library/library.ts'
 import { type Database, openDatabase } from '../src/store/database.ts'
-import { migrate } from '../src/store/migrate.ts'
+import { listMigrations, migrate } from '../src/store/migrate.ts'
 import { recordWorkflowVersions } from '../src/store/workflows.ts'
 import { createTestDatabase, type TestDatabase } from './helpers/database.ts'
 
@@ -21,7 +21,10 @@ after(async () => {
 
 describe('store', () => {
   test('migrations apply once', async () => {
-    assert.deepEqual(await migrate(database), [1, 2, 3, 4, 5])
+    assert.deepEqual(
+      await migrate(database),
+      (await listMigrations()).map((item) => item.version),
+    )
     assert.deepEqual(await migrate(database), [])
   })
 
@@ -31,7 +34,10 @@ describe('store', () => {
     const second = openDatabase(fresh.url)
     try {
       const results = await Promise.all([migrate(first), migrate(second)])
-      assert.deepEqual(results.map((applied) => applied.length).sort(), [0, 5])
+      assert.deepEqual(results.map((applied) => applied.length).sort(), [
+        0,
+        (await listMigrations()).length,
+      ])
     } finally {
       await Promise.all([first.end(), second.end()])
       await fresh.drop()

@@ -1,3 +1,5 @@
+import { decisionWorkflow, confirmDecision } from '../helpers/decisions.ts'
+import { recordDecisionOutcome } from '../../src/store/tickets.ts'
 // Only this test server exposes fixture creation; production API routes are unchanged.
 import { serve } from '@hono/node-server'
 import { appendFile, rm, writeFile } from 'node:fs/promises'
@@ -120,6 +122,23 @@ router.post('/__test/fixtures', async (c) => {
     })
     artifactTicketNumber = artifactTicket.number
   }
+  let decisionTicket: number | null = null
+  if (c.req.query('decisions') === 'true') {
+    const created = await createTicket(fixture.database, {
+      repository: 'kipster/demo-shop',
+      workflow: await decisionWorkflow(),
+      title: 'Check the cart correction',
+    })
+    const claimed = await claimAttempts(fixture.database, 100)
+    const context = claimed.find((item) => item.ticket.id === created.id)!
+    await markRunning(fixture.database, context.attempt.id, 'system')
+    await recordDecisionOutcome(
+      fixture.database,
+      context.attempt.id,
+      confirmDecision,
+    )
+    decisionTicket = created.number
+  }
   const fixtureEvents = listenForEvents(fixture.database)
   await fixtureEvents.ready
   const fixtureApp = createApp({
@@ -174,6 +193,7 @@ router.post('/__test/fixtures', async (c) => {
     url,
     tickets: fixture.tickets,
     artifactTicket: artifactTicketNumber,
+    decisionTicket,
   })
 })
 router.post('/__test/disconnect', async (c) => {
