@@ -58,7 +58,31 @@ folder, so the engine stays the same for every project.
 - [Workflow format](docs/workflows.md): every field, outcome and default
 - [Workflow guide](docs/workflow-guide.md): principles for workflows you can trust
 
-## Run it
+## Install
+
+On macOS (Apple Silicon or Intel):
+
+```sh
+curl -fsSL https://github.com/manikanta-kops/kipster-software-factory/releases/latest/download/install.sh | sh
+```
+
+The installer downloads the release for your Mac, checks its SHA-256 against the
+release checksums and installs it in `~/.kipster-factory`. The release includes
+Node.js and PostgreSQL. It links `kf` into `~/.local/bin` and runs `kf setup --start`, which:
+
+- checks git, the GitHub CLI (showing the signed-in account and its scopes;
+  offers `gh auth login` if you are signed out), Codex and Claude Code;
+- asks which agent runs steps by default, only when both are installed;
+- creates a private PostgreSQL database in `~/.kipster-factory/postgres` that
+  accepts only local socket connections;
+- starts the factory in the background, now and at login, and opens it.
+
+The built-in workflows (`feature`, `bug`, `quick-change` and `onboard-repo`)
+are ready immediately. Re-run the command, or `kf update`, to update; your
+configuration, secrets and database are kept. `kf status`, `kf logs -f`,
+`kf stop` and `kf start` manage the background factory.
+
+## Run from source
 
 Requires Node.js 26.10 (see `.nvmrc`) and PostgreSQL 18 (`initdb` and `pg_ctl`
 on `PATH`).
@@ -75,8 +99,8 @@ automatic restarts with `npm run dev -- --watch`. Vite still hot-reloads the web
 Startup also builds the web app for the API origin on :4600, so PR evidence and
 ticket links work there; :5173 remains the live development UI.
 
-`npm run dev` keeps its database in `.local/`. To run against your own
-database, build the web app and serve:
+`npm run dev` keeps its database in `.local/`. To run a source checkout like an
+installation, build the web app, set up and serve:
 
 ```sh
 npm run build
@@ -84,15 +108,17 @@ npm run kf -- setup
 npm start
 ```
 
-`kf setup` asks for the database URL and port, tests the connection, applies
-migrations, and checks Git, GitHub authentication, Codex and Claude. Re-run it to
-update settings; other configuration fields are retained. TypeSafe is optional:
-its key powers decision steps (for example judging whether a PR is safe to
-auto-merge). Skip it and those decisions come to you.
+`kf setup` creates and migrates a private PostgreSQL cluster in the factory home
+unless you pass `--database-url <url>` to use your own database. It keeps the
+configured port, or picks the first free port from 4600 on first setup. Re-run it to
+update settings; other configuration fields are retained. For scripts, use
+`npm run kf -- setup --non-interactive`. Use `--home <directory>` on setup and
+serve for a separate factory.
 
-For scripts, use `npm run kf -- setup --non-interactive --database-url <url>
---port 4600 --skip-typesafe`. Use `--home <directory>` on setup and serve for a
-separate factory. Add `--typesafe-stdin` to validate a key supplied through stdin.
+TypeSafe is optional: its key powers decision steps (for example judging whether
+a PR is safe to auto-merge). Without it those decisions come to you. Store a key
+with `kf secret set typesafe`, or validate one from stdin during setup with
+`--typesafe-stdin`.
 
 Manage secrets with `npm run kf -- secret set <name>`, `secret list`, and
 `secret remove <name>`. Set reads hidden terminal input or piped stdin; list

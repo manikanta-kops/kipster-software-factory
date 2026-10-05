@@ -27,6 +27,8 @@ jobs:
       - run: npm run check
       - name: Built-in workflows are valid
         run: npm run kf -- check
+      - name: Installer passes shellcheck
+        run: shellcheck install.sh
 
   test:
     name: Test

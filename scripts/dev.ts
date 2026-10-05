@@ -10,7 +10,7 @@ import {
   ensureDevDatabase,
   root,
 } from './dev-database.ts'
-import { startCluster, stopCluster } from './postgres.ts'
+import { startCluster, stopCluster } from '../src/store/cluster.ts'
 import { run } from '../src/executors/process.ts'
 
 const { values } = parseArgs({
