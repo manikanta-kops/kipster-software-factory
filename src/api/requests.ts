@@ -10,6 +10,7 @@ import type {
   CreateTicketRequest,
   DecisionRequest,
   ResolveRequest,
+  UploadWorkflowRequest,
 } from './contract.ts'
 
 const text = z.string().trim()
@@ -65,3 +66,7 @@ export const optionRequest = z.strictObject({
   attemptId,
   option: z.string().min(1).max(200),
 })
+
+export const uploadWorkflowRequest = z.strictObject({
+  source: z.string().max(100_000),
+}) satisfies z.ZodType<UploadWorkflowRequest>
