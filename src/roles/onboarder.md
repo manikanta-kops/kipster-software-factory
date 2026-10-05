@@ -11,7 +11,12 @@ point of view); Driving it; Gotchas. Every driving row pairs a user action, the
 exact command and the observable result. Record how you checked each map and what
 remains unproven in evidence artifacts. Never invent a successful run.
 
-Run the repository's deterministic checks as appropriate and commit the kit.
+Before reporting done, format every file you write with the repository's own
+formatter, including hidden .kipster files that default formatter globs may miss.
+Run the repository's full deterministic check command after formatting and fix
+any failures introduced by the kit. Record the exact commands and results in
+evidence artifacts, then commit the checked kit. Do not defer formatting or checks
+to verify-kit or CI; if a check cannot run, report the blocker instead of done.
 The factory's verify-kit system action owns isolated instances: agents never
 start or stop them. It runs setup, check, start and readiness, and returns stage
 findings and logs. Address those findings when routed back. Feature driving is

@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import type {
   Artifact,
@@ -287,13 +287,13 @@ function ActionPanel({ detail }: { detail: TicketResponse }) {
   )
 }
 
-function duration(attempt: Attempt) {
+function duration(attempt: Attempt, now: number) {
   const start = attempt.startedAt ?? attempt.waitingSince
   if (!start) return 'Not started'
   const seconds = Math.max(
     0,
     Math.round(
-      (Date.parse(attempt.finishedAt ?? new Date().toISOString()) -
+      ((attempt.finishedAt ? Date.parse(attempt.finishedAt) : now) -
         Date.parse(start)) /
         1000,
     ),
@@ -305,6 +305,17 @@ function duration(attempt: Attempt) {
         ? `${Math.floor(seconds / 60)}m ${seconds % 60}s`
         : `${Math.floor(seconds / 3600)}h ${Math.floor((seconds % 3600) / 60)}m`
   return attempt.finishedAt ? value : `${value} elapsed`
+}
+function AttemptDuration({ attempt }: { attempt: Attempt }) {
+  const [now, setNow] = useState(Date.now)
+  const active =
+    !attempt.finishedAt && Boolean(attempt.startedAt ?? attempt.waitingSince)
+  useEffect(() => {
+    if (!active) return
+    const timer = setInterval(() => setNow(Date.now()), 1000)
+    return () => clearInterval(timer)
+  }, [active])
+  return <span>{duration(attempt, now)}</span>
 }
 function Time({ value }: { value: string }) {
   return (
@@ -363,7 +374,7 @@ function AttemptEntry({
       <div className="attempt-meta">
         <Status value={outcome} />
         <span>{attempt.executor ?? 'Unassigned'}</span>
-        <span>{duration(attempt)}</span>
+        <AttemptDuration attempt={attempt} />
         {attempt.headCommit && (
           <span>
             Commit{' '}
@@ -378,6 +389,7 @@ function AttemptEntry({
           key={artifact.id}
           artifact={artifact}
           defaultOpen={attempt.executor === 'human' && artifact.kind === 'note'}
+          live={attempt.status === 'running' && artifact.kind === 'log'}
         />
       ))}
     </li>

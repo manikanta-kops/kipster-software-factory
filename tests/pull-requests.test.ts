@@ -31,6 +31,7 @@ import { Workspaces } from '../src/workspace/workspaces.ts'
 import { runAttempt, type RunnerOptions } from '../src/engine/runner.ts'
 import {
   pollPullRequestChecks,
+  pollPullRequestBase,
   pollPullRequestFeedback,
 } from '../src/engine/pull-requests.ts'
 import { startScheduler } from '../src/engine/scheduler.ts'
@@ -255,7 +256,11 @@ test('maintain-pr merges base without rewriting branch, invokes writer and links
   )
   assert.equal(f.writers(), 1)
   assert.match(f.bodies[0]!, new RegExp(`Verified at ${head}`))
-  assert.match(f.bodies[0]!, /https:\/\/factory.example.test/)
+  assert.ok(
+    f.bodies[0]!.includes(
+      `https://factory.example.test/#/tickets/${f.ticket.number}`,
+    ),
+  )
   assert.ok(f.bodies[0]!.length < 4100)
   f.setChecks({ state: 'none', failures: [] })
   await f.poll()
@@ -280,6 +285,67 @@ test('base conflict is aborted and conflicting paths reach builder as findings',
     run('git', ['rev-parse', '--verify', 'MERGE_HEAD'], { cwd: f.cwd }),
   )
   assert.equal(f.bodies.length, 0)
+})
+
+for (const state of ['pending', 'passed'] as const) {
+  test(`base advances during ${state} CI: queue maintenance without reusing the old verdict`, async (t) => {
+    const f = await fixture(t, true)
+    await f.publish()
+    const base = await f.advanceBase()
+    f.setChecks({ state, failures: [] })
+    await f.poll()
+    const queued = await f.detail()
+    assert.equal(queued.ticket.status, 'queued')
+    assert.equal(queued.attempts.at(-1)!.stepId, 'publish')
+    assert.match(queued.attempts.at(-2)!.summary!, new RegExp(base))
+    assert.equal(f.writers(), 1)
+    assert.equal(
+      await run('git', ['rev-parse', 'HEAD'], { cwd: f.cwd }),
+      f.head,
+    )
+    await f.publish()
+    const synced = await f.detail()
+    const maintained = synced.attempts.at(-2)!
+    assert.equal(maintained.outcome, 'base-moved')
+    assert.notEqual(maintained.headCommit, f.head)
+    assert.equal(
+      await run('git', ['rev-parse', 'HEAD^2'], { cwd: f.cwd }),
+      base,
+    )
+    assert.equal(
+      await isLatestTesterVerdictCurrent(
+        f.store.database,
+        f.ticket.id,
+        maintained.headCommit!,
+      ),
+      false,
+    )
+    assert.equal(f.writers(), 1, 'stale proof prevents a new writer or push')
+  })
+}
+
+test('base advances during owner merge wait: queue the previous maintenance step exactly once', async (t) => {
+  const f = await fixture(t)
+  f.setChecks({ state: 'none', failures: [] })
+  await f.publish()
+  await runAttempt(f.options, await f.next(), signal)
+  const [waiting] = await listWaitingForMerge(f.store.database)
+  const base = await f.advanceBase()
+  assert.equal(await pollPullRequestBase(f.options, waiting!, signal), true)
+  assert.equal(f.writers(), 1)
+  assert.equal(await run('git', ['rev-parse', 'HEAD'], { cwd: f.cwd }), f.head)
+  await assert.rejects(
+    pollPullRequestBase(f.options, waiting!, signal),
+    /no longer open/,
+  )
+  assert.equal(
+    (await f.detail()).attempts.filter((a) => a.status === 'pending').length,
+    1,
+  )
+  await f.publish()
+  assert.equal(await run('git', ['rev-parse', 'HEAD^2'], { cwd: f.cwd }), base)
+  assert.equal(f.writers(), 2)
+  assert.equal((await f.detail()).attempts.at(-2)!.outcome, 'ready')
 })
 
 test('base movement invalidates a tester verdict; retry cannot reuse it after merge was saved', async (t) => {

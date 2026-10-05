@@ -8,6 +8,7 @@ import {
   afterDecision,
   afterFailure,
   afterInterruption,
+  afterPullRequestBaseAdvance,
   afterResolution,
   afterResult,
   type ArtifactInput,
@@ -419,6 +420,22 @@ export async function failAttempt(
     openAttemptOf(locked, attemptId)
     const transition = afterFailure(locked.attempts, error)
     return apply(connection, locked, transition, { error }, [])
+  })
+}
+
+export async function requeuePullRequestMaintenance(
+  database: Database,
+  attemptId: number,
+  summary: string,
+): Promise<Moved> {
+  return transaction(database, async (connection) => {
+    const locked = await lockByAttempt(connection, attemptId)
+    openAttemptOf(locked, attemptId)
+    const transition = afterPullRequestBaseAdvance(
+      locked.workflow,
+      locked.attempts,
+    )
+    return apply(connection, locked, transition, { summary }, [])
   })
 }
 

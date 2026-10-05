@@ -334,8 +334,16 @@ async function assertDead(pidFile: string) {
 
 test('timeout kills agent and its child process and asks the human', async (t) => {
   const f = await setup(t, { planner: [{ wait: true, descendant: true }] })
-  await f.start(engineConfig.parse({ stepTimeoutMinutes: 0.03 }))
+  // The deadline includes Git/prompt setup, which can exceed 1.8 s on CI.
+  await f.start(engineConfig.parse({ stepTimeoutMinutes: 0.1 }))
   const ticket = await f.ticket()
+  await until(
+    async () =>
+      f.invocations[0]
+        ? exists(join(f.invocations[0], 'descendant.pid'))
+        : false,
+    Boolean,
+  )
   const detail = await until(
     () => f.detail(ticket.number),
     (d) => d.ticket.waiting?.for === 'ask',

@@ -219,7 +219,13 @@ export function createApp({
         'Content-Type': 'text/markdown; charset=utf-8',
       })
     }
-    const file = await openArtifactFile(home, artifact.path as string)
+    const file = await openArtifactFile(
+      home,
+      artifact.path as string,
+      c.req.method === 'GET' && !c.req.header('If-Range')
+        ? c.req.header('Range')
+        : undefined,
+    )
     if (!file.ok) {
       return file.reason === 'outside-home'
         ? c.json<ErrorResponse>(
@@ -233,9 +239,11 @@ export function createApp({
             404,
           )
     }
-    return c.body(file.body, 200, {
+    return c.body(file.body ?? '', file.status, {
       'Content-Type': file.type,
       'Content-Length': String(file.size),
+      'Accept-Ranges': 'bytes',
+      ...(file.contentRange ? { 'Content-Range': file.contentRange } : {}),
     })
   })
 
@@ -250,6 +258,11 @@ export function createApp({
   })
 
   app.all('/api/*', (c) => c.json<ErrorResponse>({ error: 'Not found' }, 404))
+
+  // Keep ticket links already published in PR descriptions usable.
+  app.get('/tickets/:number{[0-9]+}', (c) =>
+    c.redirect(`/#/tickets/${c.req.param('number')}`),
+  )
 
   if (webRoot && existsSync(join(webRoot, 'index.html'))) {
     app.use('/*', serveStatic({ root: webRoot }))

@@ -11,6 +11,7 @@ import {
   root,
 } from './dev-database.ts'
 import { startCluster, stopCluster } from './postgres.ts'
+import { run } from '../src/executors/process.ts'
 
 const { values } = parseArgs({
   options: {
@@ -20,6 +21,16 @@ const { values } = parseArgs({
   },
 })
 
+// Vite mutates NODE_ENV; build separately so agents still install dev dependencies.
+console.log(
+  await run(
+    process.execPath,
+    [join(root, 'node_modules/vite/bin/vite.js'), 'build'],
+    {
+      cwd: root,
+    },
+  ),
+)
 startCluster(cluster)
 await ensureDevDatabase()
 

@@ -115,7 +115,12 @@ test('feature build → changes-needed → build → passed; isolated edits, evi
   const evidence = detail.artifacts.filter(
     (a) => a.attemptId === passed.id && a.kind === 'evidence',
   )
-  assert.ok(evidence.length > 0)
+  assert.equal(
+    evidence.length,
+    1,
+    'declared evidence is not also attached as an automatic capture',
+  )
+  assert.equal(evidence[0]!.title, 'head checkout response')
   assert.equal(
     JSON.parse(await readFile(evidence[0]!.path!, 'utf8')).status,
     200,
@@ -196,6 +201,18 @@ test('bug reproduced on base → fixed → tester proves failing base and passin
   assert.deepEqual(
     observations.map((o) => o.status),
     [500, 200],
+  )
+  const artifacts = (await f.detail()).artifacts
+  assert.equal(
+    artifacts.filter(
+      (a) => a.attemptId === reproduced.id && a.title === 'Reproduction steps',
+    ).length,
+    1,
+  )
+  assert.equal(
+    artifacts.filter((a) => a.attemptId === passed.id && a.kind === 'evidence')
+      .length,
+    2,
   )
   assert.equal(
     await isLatestTesterVerdictCurrent(
@@ -440,9 +457,19 @@ test('a branch commit during proof rejects the verdict without changing its reco
   await f.approve()
   const built = await f.next('build')
   await assert.rejects(f.next('test'), /branch moved during proof/)
-  const tested = (await f.detail()).attempts.find((a) => a.stepId === 'test')!
+  const detail = await f.detail()
+  const tested = detail.attempts.find((a) => a.stepId === 'test')!
   assert.equal(tested.headCommit, built.headCommit)
   assert.equal(tested.status, 'failed')
+  const evidence = detail.artifacts.filter(
+    (a) => a.attemptId === tested.id && a.kind === 'evidence',
+  )
+  assert.equal(evidence.length, 1)
+  assert.equal(evidence[0]!.title, 'head checkout response')
+  assert.equal(
+    JSON.parse(await readFile(evidence[0]!.path!, 'utf8')).status,
+    200,
+  )
   assert.equal(
     await isLatestTesterVerdictCurrent(
       f.store.database,

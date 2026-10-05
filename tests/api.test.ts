@@ -616,6 +616,63 @@ describe('artifacts', () => {
     }
   })
 
+  test('serves bounded, open-ended and suffix byte ranges for seeking evidence', async () => {
+    for (const [range, bytes, contentRange] of [
+      ['bytes=1-3', [80, 78, 71], 'bytes 1-3/8'],
+      ['bytes=6-', [26, 10], 'bytes 6-7/8'],
+      ['bytes=-3', [10, 26, 10], 'bytes 5-7/8'],
+      ['bytes=6-99', [26, 10], 'bytes 6-7/8'],
+    ] as const) {
+      const response = await app.request(
+        `/api/artifacts/${artifactIds.Screenshot}`,
+        { headers: { Range: range } },
+      )
+      assert.equal(response.status, 206)
+      assert.equal(response.headers.get('Accept-Ranges'), 'bytes')
+      assert.equal(response.headers.get('Content-Range'), contentRange)
+      assert.equal(response.headers.get('Content-Length'), String(bytes.length))
+      assert.equal(response.headers.get('Content-Type'), 'image/png')
+      assert.deepEqual(
+        [...new Uint8Array(await response.arrayBuffer())],
+        [...bytes],
+      )
+    }
+  })
+
+  test('range errors and fallback preserve file safety and full responses', async () => {
+    for (const range of ['bytes=8-', 'bytes=-0']) {
+      const response = await app.request(
+        `/api/artifacts/${artifactIds.Screenshot}`,
+        { headers: { Range: range } },
+      )
+      assert.equal(response.status, 416)
+      assert.equal(response.headers.get('Content-Range'), 'bytes */8')
+      assert.equal(await response.text(), '')
+    }
+    for (const headers of [
+      { Range: 'bytes=3-1' },
+      { Range: 'bytes=0-1,4-5' },
+      { Range: 'items=0-1' },
+      { Range: 'bytes=0-1', 'If-Range': '"old-version"' },
+    ]) {
+      const response = await app.request(
+        `/api/artifacts/${artifactIds.Screenshot}`,
+        { headers },
+      )
+      assert.equal(response.status, 200)
+      assert.equal((await response.arrayBuffer()).byteLength, 8)
+    }
+    for (const title of ['Escape', 'Absolute', 'Symlink'])
+      assert.equal(
+        (
+          await app.request(`/api/artifacts/${artifactIds[title]}`, {
+            headers: { Range: 'bytes=0-1' },
+          })
+        ).status,
+        403,
+      )
+  })
+
   test('reports missing files and artifacts', async () => {
     assert.equal((await get('Missing')).status, 404)
     assert.equal((await app.request('/api/artifacts/999999')).status, 404)

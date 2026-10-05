@@ -7,11 +7,12 @@ You describe a problem and agree the outcome. The factory plans, builds, proves
 the change by running the real app, keeps the pull request ready, and only
 interrupts you for decisions that are yours to make.
 
-> **Status: Slice 1 complete.** Register a repository, create and approve a
-> ticket in the web app, and let fresh agents build and review it before a
-> system step opens its pull request. Proven on the private factory-floor test
-> bed; the owner merges. See the [roadmap](docs/roadmap.md) for the next
-> slices.
+> **Status: Slices 1–3 complete.** Onboard a repository, approve a ticket, and
+> let fresh agents build, prove and review it. The factory attaches real browser
+> evidence to the tested commit, synchronizes base changes, waits for required
+> CI, and routes PR feedback back to the builder. Proven with real agents on the
+> private factory-floor test bed; the owner merges. Decisions and merge policy
+> come next in the [roadmap](docs/roadmap.md).
 
 ## How it works
 
@@ -71,6 +72,8 @@ npm run dev        # local database, API on :4600 and the web app on :5173
 `npm run dev` does not restart the factory on source edits, so active agent steps
 keep running. Stop and start it explicitly to load server changes, or opt into
 automatic restarts with `npm run dev -- --watch`. Vite still hot-reloads the web app.
+Startup also builds the web app for the API origin on :4600, so PR evidence and
+ticket links work there; :5173 remains the live development UI.
 
 `npm run dev` keeps its database in `.local/`. To run against your own
 database, build the web app and serve:

@@ -31,6 +31,10 @@ type Instance = VerificationInstance & {
   surface: 'base' | 'head'
   commit: string
 }
+type RetainedArtifact = {
+  source: string
+  artifact: ArtifactInput & { path: string }
+}
 
 export async function runProofAttempt(
   options: RunnerOptions,
@@ -123,6 +127,7 @@ export async function runProofAttempt(
     const executionSignal = AbortSignal.any([signal, lifetime.signal])
     let execution: Promise<void> | undefined
     let result: StepResult | undefined
+    let retained: RetainedArtifact[] = []
     try {
       for (const target of targets) {
         const instance = await startVerification({
@@ -206,16 +211,25 @@ export async function runProofAttempt(
       }
       const artifacts = await Promise.all(
         result.artifacts.map(async (artifact, index) => {
-          if (!artifact.path) return artifact
+          if (!artifact.path) return { artifact, source: null }
           const path = join(
             directory,
             `artifact-${index}${extname(artifact.path) || '.txt'}`,
           )
-          await copyFile(await artifactPath(home, artifact.path), path)
-          return { ...artifact, path }
+          const source = await artifactPath(home, artifact.path)
+          await copyFile(source, path)
+          return { artifact: { ...artifact, path }, source }
         }),
       )
-      result = { ...result, artifacts }
+      retained = artifacts.filter(
+        (item): item is RetainedArtifact => item.source !== null,
+      )
+      result = {
+        ...result,
+        artifacts: artifacts
+          .filter((item) => item.source === null)
+          .map((item) => item.artifact),
+      }
       // Check exits that occurred while ingesting evidence, before deliberate shutdown.
       await Promise.race([
         Promise.all(instances.map((i) => i.exited)),
@@ -232,7 +246,7 @@ export async function runProofAttempt(
     } finally {
       lifetime.abort(new Error('Proof session finished'))
       await execution?.catch(() => {})
-      await retainAndStop(instances, database, attempt.id)
+      await retainAndStop(instances, database, attempt.id, retained)
     }
     signal.throwIfAborted()
     if ((await git(['rev-parse', 'HEAD'])) !== head)
@@ -317,7 +331,10 @@ async function validateProof(
   }
 }
 
-async function capturedEvidence(instance: Instance): Promise<ArtifactInput[]> {
+async function capturedEvidence(
+  instance: Instance,
+  declared: ReadonlySet<string>,
+): Promise<ArtifactInput[]> {
   const artifacts: ArtifactInput[] = []
   for (const entry of await readdir(instance.evidenceDir, {
     recursive: true,
@@ -325,7 +342,11 @@ async function capturedEvidence(instance: Instance): Promise<ArtifactInput[]> {
   })) {
     if (!entry.isFile()) continue
     const path = join(entry.parentPath, entry.name)
-    if (instance.logs.some((log) => log.path === path)) continue
+    if (
+      declared.has(await realpath(path)) ||
+      instance.logs.some((log) => log.path === path)
+    )
+      continue
     artifacts.push({
       kind: 'evidence',
       title: `${instance.surface} ${instance.commit}: ${relative(instance.evidenceDir, path)}`,
@@ -339,14 +360,22 @@ async function retainAndStop(
   instances: Instance[],
   database: Database,
   attemptId: number,
+  retained: RetainedArtifact[],
 ) {
   // Always try every cleanup even if another stop fails; retain evidence on failures too.
   const cleanup = await Promise.allSettled(instances.map((i) => i.stop()))
+  // Attach declared files here too, so cleanup or stale-head failures retain them once.
+  await addAttemptArtifacts(
+    database,
+    attemptId,
+    retained.map((item) => item.artifact),
+  )
+  const declared = new Set(retained.map((item) => item.source))
   for (const instance of instances)
     await addAttemptArtifacts(
       database,
       attemptId,
-      await capturedEvidence(instance),
+      await capturedEvidence(instance, declared),
     )
   const failures = cleanup.filter((r) => r.status === 'rejected')
   if (failures.length)

@@ -309,6 +309,38 @@ export function afterCancel(history: readonly AttemptState[]): Transition {
   )
 }
 
+/** A parked PR needs another scheduled maintenance pass after its base advances. */
+export function afterPullRequestBaseAdvance(
+  workflow: Workflow,
+  history: readonly AttemptState[],
+): Transition {
+  const attempt = openAttempt(history)
+  if (
+    attempt.status !== 'waiting' ||
+    !['pull-request-checks', 'pull-request-merge'].includes(
+      attempt.waitingFor ?? '',
+    )
+  )
+    throw new FactoryError(
+      'conflict',
+      'The attempt is not waiting for a pull request',
+    )
+  const maintenance = history.findLast((previous) => {
+    const step = stepOf(workflow, previous.stepId)
+    return step.kind === 'system' && step.action === 'maintain-pr'
+  })
+  if (!maintenance)
+    throw new FactoryError('conflict', 'No prior pull request maintenance step')
+  return transition(
+    {
+      status: 'finished',
+      outcome: null,
+      next: { to: 'step', stepId: maintenance.stepId },
+    },
+    openStep(workflow, maintenance.stepId),
+  )
+}
+
 /** A system step parks its running attempt until the pull request is merged. */
 export function waitForMerge(
   workflow: Workflow,

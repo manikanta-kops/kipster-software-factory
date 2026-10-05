@@ -1,6 +1,78 @@
 import { test, expect } from './fixtures.ts'
 import type { TicketResponse } from '../../src/api/contract.ts'
 
+test('published legacy ticket links reach the matching ticket timeline', async ({
+  page,
+  factory,
+}) => {
+  await page.goto(`${factory.url}/tickets/${factory.tickets.running}`)
+  await expect(page).toHaveURL(
+    `${factory.url}/#/tickets/${factory.tickets.running}`,
+  )
+  await expect(
+    page.getByRole('heading', { name: 'Fix the typo on the pricing page' }),
+  ).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Timeline' })).toBeVisible()
+})
+
+test('open running logs refresh, closed logs stop polling, and completion loads final output', async ({
+  page,
+  factory,
+  request,
+}) => {
+  const fetched: string[] = []
+  page.on('request', (resource) => {
+    if (resource.url().includes('/api/artifacts/')) fetched.push(resource.url())
+  })
+  await page.clock.install()
+  await page.goto(`${factory.url}/#/tickets/${factory.tickets.running}`)
+  const toggle = page.getByText('Live agent log log', { exact: true })
+  await expect(toggle).toBeVisible()
+  await page.clock.fastForward(6000)
+  expect(fetched).toHaveLength(0)
+  await toggle.click()
+  const log = page.getByLabel('Live agent log', { exact: true })
+  await expect(log).toContainText('Agent started')
+  await request.post('/__test/update-log', { data: { url: factory.url } })
+  await page.clock.fastForward(3000)
+  await expect(log).toContainText('Agent made progress')
+  await toggle.click()
+  const closedCount = fetched.length
+  await page.clock.fastForward(6000)
+  expect(fetched).toHaveLength(closedCount)
+  await toggle.click()
+  await expect(log).toBeVisible()
+  await request.post('/__test/update-log', {
+    data: { url: factory.url, finish: true },
+  })
+  await expect(log).toContainText('Agent finished')
+  const completedCount = fetched.length
+  await page.clock.fastForward(6000)
+  expect(fetched).toHaveLength(completedCount)
+})
+
+test('running attempt elapsed time advances without ticket events', async ({
+  page,
+  factory,
+}) => {
+  await page.clock.install()
+  await page.goto(`${factory.url}/#/tickets/${factory.tickets.running}`)
+  const elapsed = page.locator('.attempt-meta').getByText(/elapsed$/)
+  await expect(elapsed).toBeVisible()
+  const before = await elapsed.textContent()
+  await page.clock.fastForward(5000)
+  await expect(elapsed).not.toHaveText(before!)
+
+  await page.goto(`${factory.url}/#/tickets/${factory.tickets.proofPassed}`)
+  const completed = page
+    .locator('.attempt-meta')
+    .filter({ hasText: 'Commit aaaaaaa' })
+    .first()
+  const finished = await completed.textContent()
+  await page.clock.fastForward(5000)
+  await expect(completed).toHaveText(finished!)
+})
+
 test('evidence belongs to its test run, media uses the configured API, and logs load on demand', async ({
   page,
   factory,
@@ -52,10 +124,13 @@ test('evidence belongs to its test run, media uses the configured API, and logs 
         ),
     )
     .toBe(320)
-  await page.keyboard.press('Escape')
-  await expect(viewer).toHaveCount(0)
-  await expect(thumbnail).toBeFocused()
-  await page.keyboard.press('Space')
+  for (let reopen = 0; reopen < 3; reopen++) {
+    await page.keyboard.press('Escape')
+    await expect(viewer).toHaveCount(0)
+    await expect(thumbnail).toBeFocused()
+    await page.keyboard.press('Space')
+    await expect(viewer).toBeVisible()
+  }
   await viewer.getByRole('button', { name: 'Close image' }).click()
   await expect(thumbnail).toBeFocused()
   const video = run.locator('video')
