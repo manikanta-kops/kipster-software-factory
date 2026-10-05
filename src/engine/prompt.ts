@@ -5,32 +5,23 @@ import { roles, type RoleName } from '../domain/catalog.ts'
 import type { TicketDetail } from '../store/tickets.ts'
 import type { AgentStep } from '../domain/workflow.ts'
 import { parseStepResult, type StepResult } from '../domain/lifecycle.ts'
+import { CONTEXT_INDEX_PATH, type TrustedInstructions } from '../kit/kit.ts'
 
 export async function buildPrompt(input: {
   step: AgentStep
   detail: TicketDetail
-  cwd: string
   directory: string
   diff: string
   home: string
   dependencies?: readonly DependencyCheckout[]
-  proof?: { context: unknown; roleInstructions: string }
+  trusted: TrustedInstructions
+  proof?: { context: unknown }
 }): Promise<string> {
-  const { step, detail, cwd, directory, diff, home } = input
+  const { step, detail, directory, diff, home, trusted } = input
   const base = await readFile(
     new URL(`../roles/${step.role}.md`, import.meta.url),
     'utf8',
   )
-  let kit = input.proof?.roleInstructions ?? ''
-  if (!input.proof)
-    try {
-      kit = await readFile(
-        resolve(cwd, '.kipster', 'roles', `${step.role}.md`),
-        'utf8',
-      )
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
-    }
   const approval = detail.attempts.findLast(
     (attempt) =>
       attempt.waitingFor === 'human' && attempt.outcome === 'approved',
@@ -64,7 +55,8 @@ export async function buildPrompt(input: {
       ? [await readFile(new URL('../../docs/kit.md', import.meta.url), 'utf8')]
       : []),
     step.instructions ?? '',
-    kit,
+    trusted.roleInstructions,
+    contextIndexSection(trusted.contextIndex),
     ...(input.proof
       ? [
           `Verification context (factory-owned instances; use these exact URLs and evidence directories):\n${JSON.stringify(input.proof.context, null, 2)}`,
@@ -86,6 +78,16 @@ export async function buildPrompt(input: {
   ]
     .filter(Boolean)
     .join('\n\n')
+}
+export const CONTEXT_INDEX_LIMIT = 8_000
+export function contextIndexSection(index: string): string {
+  if (!index.trim()) return ''
+  let text = index
+  if (index.length > CONTEXT_INDEX_LIMIT) {
+    const cut = index.lastIndexOf('\n', CONTEXT_INDEX_LIMIT)
+    text = `${index.slice(0, cut > 0 ? cut : CONTEXT_INDEX_LIMIT)}\n\n[Truncated at ${CONTEXT_INDEX_LIMIT} of ${index.length} characters. Read ${CONTEXT_INDEX_PATH} for the rest.]`
+  }
+  return `Repository context index (${CONTEXT_INDEX_PATH} from the default branch). Open a linked document when it is relevant to this step; relative links resolve from .kipster/context/.\n\n${text}`
 }
 export async function readResult(
   directory: string,

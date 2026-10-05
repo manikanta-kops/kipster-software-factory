@@ -4,7 +4,16 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { test } from 'node:test'
-import { loadKit, parseKit, validateFeatureMap } from '../src/kit/kit.ts'
+import {
+  loadKit,
+  loadTrustedInstructions,
+  parseKit,
+  validateFeatureMap,
+} from '../src/kit/kit.ts'
+import {
+  CONTEXT_INDEX_LIMIT,
+  contextIndexSection,
+} from '../src/engine/prompt.ts'
 import { Workspaces } from '../src/workspace/workspaces.ts'
 import {
   createRepository,
@@ -165,4 +174,85 @@ test('optional merge migration globs are additive and validated', () => {
         `version: 1\ncheck: "true"\nmerge:\n  migrations: ["${glob}"]\n`,
       ),
     )
+})
+
+test('trusted instructions come from the committed blob, not the working tree', async (t) => {
+  const root = await mkdtemp(join(tmpdir(), 'factory-trusted-'))
+  t.after(() => rm(root, { recursive: true, force: true }))
+  execFileSync('git', ['init', '-b', 'main', root], { stdio: 'ignore' })
+  await writeFile(join(root, 'README.md'), 'fixture\n')
+  const commit = () => {
+    execFileSync('git', ['add', '.'], { cwd: root })
+    execFileSync(
+      'git',
+      [
+        '-c',
+        'user.name=Fixture',
+        '-c',
+        'user.email=fixture@example.test',
+        'commit',
+        '-m',
+        'Commit',
+      ],
+      { cwd: root, stdio: 'ignore' },
+    )
+    return execFileSync('git', ['rev-parse', 'HEAD'], {
+      cwd: root,
+      encoding: 'utf8',
+    }).trim()
+  }
+  const bare = commit()
+  assert.deepEqual(await loadTrustedInstructions(root, bare, 'builder'), {
+    roleInstructions: '',
+    contextIndex: '',
+  })
+  await mkdir(join(root, '.kipster/roles'), { recursive: true })
+  await mkdir(join(root, '.kipster/context'))
+  await writeFile(join(root, '.kipster/roles/builder.md'), 'Trusted builder.\n')
+  await writeFile(join(root, '.kipster/roles/tester.md'), 'Tester only.\n')
+  await writeFile(
+    join(root, '.kipster/context/index.md'),
+    '- [Billing](billing.md): read before touching invoices.\n',
+  )
+  const trusted = commit()
+  await writeFile(join(root, '.kipster/roles/builder.md'), 'Edited builder.\n')
+  await writeFile(join(root, '.kipster/context/index.md'), 'Edited index.\n')
+  assert.deepEqual(await loadTrustedInstructions(root, trusted, 'builder'), {
+    roleInstructions: 'Trusted builder.',
+    contextIndex: '- [Billing](billing.md): read before touching invoices.',
+  })
+  assert.equal(
+    (await loadTrustedInstructions(root, trusted, 'reviewer')).roleInstructions,
+    '',
+  )
+  assert.equal(
+    (await loadTrustedInstructions(root, bare, 'builder')).contextIndex,
+    '',
+  )
+})
+
+test('a long context index is truncated on a line boundary, never rejected', () => {
+  assert.equal(contextIndexSection(''), '')
+  assert.equal(contextIndexSection('  \n'), '')
+  const short = contextIndexSection('- [Domain](domain.md): vocabulary.')
+  assert.match(
+    short,
+    /^Repository context index \(\.kipster\/context\/index\.md/,
+  )
+  assert.match(short, /- \[Domain\]\(domain\.md\): vocabulary\.$/)
+  assert.doesNotMatch(short, /Truncated/)
+  const line = `- [Doc](doc.md): ${'x'.repeat(80)}\n`
+  const long = line.repeat(Math.ceil((CONTEXT_INDEX_LIMIT * 2) / line.length))
+  const section = contextIndexSection(long)
+  const body = section.split('\n\n')[1]!
+  assert.ok(body.length <= CONTEXT_INDEX_LIMIT)
+  assert.ok(body.split('\n').every((entry) => entry === line.trimEnd()))
+  assert.match(
+    section,
+    new RegExp(
+      `\\[Truncated at ${CONTEXT_INDEX_LIMIT} of ${long.length} characters\\. Read \\.kipster/context/index\\.md for the rest\\.\\]$`,
+    ),
+  )
+  const unbroken = contextIndexSection('y'.repeat(CONTEXT_INDEX_LIMIT + 5))
+  assert.equal(unbroken.split('\n\n')[1], 'y'.repeat(CONTEXT_INDEX_LIMIT))
 })
