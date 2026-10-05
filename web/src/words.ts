@@ -14,7 +14,6 @@ export function humanize(id: string) {
 const ACTION_NAMES: Record<string, string> = {
   'maintain-pr': 'Pull request',
   'verify-kit': 'Verify kit',
-  'wait-children': 'Wait for phases',
 }
 
 /** A step's name for people; system steps named after their action read as the action. */
@@ -35,8 +34,6 @@ const VERBS: Record<string, string> = {
   'verify-kit': 'Verifying the kit',
   'maintain-pr': 'Updating the pull request',
   merge: 'Ready to merge',
-  split: 'Splitting into phases',
-  'wait-children': 'Waiting for phases',
   decide: 'Deciding',
 }
 

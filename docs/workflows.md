@@ -48,8 +48,6 @@ System steps take an `action` and its parameters under `with`:
 | decide            | one per option; no success outcome     |
 | maintain-pr       | ready, conflict, ci-failed, base-moved |
 | merge             | merged, changes-needed, rejected       |
-| split             | done                                   |
-| wait-children     | done, deferred                         |
 
 Agent and system steps can also report `needs-decision`, which always pauses
 the ticket for you unless routed.

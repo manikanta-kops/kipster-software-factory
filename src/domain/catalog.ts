@@ -109,8 +109,6 @@ export const decideParams = z.strictObject({
     .default({ act: 0.9, confirm: 0.6 }),
 })
 
-export const splitParams = z.strictObject({ workflow: slug })
-
 const noParams = z.strictObject({})
 
 function fixed(success: string, outcomes: readonly string[]) {
@@ -147,17 +145,6 @@ export const actions = {
       'Merges when the repository policy allows it, otherwise waits for a human.',
     params: noParams,
     contract: fixed('merged', ['merged', 'changes-needed', 'rejected']),
-  },
-  split: {
-    summary:
-      'Creates one child ticket per planned phase, each running the named workflow.',
-    params: splitParams,
-    contract: fixed('done', ['done']),
-  },
-  'wait-children': {
-    summary: 'Waits until every child ticket has finished or been deferred.',
-    params: noParams,
-    contract: fixed('done', ['done', 'deferred']),
   },
 } as const satisfies Record<string, Action>
 

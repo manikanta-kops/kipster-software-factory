@@ -24,7 +24,7 @@ failure seen in practice.
   scenarios the tester can run. For UI, a clickable prototype beats prose.
 - **Questions that running something can answer are the agent's.** Only product
   and taste questions reach a human.
-- **Thin vertical slices.** Each ticket or phase should fit in one fresh
+- **Thin vertical slices.** Each ticket should fit in one fresh
   session and work end to end.
 
 ## Flow

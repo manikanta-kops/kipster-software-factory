@@ -146,8 +146,6 @@ const STEP_ICONS: Record<string, string> = {
   'verify-kit': 'shield',
   'maintain-pr': 'pr',
   merge: 'merge',
-  split: 'layers',
-  'wait-children': 'hourglass',
   decide: 'sparkle',
 }
 

@@ -23,7 +23,7 @@ a list of steps of three kinds:
 | ------ | --------------------------------------------------------------------- |
 | agent  | A fresh agent session in a fixed **role** (planner, builder, tester…) |
 | human  | The ticket waits for you to approve, request changes or reject        |
-| system | Deterministic work: keep the PR current, merge, split, decide         |
+| system | Deterministic work: keep the PR current, merge, decide                |
 
 Each step reports an outcome, and **routes** send the ticket forward, back to
 an earlier step, or to you. Loops have limits, so nothing spins forever.

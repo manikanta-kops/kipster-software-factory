@@ -26,7 +26,7 @@ export function workflowVersion(source: string): string {
   return createHash('sha256').update(source).digest('hex').slice(0, 12)
 }
 
-/** Loads every `<name>.yml` in a directory and checks references between workflows. */
+/** Loads every `<name>.yml` in a directory and validates each workflow. */
 export async function loadLibrary(directory: string): Promise<LoadResult> {
   const files = (await readdir(directory))
     .filter((file) => extname(file) === '.yml')
@@ -53,18 +53,6 @@ export async function loadLibrary(directory: string): Promise<LoadResult> {
       version: workflowVersion(source),
       source,
     })
-  }
-
-  for (const [name, { workflow }] of library) {
-    for (const step of workflow.steps) {
-      if (step.kind !== 'system' || step.action !== 'split') continue
-      const child = step.with['workflow']
-      if (typeof child === 'string' && !library.has(child)) {
-        errors.push(
-          `${name}.yml: step "${step.id}" splits into unknown workflow "${child}"`,
-        )
-      }
-    }
   }
 
   if (files.length === 0) errors.push(`${directory}: no workflow files found`)

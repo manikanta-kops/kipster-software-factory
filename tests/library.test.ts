@@ -34,9 +34,7 @@ describe('loadLibrary', () => {
     assert.deepEqual([...result.library.keys()].sort(), [
       'bug',
       'feature',
-      'large-feature',
       'onboard-repo',
-      'phase',
       'quick-change',
     ])
   })
@@ -54,26 +52,6 @@ describe('loadLibrary', () => {
     const result = await loadLibrary(directory)
     assert.equal(result.ok, false)
     assert.match(result.ok ? '' : result.errors.join(), /must match the file/)
-  })
-
-  test('checks that split targets exist', async () => {
-    const directory = await directoryWith({
-      'parent.yml': [
-        'name: parent',
-        'description: x',
-        'steps:',
-        '  - id: split',
-        '    kind: system',
-        '    action: split',
-        '    with: { workflow: missing }',
-      ].join('\n'),
-    })
-    const result = await loadLibrary(directory)
-    assert.equal(result.ok, false)
-    assert.match(
-      result.ok ? '' : result.errors.join(),
-      /unknown workflow "missing"/,
-    )
   })
 
   test('reports an empty directory', async () => {

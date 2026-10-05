@@ -14,7 +14,7 @@
 | **Decision**   | A fast typed judgement (a choice with probabilities and a confidence) used where input is unstructured.       |
 
 Roles: planner, builder, tester, reproducer, reviewer, writer, onboarder.
-Actions: decide, verify-kit, maintain-pr, merge, split, wait-children.
+Actions: decide, verify-kit, maintain-pr, merge.
 The catalog in `src/domain/catalog.ts` is the single list of each.
 
 ## Principles the design enforces
