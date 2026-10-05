@@ -557,3 +557,45 @@ for (const modify of [false, true]) {
     assert.equal(await readFile(join(path, 'behaviour.txt'), 'utf8'), 'broken')
   })
 }
+
+test('invalid targets always ask the owner even when needs-decision has a custom workflow route', async (t) => {
+  const f = await otherRepositoriesFixture()
+  t.after(() => f.close())
+  const { parseWorkflow } = await import('../src/domain/workflow.ts')
+  const { workflowVersion } = await import('../src/library/library.ts')
+  const { createTicket } = await import('../src/store/tickets.ts')
+  const source = f.library
+    .get('caller')!
+    .source.replace(
+      '    role: builder',
+      '    role: builder\n    routes:\n      needs-decision: confirm-completion',
+    )
+  const parsed = parseWorkflow(source)
+  if (!parsed.ok) assert.fail(parsed.errors.join())
+  const ticket = await createTicket(f.database, {
+    repository: 'fixture/caller',
+    title: 'Invalid target with a route',
+    workflow: {
+      workflow: parsed.workflow,
+      version: workflowVersion(source),
+      source,
+    },
+  })
+  f.setExecute(async (invocation) =>
+    result(invocation.directory, {
+      ...request,
+      otherRepository: {
+        ...request.otherRepository,
+        repository: 'fixture/missing',
+      },
+    }),
+  )
+  await f.start()
+  const ask = await until(
+    () => f.detail(ticket.number),
+    (detail) => detail.ticket.status === 'needs-you',
+  )
+  assert.equal(ask.ticket.currentStep, 'build')
+  assert.equal(ask.ticket.waiting?.for, 'ask')
+  assert.match(ask.ticket.waiting!.summary!, /No repository fixture\/missing/)
+})

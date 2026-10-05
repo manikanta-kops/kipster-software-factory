@@ -2,7 +2,9 @@ import { FactoryError } from '../domain/errors.ts'
 import type { StepResult } from '../domain/lifecycle.ts'
 import { BUILT_IN_WORKFLOWS, loadLibrary } from '../library/library.ts'
 import {
-  completeAttempt,
+  addAttemptArtifacts,
+  failAttempt,
+  recordAttemptHeadCommit,
   linkOtherRepository,
   resolveLinkedTicket,
 } from '../store/tickets.ts'
@@ -38,22 +40,19 @@ export async function requestOtherRepository(
   } catch (error) {
     if (!(error instanceof FactoryError) || error.code === 'not-found')
       throw error
-    await completeAttempt(
+    await addAttemptArtifacts(options.database, attemptId, [
+      ...result.artifacts,
+      {
+        kind: 'finding',
+        title: 'Other repository request needs you',
+        content: `${error.message}\n\nRequested change:\n${JSON.stringify(result.otherRepository, null, 2)}`,
+      },
+    ])
+    await recordAttemptHeadCommit(options.database, attemptId, headCommit)
+    await failAttempt(
       options.database,
       attemptId,
-      {
-        outcome: 'needs-decision',
-        summary: `Cannot open linked ticket: ${error.message}`,
-        artifacts: [
-          ...result.artifacts,
-          {
-            kind: 'finding',
-            title: 'Other repository request needs you',
-            content: `${error.message}\n\nRequested change:\n${JSON.stringify(result.otherRepository, null, 2)}`,
-          },
-        ],
-      },
-      { headCommit },
+      `Cannot open linked ticket: ${error.message}`,
     )
   }
 }
