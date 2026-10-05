@@ -27,6 +27,7 @@ import {
 } from '../src/store/tickets.ts'
 import { isLatestTesterVerdictCurrent } from '../src/store/verdicts.ts'
 import { getMergeGate as getSavedMergeGate } from '../src/store/merge-gates.ts'
+import { baseSyncCount, beginBaseSync } from '../src/store/auto-merge.ts'
 import { createTestStore } from './helpers/store.ts'
 import { Workspaces } from '../src/workspace/workspaces.ts'
 import { runAttempt, type RunnerOptions } from '../src/engine/runner.ts'
@@ -411,6 +412,11 @@ for (const alreadyPublished of [false, true]) {
         { cwd: f.cwd },
       )
       await run('git', ['push', 'origin', f.ticket.branch], { cwd: f.cwd })
+      for (let sync = 0; sync < 3; sync++)
+        assert.equal(
+          await beginBaseSync(f.store.database, f.ticket.id, 3),
+          true,
+        )
     }
     await pollPullRequestBase(f.options, waiting!, signal)
     await f.publish()
@@ -435,6 +441,27 @@ for (const alreadyPublished of [false, true]) {
     const gate = await getSavedMergeGate(f.store.database, f.ticket.id)
     assert.equal(gate?.latest.ready, true)
     assert.deepEqual(gate?.latest.needsOwner, ['Untested workflow'])
+    if (alreadyPublished) {
+      assert.equal(await baseSyncCount(f.store.database, f.ticket.id), 3)
+      await runAttempt(f.options, await f.next(), signal)
+      const [ownerWait] = await listWaitingForMerge(f.store.database)
+      await f.advanceBase('fourth-base-move.txt')
+      assert.equal(
+        await pollPullRequestBase(f.options, ownerWait!, signal),
+        true,
+      )
+      const bounded = await f.detail()
+      assert.equal(bounded.ticket.waiting?.for, 'ask')
+      assert.match(
+        bounded.attempts.at(-2)!.summary!,
+        /3 consecutive base re-syncs/,
+      )
+      assert.equal(
+        await run('git', ['rev-parse', 'HEAD'], { cwd: f.cwd }),
+        head,
+      )
+      assert.equal(f.writers(), 2)
+    }
   })
 }
 
