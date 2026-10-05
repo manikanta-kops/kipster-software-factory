@@ -2,16 +2,16 @@
 
 ## Concepts
 
-| Concept        | Meaning                                                                                                       |
-| -------------- | ------------------------------------------------------------------------------------------------------------- |
-| **Ticket**     | One unit of work. It targets one repository, may read others, and runs one workflow version.                  |
-| **Workflow**   | A named, versioned list of steps with routes. Stored by content hash, so edits never change a running ticket. |
-| **Step**       | An `agent`, `human` or `system` step. It reports one outcome when it finishes.                                |
-| **Role**       | A fixed kind of agent with its own instructions, permissions and outcomes.                                    |
-| **Action**     | A fixed kind of system work, configured with `with`.                                                          |
-| **Capability** | Something a repository's kit provides, such as `setup` or `verify`. Steps declare what they need.             |
-| **Kit**        | The `.kipster/` folder in a repository: how to set up, run, verify and merge it.                              |
-| **Decision**   | A fast typed judgement (a choice with probabilities and a confidence) used where input is unstructured.       |
+| Concept        | Meaning                                                                                                                                       |
+| -------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Ticket**     | One unit of work. It targets one repository, may read others, and runs one workflow version.                                                  |
+| **Workflow**   | A named, versioned list of steps with routes. Loaded from a file or uploaded. Stored by content hash, so edits never change a running ticket. |
+| **Step**       | An `agent`, `human` or `system` step. It reports one outcome when it finishes.                                                                |
+| **Role**       | A fixed kind of agent with its own instructions, permissions and outcomes.                                                                    |
+| **Action**     | A fixed kind of system work, configured with `with`.                                                                                          |
+| **Capability** | Something a repository's kit provides, such as `setup` or `verify`. Steps declare what they need.                                             |
+| **Kit**        | The `.kipster/` folder in a repository: how to set up, run, verify and merge it.                                                              |
+| **Decision**   | A fast typed judgement (a choice with probabilities and a confidence) used where input is unstructured.                                       |
 
 Roles: planner, builder, tester, reproducer, reviewer, writer, onboarder.
 Actions: decide, verify-kit, maintain-pr, merge.
@@ -44,7 +44,7 @@ src/
   domain/       Pure rules: catalog, workflow parsing and validation, routing,
                 the ticket lifecycle and the records the API returns.
                 No I/O; the web app imports its types.
-  library/      Loads and versions workflow files.
+  library/      Loads and versions workflow files and uploaded workflows.
   store/        PostgreSQL access and append-only migrations. The only place
                 that writes SQL; the engine and API call its functions.
   api/          HTTP API (Hono) and the response contract shared with the web app.
@@ -701,6 +701,29 @@ ticket cleanup makes its owned dependency directories writable, removes them and
 releases their cache pins. This also runs when a dirty or locked ticket worktree
 must be retained, or when that worktree is already absent. Repository object
 caches remain; dependency checkouts do not accumulate for done/cancelled tickets.
+
+## Uploaded workflows
+
+`POST /api/workflows` takes `{ source }`, the YAML text, up to 100,000
+characters, with a JSON content type. It validates the source with the same
+`parseWorkflow` as workflow files and answers 400 with every error in `issues`.
+A name owned by a workflow file answers 409, so uploads never replace the
+built-in `feature` that linked-ticket requests default to. Otherwise one
+transaction records the version in `workflow_versions` and makes it current in
+`uploaded_workflows` (migration 010). The response is 201 for a new name and
+200 for a new version of an uploaded one.
+
+The server, API and scheduler share one in-memory library. An upload is added
+to it after saving, so new tickets and linked-ticket requests can use it at
+once. Running tickets keep their stored version. At startup the factory loads
+workflow files first, then each upload's current version. An upload hidden by
+a file with the same name, or no longer valid for the current catalog, is left
+out with a warning; its rows stay. `GET /api/workflows` adds `origin: file |
+upload`. The Workflows page uploads a chosen `.yml` file and lists the issues.
+
+There is no removal or rename yet, and the API has no authentication beyond
+binding to localhost and the CORS allow-list.
+`skills/kipster-workflows/SKILL.md` teaches a model to write a valid file.
 
 Child tickets are deferred until a real ticket needs them; the unused child
 workflows and actions are absent from the catalog and library.
