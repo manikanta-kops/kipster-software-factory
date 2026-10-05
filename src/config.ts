@@ -49,7 +49,7 @@ export const engineConfig = z.object({
 export type EngineConfig = z.infer<typeof engineConfig>
 export type AgentConfig = z.infer<typeof agentConfig>
 
-const configFile = z.strictObject({
+const configFile = z.object({
   ...engineConfig.shape,
   databaseUrl: z.string().min(1),
   port: z.int().min(1).max(65_535).default(DEFAULT_PORT),
@@ -67,7 +67,7 @@ export async function readConfig(home: string): Promise<FactoryConfig> {
     text = await readFile(path, 'utf8')
   } catch {
     throw new Error(
-      `No configuration at ${path}. Create it with {"databaseUrl": "postgresql://…"}.`,
+      `No configuration at ${path}. Run kf setup --home <directory> to configure the factory.`,
     )
   }
   const parsed = configFile.safeParse(JSON.parse(text))

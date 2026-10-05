@@ -31,6 +31,8 @@ The catalog in `src/domain/catalog.ts` is the single list of each.
   back once it reaches the limit.
 - **A verdict belongs to one commit.** New commits or a moved base branch void
   it.
+- **Every integration is optional.** The factory works without it. A missing
+  TypeSafe key never fails a ticket: the decision goes to the owner.
 - **Hard rules before AI decisions.** Paths that always need a human are
   checked first; a decision only chooses within what the rules allow, and an
   unsure decision goes to a human.
@@ -55,7 +57,7 @@ src/
   github/       Small gh-backed PR interface.
   roles/        Base instructions for each catalog role.
   server.ts     Composes the store, library, engine and API into a running factory.
-  cli.ts        `kf serve | migrate | check`.
+  cli.ts        `kf setup | secret | serve | migrate | check`.
   config.ts     Factory home and config.json.
 web/            React app: what needs you, workflows, and later tickets.
 workflows/      Built-in workflow library.
@@ -64,7 +66,7 @@ tests/          Unit and integration tests (node:test) and browser tests (Playwr
 ```
 
 Slice 3 extends the GitHub interface with CI/checks and feedback. Later slices
-add `decider/` (typed decisions). These are part of the factory, not plugins.
+`decider/` provides typed decisions in Slice 4. These are part of the factory, not plugins.
 
 ## Data flow
 
@@ -460,3 +462,23 @@ explicit opt-in check with the real default CLI. It runs independent reproducer
 and tester sessions against the HTTP fixture, with a deterministic fixture fix
 between them, retains local evidence, and never publishes a branch. It does not
 verify browser UI proof, Claude, GitHub publication or moving-base routing.
+
+## Guided setup and secrets (Slice 4)
+
+`kf setup` creates or updates the home's config.json, keeping fields it does not
+ask about. It validates the PostgreSQL connection and migrates it before saving,
+asks for a port, and warns about missing Git, gh/auth, Codex and Claude. Scripted
+setup uses `--non-interactive`, `--database-url`, `--port`, `--skip-typesafe` or
+`--typesafe-stdin`. TypeSafe is an optional, hidden-input step validated through
+GET /v1/models. Re-running with Enter retains an existing stored key.
+
+`kf secret set|list|remove` manages named secrets. The pinned @napi-rs/keyring
+backend uses service `kipster-software-factory` and the secret name as account;
+Linux explicitly selects Secret Service. Unavailable OS storage falls back to
+home/secrets.json, written atomically with mode 0600 and a warning. Tests select
+`--secret-backend file` and never access OS credentials. macOS is tested; Linux
+remains unverified and Windows validation is later. Settings and secrets do not
+use .env files or environment variables. A secret is read at the moment of use,
+passed explicitly only to its client, and never added to executor environments,
+prompts, events, artifacts, logs or API responses. SDK logging is disabled, and
+remote error bodies are replaced with safe status/category messages.
