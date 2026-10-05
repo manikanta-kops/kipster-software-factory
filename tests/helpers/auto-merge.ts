@@ -32,6 +32,9 @@ export async function autoMergeFixture(
   settings: {
     path?: string
     tester?: boolean
+    reviewer?: boolean
+    ownerReview?: string
+    initialBaseMove?: boolean
     settle?: number
     maxBaseSyncs?: number
   } = {},
@@ -90,6 +93,17 @@ export async function autoMergeFixture(
               routes: {},
             },
           ]),
+      ...(settings.reviewer === false
+        ? []
+        : [
+            {
+              id: 'review',
+              kind: 'agent' as const,
+              role: 'reviewer' as const,
+              needs: [],
+              routes: {},
+            },
+          ]),
       {
         id: 'publish',
         kind: 'system',
@@ -141,41 +155,12 @@ export async function autoMergeFixture(
   }
   let merges = 0,
     requests = 0,
-    enabledKey = true,
-    confidence = 0.95,
-    choice = 'merge',
-    httpStatus = 200
+    enabledKey = true
   let onInspect: (() => Promise<void>) | undefined
-  let onDecision: (() => Promise<void>) | undefined
-  const sent: Record<string, unknown>[] = []
-  const server = createServer(async (req, res) => {
+  const server = createServer((_req, res) => {
     requests++
-    let body = ''
-    for await (const chunk of req) body += chunk
-    sent.push(JSON.parse(body))
-    await onDecision?.()
-    res.writeHead(httpStatus, { 'content-type': 'application/json' })
-    res.end(
-      JSON.stringify(
-        httpStatus === 200
-          ? {
-              model: 'jev-1.13.0',
-              answers: {
-                decision: {
-                  type: 'choice',
-                  choice,
-                  confidence,
-                  probabilities:
-                    choice === 'merge'
-                      ? { merge: 0.98, owner: 0.02 }
-                      : { merge: 0.02, owner: 0.98 },
-                },
-              },
-              usage: { input_tokens: 100, output_tokens: 20 },
-            }
-          : { error: 'fixture failure' },
-      ),
-    )
+    res.writeHead(500, { 'content-type': 'application/json' })
+    res.end(JSON.stringify({ error: 'The merge path must not call TypeSafe' }))
   })
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
   const address = server.address()
@@ -246,13 +231,27 @@ export async function autoMergeFixture(
       context.attempt.id,
       {
         outcome: 'passed',
-        summary: 'Agent prose sentinel; never a decision fact',
+        summary: 'Independent verdict',
+        ...(context.step.kind === 'agent' &&
+        context.step.role === 'reviewer' &&
+        settings.ownerReview
+          ? { ownerReview: { reason: settings.ownerReview } }
+          : {}),
         artifacts: [],
       },
       { headCommit: head },
     )
   }
   if (settings.tester !== false) await pass()
+  if (settings.reviewer !== false) await pass()
+  if (settings.initialBaseMove) {
+    await commit(
+      source,
+      'initial-base.txt',
+      'Base moved before first publication',
+    )
+    await run('git', ['push', bare, 'main'], { cwd: source })
+  }
   await runAttempt(options, await next(), signal)
   if (
     (await getTicketDetail(store.database, ticket.number))!.ticket
@@ -273,7 +272,6 @@ export async function autoMergeFixture(
     commit,
     pass,
     next,
-    sent,
     head: () => head,
     merges: () => merges,
     requests: () => requests,
@@ -285,19 +283,10 @@ export async function autoMergeFixture(
     setPostChecks: (value: Checks) => {
       postChecks = value
     },
-    setAnswer: (value: number, option = 'merge') => {
-      confidence = value
-      choice = option
-    },
     noKey: () => {
       enabledKey = false
     },
-    error: () => {
-      httpStatus = 401
-    },
-    onDecision: (callback: () => Promise<void>) => {
-      onDecision = callback
-    },
+    pr: () => ({ ...pr }),
     onInspect: (callback: () => Promise<void>) => {
       onInspect = callback
     },

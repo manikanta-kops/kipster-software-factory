@@ -392,6 +392,8 @@ async function seedLocked(
         ? { status: 'finished', outcome: 'passed', commit: head }
         : null,
       hasTester,
+      hasReviewer: true,
+      reviewer: { status: 'finished', outcome: 'passed', commit: head },
       reproducer: null,
       hasReproducer: false,
       ci: 'passed',

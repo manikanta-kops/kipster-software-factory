@@ -1,12 +1,7 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import {
-  mergePolicy,
-  settledCI,
-  mergeQuestion,
-} from '../src/domain/auto-merge.ts'
+import { mergePolicy, settledCI } from '../src/domain/auto-merge.ts'
 import { evaluateMergeGate, type MergeFacts } from '../src/domain/merge-gate.ts'
-import type { DecisionRecord } from '../src/domain/decisions.ts'
 const head = 'a'.repeat(40)
 const facts: MergeFacts = {
   head,
@@ -15,6 +10,8 @@ const facts: MergeFacts = {
   behind: 0,
   tester: { status: 'finished', outcome: 'passed', commit: head },
   hasTester: true,
+  hasReviewer: true,
+  reviewer: { status: 'finished', outcome: 'passed', commit: head },
   reproducer: null,
   hasReproducer: false,
   ci: 'passed',
@@ -31,96 +28,52 @@ const facts: MergeFacts = {
 }
 const gate = (patch: Partial<MergeFacts> = {}) =>
   evaluateMergeGate({ ...facts, ...patch }, new Date().toISOString())
-const decision: DecisionRecord = {
-  ...mergeQuestion,
-  id: 1,
-  ticketId: 1,
-  ticketNumber: 1,
-  attemptId: 1,
-  stepId: 'merge',
-  workflow: 'feature',
-  workflowVersion: 'v1',
-  facts: {
-    base: { ref: 'origin/main', commit: facts.base },
-    headCommit: head,
-    files: [],
-    verdicts: [],
-    ci: null,
-  },
-  answer: {
-    model: 'jev-1.13.0',
-    choice: 'merge',
-    probabilities: { merge: 0.99, owner: 0.01 },
-    confidence: 0.95,
-    usage: { inputTokens: 1, outputTokens: 1 },
-  },
-  band: 'acted',
-  reason: null,
-  durationMs: 1,
-  finalOption: 'merge',
-  decidedBy: 'model',
-  overridden: false,
-  pending: false,
-  createdAt: '',
-  decidedAt: '',
-}
-test('policy bands and owner overrides stay behind the hard gate', () => {
-  assert.equal(mergePolicy(true, gate()), 'ask')
-  assert.equal(mergePolicy(false, gate(), decision), 'owner')
-  assert.equal(mergePolicy(true, gate(), decision), 'merge')
-  assert.equal(
-    mergePolicy(true, gate(), {
-      ...decision,
-      band: 'confirm',
-      finalOption: null,
-    }),
-    'confirm',
-  )
-  assert.equal(
-    mergePolicy(true, gate(), {
-      ...decision,
-      band: 'confirm',
-      finalOption: 'merge',
-      decidedBy: 'owner',
-    }),
-    'merge',
-  )
-  for (const band of ['owner', 'no-key', 'error'] as const)
-    assert.equal(
-      mergePolicy(true, gate(), { ...decision, band, finalOption: null }),
-      'owner',
-    )
-  assert.equal(
-    mergePolicy(true, gate(), { ...decision, finalOption: 'owner' }),
-    'owner',
-  )
+test('rules merge only ready, tested and reviewed heads with auto-merge on', () => {
+  assert.equal(mergePolicy(true, gate()), 'merge')
+  assert.equal(mergePolicy(false, gate()), 'owner')
   for (const path of [
     'db/migrations/001.sql',
     '.kipster/kit.yml',
     '.github/workflows/ci.yml',
   ])
-    assert.equal(mergePolicy(true, gate({ paths: [path] }), decision), 'owner')
+    assert.equal(mergePolicy(true, gate({ paths: [path] })), 'owner')
+  for (const role of ['tester', 'reviewer'] as const) {
+    const missing =
+      role === 'tester'
+        ? { hasTester: false, tester: null }
+        : { hasReviewer: false, reviewer: null }
+    assert.equal(gate(missing).ready, true)
+    assert.equal(mergePolicy(true, gate(missing)), 'owner')
+    assert.equal(
+      mergePolicy(
+        true,
+        gate({
+          [role]: {
+            status: 'finished',
+            outcome: 'passed',
+            commit: 'c'.repeat(40),
+          },
+        }),
+      ),
+      'wait',
+    )
+  }
+  const flagged = gate({
+    reviewer: {
+      ...facts.reviewer!,
+      ownerReview: { reason: 'Changes public API behavior' },
+    },
+  })
+  assert.equal(flagged.ready, true)
+  assert.deepEqual(flagged.needsOwner, [
+    'Reviewer requests owner review: Changes public API behavior',
+  ])
+  assert.equal(mergePolicy(true, flagged), 'owner')
   assert.equal(
-    mergePolicy(true, gate({ hasTester: false, tester: null }), decision),
-    'owner',
-  )
-  assert.equal(gate({ hasTester: false, tester: null }).ready, true)
-  assert.equal(
-    mergePolicy(true, gate({ trustedKitError: 'Invalid rules' }), decision),
+    mergePolicy(true, gate({ trustedKitError: 'Invalid rules' })),
     'wait',
   )
-  assert.equal(mergePolicy(true, gate({ ci: 'pending' }), decision), 'wait')
-  assert.equal(
-    mergePolicy(true, gate(), {
-      ...decision,
-      facts: { ...decision.facts, headCommit: 'c'.repeat(40) },
-    }),
-    'ask',
-  )
-  assert.equal(
-    mergePolicy(true, gate(), { ...decision, mergeRequestedAt: 'now' }),
-    'owner',
-  )
+  assert.equal(mergePolicy(true, gate({ ci: 'pending' })), 'wait')
 })
 test('CI settle window expires at its boundary and never suppresses an actual failure', () => {
   const since = '2026-10-05T12:00:00Z',

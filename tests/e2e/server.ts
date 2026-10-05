@@ -1,12 +1,9 @@
-import { mergeQuestion } from '../../src/domain/auto-merge.ts'
+import { mergePolicy } from '../../src/domain/auto-merge.ts'
 import { getMergeGate } from '../../src/store/merge-gates.ts'
 import {
-  reserveMergeDecision,
-  saveMergeDecision,
   markMergeRequested,
   markMergeResult,
 } from '../../src/store/auto-merge.ts'
-import { listDecisions } from '../../src/store/decisions.ts'
 import { setAutoMerge } from '../../src/store/repositories.ts'
 import {
   recordMergedPR,
@@ -168,29 +165,6 @@ router.post('/__test/fixtures', async (c) => {
       fixture.tickets.proofPassed,
     ))!
     await setAutoMerge(fixture.database, detail.ticket.repository.id, true)
-    const gate = (await getMergeGate(fixture.database, detail.ticket.id))!
-      .latest
-    const input = {
-      ...confirmDecision,
-      ...mergeQuestion,
-      facts: {
-        ...confirmDecision.facts,
-        headCommit: gate.facts.head,
-        gate: gate.facts,
-      },
-      answer: {
-        ...confirmDecision.answer!,
-        choice: 'merge',
-        probabilities: { merge: 0.9, owner: 0.1 },
-      },
-    }
-    const id = await reserveMergeDecision(
-      fixture.database,
-      detail.ticket.id,
-      detail.ticket.waiting!.attemptId,
-      input,
-    )
-    await saveMergeDecision(fixture.database, id!, input)
   }
   const fixtureEvents = listenForEvents(fixture.database)
   await fixtureEvents.ready
@@ -225,22 +199,23 @@ router.post('/__test/fixtures', async (c) => {
         fixture.database,
         fixture.tickets.proofPassed,
       ))!
-      const decision = (
-        await listDecisions(fixture.database, detail.ticket.id)
-      ).find((d) => d.purpose === 'merge')!
-      if (!(await markMergeRequested(fixture.database, decision.id)))
-        throw new Error('Merge has not been authorized')
-      await markMergeResult(fixture.database, decision.id)
+      const gate = (await getMergeGate(fixture.database, detail.ticket.id))!
+        .latest
       const context = (await listWaitingForMerge(fixture.database)).find(
         (ctx) => ctx.ticket.id === detail.ticket.id,
       )!
+      if (mergePolicy(true, gate) !== 'merge')
+        throw new Error('Gate requires owner or more proof')
+      if (!(await markMergeRequested(fixture.database, context, gate)))
+        throw new Error('Merge has not been authorized')
+      await markMergeResult(fixture.database, detail.ticket.id, gate.facts.head)
       await recordMergedPR(
         fixture.database,
         context,
         {
           url: detail.ticket.pullRequestUrl!,
           state: 'MERGED',
-          headRefOid: decision.facts.headCommit,
+          headRefOid: gate.facts.head,
           mergeCommit: { oid: 'd'.repeat(40) },
         },
         true,
@@ -249,7 +224,7 @@ router.post('/__test/fixtures', async (c) => {
         fixture.database,
         context.attempt.id,
         { outcome: 'merged', summary: 'Merged by factory', artifacts: [] },
-        { headCommit: decision.facts.headCommit },
+        { headCommit: gate.facts.head },
       )
       const check = (await pendingPostMergeChecks(fixture.database))[0]!
       await finishPostMergeCheck(
@@ -310,6 +285,15 @@ router.post('/__test/fixtures', async (c) => {
                   ]
                 : [],
             behind: state === 'behind' ? 2 : 0,
+            hasReviewer: state !== 'unreviewed',
+            reviewer: {
+              status: 'finished',
+              outcome: 'passed',
+              commit: facts.head,
+              ...(state === 'reviewer-owner'
+                ? { ownerReview: { reason: 'Changes public API behavior' } }
+                : {}),
+            },
           },
           new Date().toISOString(),
         ),

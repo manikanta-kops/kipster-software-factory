@@ -10,7 +10,7 @@ import {
   pollPullRequestBase,
 } from '../src/engine/pull-requests.ts'
 import { listDecisions } from '../src/store/decisions.ts'
-import { confirmMergeDecision, baseSyncCount } from '../src/store/auto-merge.ts'
+import { markMergeRequested, baseSyncCount } from '../src/store/auto-merge.ts'
 import { setAutoMerge } from '../src/store/repositories.ts'
 import {
   completeAttempt,
@@ -28,74 +28,77 @@ import { run } from '../src/executors/process.ts'
 import { withPreparedArtifacts } from '../src/store/artifact-preparation.ts'
 import { transaction } from '../src/store/database.ts'
 
-for (const band of [
-  'acted',
-  'confirm-merge',
-  'confirm-owner',
-  'owner',
-  'acted-owner',
-  'no-key',
-  'error',
-  'off',
-] as const) {
-  test(`merge wait uses ${band} policy, logs factual input and asks once per head`, async (t) => {
+test('ready tested and reviewed head merges without a key or any model call and records factory attribution', async (t) => {
+  const f = await autoMergeFixture(t)
+  f.noKey()
+  const context = await f.context()
+  await pollAutoMerge(f.options, context, f.signal)
+  assert.equal(f.merges(), 1)
+  assert.equal(f.requests(), 0)
+  assert.deepEqual(await listDecisions(f.store.database, f.ticket.id), [])
+  await pollMergeWait(f.options, context, f.signal)
+  const detail = await f.detail()
+  assert.equal(detail.ticket.status, 'done')
+  assert.ok(
+    detail.events.some((e) => e.kind === 'pull-request.merge-requested'),
+  )
+  assert.ok(
+    detail.events.some(
+      (e) =>
+        e.kind === 'pull-request.merged' && e.data['mergedBy'] === 'factory',
+    ),
+  )
+  assert.equal((await pendingPostMergeChecks(f.store.database)).length, 1)
+})
+test('auto-merge off retains owner merging', async (t) => {
+  const f = await autoMergeFixture(t)
+  await setAutoMerge(f.store.database, f.repository.id, false)
+  await pollAutoMerge(f.options, await f.context(), f.signal)
+  assert.equal(f.merges(), 0)
+  assert.equal(f.requests(), 0)
+  assert.equal(
+    (await f.store.database.query('SELECT * FROM merge_requests')).rows.length,
+    0,
+  )
+})
+for (const settings of [
+  { reviewer: false },
+  { ownerReview: 'Changes permission checks' },
+]) {
+  test(`reviewer owner policy: ${JSON.stringify(settings)}`, async (t) => {
+    const f = await autoMergeFixture(t, settings)
+    await pollAutoMerge(f.options, await f.context(), f.signal)
+    const gate = (await getMergeGate(f.store.database, f.ticket.id))!.latest
+    assert.equal(gate.ready, true)
+    assert.deepEqual(gate.needsOwner, [
+      settings.reviewer === false
+        ? 'Unreviewed workflow'
+        : 'Reviewer requests owner review: Changes permission checks',
+    ])
+    assert.equal(f.merges(), 0)
+    assert.equal(f.requests(), 0)
+    if (settings.ownerReview)
+      assert.deepEqual(
+        (await f.detail()).attempts.find((a) => a.stepId === 'review')!
+          .ownerReview,
+        { reason: settings.ownerReview },
+      )
+  })
+}
+for (const role of ['test', 'review']) {
+  test(`older ${role} verdict cannot authorize the new PR head`, async (t) => {
     const f = await autoMergeFixture(t)
-    if (band.startsWith('confirm')) f.setAnswer(0.8)
-    if (band === 'owner') f.setAnswer(0.4)
-    if (band === 'acted-owner') f.setAnswer(0.95, 'owner')
-    if (band === 'no-key') f.noKey()
-    if (band === 'error') f.error()
-    if (band === 'off')
-      await setAutoMerge(f.store.database, f.repository.id, false)
-    const context = await f.context()
-    await pollAutoMerge(f.options, context, f.signal)
-    const records = await listDecisions(f.store.database, f.ticket.id)
-    if (band === 'off') assert.equal(records.length, 0)
-    else {
-      assert.equal(records.length, 1)
-      const decision = records[0]!
-      assert.equal(decision.purpose, 'merge')
-      assert.equal(decision.facts.headCommit, f.head())
-      assert.equal(decision.facts.ticket, undefined)
-      assert.equal(
-        JSON.stringify(decision.facts).includes('Agent prose sentinel'),
-        false,
-      )
-      assert.deepEqual(decision.facts.files, [
-        { path: 'ui.ts', added: 1, removed: 0 },
-      ])
-      assert.equal(decision.facts.gate?.tester?.commit, f.head())
-      assert.equal(decision.facts.ci?.state, 'passed')
-      if (band.startsWith('confirm')) {
-        assert.equal(decision.pending, true)
-        await confirmMergeDecision(
-          f.store.database,
-          f.ticket.number,
-          decision.id,
-          band === 'confirm-merge' ? 'merge' : 'owner',
-        )
-        await pollAutoMerge(f.options, context, f.signal)
-      }
-    }
-    const expected = band === 'acted' || band === 'confirm-merge' ? 1 : 0
-    assert.equal(f.merges(), expected)
-    await pollAutoMerge(f.options, context, f.signal)
-    assert.equal(f.merges(), expected)
-    assert.equal(f.requests(), ['no-key', 'off'].includes(band) ? 0 : 1)
-    if (expected) {
-      await pollMergeWait(f.options, context, f.signal)
-      const detail = await f.detail()
-      assert.equal(detail.ticket.status, 'done')
-      assert.ok(
-        detail.events.some(
-          (e) =>
-            e.kind === 'pull-request.merged' &&
-            e.data['mergedBy'] === 'factory' &&
-            typeof e.data['decisionId'] === 'number',
-        ),
-      )
-      assert.equal((await pendingPostMergeChecks(f.store.database)).length, 1)
-    }
+    const head = await f.newHead()
+    await f.store.database.query(
+      'UPDATE attempts SET head_commit = $2 WHERE ticket_id = $1 AND step_id <> $3',
+      [f.ticket.id, head, role],
+    )
+    await pollAutoMerge(f.options, await f.context(), f.signal)
+    assert.equal(f.merges(), 0)
+    assert.equal(
+      (await getMergeGate(f.store.database, f.ticket.id))!.latest.ready,
+      false,
+    )
   })
 }
 
@@ -158,10 +161,25 @@ test('none stays pending during CI settlement, can fail before registration wind
 })
 
 for (const mutation of ['head', 'ci', 'feedback', 'base'] as const) {
-  test(`fresh gate prevents a merge when ${mutation} changes after decision; stored green cannot authorize`, async (t) => {
+  test(`fresh gate prevents a merge when ${mutation} changes between gate checks; stored green cannot authorize`, async (t) => {
     const f = await autoMergeFixture(t)
     const context = await f.context()
-    f.onDecision(async () => {
+    if (mutation === 'base') {
+      const prepare = f.options.workspaces.prepareRepository.bind(
+        f.options.workspaces,
+      )
+      let preparations = 0
+      f.options.workspaces.prepareRepository = async (...args) => {
+        if (++preparations === 2) {
+          await f.commit(f.source, 'base.txt', 'Base moved')
+          await run('git', ['push', f.bare, 'main'], { cwd: f.source })
+        }
+        return prepare(...args)
+      }
+    }
+    let inspections = 0
+    f.onInspect(async () => {
+      if (++inspections !== 2) return
       if (mutation === 'head') await f.newHead()
       if (mutation === 'ci')
         f.setChecks({
@@ -179,13 +197,9 @@ for (const mutation of ['head', 'ci', 'feedback', 'base'] as const) {
             changeRequest: true,
           },
         ]
-      if (mutation === 'base') {
-        await f.commit(f.source, 'base.txt', 'Base moved')
-        await run('git', ['push', f.bare, 'main'], { cwd: f.source })
-      }
     })
     await pollAutoMerge(f.options, context, f.signal)
-    assert.equal(f.requests(), 1)
+    assert.equal(f.requests(), 0)
     assert.equal(f.merges(), 0)
     assert.equal(
       (await getMergeGate(f.store.database, f.ticket.id))!.latest.ready,
@@ -233,28 +247,6 @@ test('untested is ready for owner, while an invalid trusted kit blocks auto-merg
       f.store.database,
       f.ticket.id,
     ))!.latest.blockers.includes('Trusted kit is invalid'),
-  )
-  assert.equal(f.merges(), 0)
-})
-
-test('new PR head gets a new decision; old confirmation cannot merge it', async (t) => {
-  const f = await autoMergeFixture(t)
-  f.setAnswer(0.8)
-  const context = await f.context()
-  await pollAutoMerge(f.options, context, f.signal)
-  const first = (await listDecisions(f.store.database, f.ticket.id))[0]!
-  const head = await f.newHead()
-  // Record independent proof of the new head without changing the waiting merge attempt.
-  await f.store.database.query(
-    "UPDATE attempts SET head_commit = $2 WHERE ticket_id = $1 AND step_id = 'test'",
-    [f.ticket.id, head],
-  )
-  await pollAutoMerge(f.options, context, f.signal)
-  assert.equal(f.requests(), 2)
-  assert.equal((await listDecisions(f.store.database, f.ticket.id)).length, 2)
-  await assert.rejects(
-    confirmMergeDecision(f.store.database, f.ticket.number, first.id, 'merge'),
-    /no longer available/,
   )
   assert.equal(f.merges(), 0)
 })
@@ -350,22 +342,18 @@ test('no-CI post-merge check uses disposable exact-commit kit harness and retain
 })
 
 test('base re-sync bound parks the owner and an owner retry resets the count', async (t) => {
-  const f = await autoMergeFixture(t, { maxBaseSyncs: 1 })
+  const f = await autoMergeFixture(t, {
+    maxBaseSyncs: 1,
+    tester: false,
+    reviewer: false,
+  })
   const context = await f.context()
   await f.commit(f.source, 'base1.txt', 'First base movement')
   await run('git', ['push', f.bare, 'main'], { cwd: f.source })
   assert.equal(await pollPullRequestBase(f.options, context, f.signal), true)
   await runAttempt(f.options, await f.next(), f.signal)
   assert.equal(await baseSyncCount(f.store.database, f.ticket.id), 1)
-  // First sync routes to tester. Re-test and publish to resume merge wait.
   const head = await run('git', ['rev-parse', 'HEAD'], { cwd: f.cwd })
-  await completeAttempt(
-    f.store.database,
-    (await f.next()).attempt.id,
-    { outcome: 'passed', summary: 'Retested sync', artifacts: [] },
-    { headCommit: head },
-  )
-  await runAttempt(f.options, await f.next(), f.signal)
   await runAttempt(f.options, await f.next(), f.signal)
   await f.commit(f.source, 'base2.txt', 'Second base movement')
   await run('git', ['push', f.bare, 'main'], { cwd: f.source })
@@ -521,7 +509,6 @@ test('a slow post-merge check cannot hold a scheduler slot or stop another ticke
 
 test('SQL rollback cleans copied evidence while preserving its source and factory-owned live log', async (t) => {
   const { addAttemptArtifacts } = await import('../src/store/tickets.ts')
-  const { readFile } = await import('node:fs/promises')
   const f = await autoMergeFixture(t)
   const context = await f.context()
   const directory = join(f.home, 'evidence', String(f.ticket.id))
@@ -552,79 +539,98 @@ test('SQL rollback cleans copied evidence while preserving its source and factor
   )
 })
 
-test('a saved confident merge cannot override a hard path', async (t) => {
-  const { reserveMergeDecision, saveMergeDecision } =
-    await import('../src/store/auto-merge.ts')
+test('a saved merge request cannot override a hard path', async (t) => {
   const { refreshMergeGate } = await import('../src/engine/merge-gate.ts')
-  const { mergeQuestion } = await import('../src/domain/auto-merge.ts')
   const f = await autoMergeFixture(t, { path: 'db/migrations/004.sql' })
   const context = await f.context()
   const { gate } = await refreshMergeGate(f.options, context, f.signal)
-  const input = {
-    ...mergeQuestion,
-    facts: {
-      base: { ref: 'origin/main', commit: gate.facts.base },
-      headCommit: f.head(),
-      files: [{ path: 'db/migrations/004.sql', added: 1, removed: 0 }],
-      verdicts: [],
-      ci: { commit: f.head(), state: 'passed' },
-    },
-    answer: {
-      model: 'jev-1.13.0',
-      choice: 'merge',
-      confidence: 0.99,
-      probabilities: { merge: 0.99, owner: 0.01 },
-      usage: { inputTokens: 10, outputTokens: 10 },
-    },
-    band: 'acted' as const,
-    reason: null,
-    durationMs: 10,
-  }
-  const id = await reserveMergeDecision(
-    f.store.database,
-    f.ticket.id,
-    context.attempt.id,
-    input,
-  )
-  await saveMergeDecision(f.store.database, id!, input)
+  await markMergeRequested(f.store.database, context, {
+    ...gate,
+    ready: true,
+    needsOwner: [],
+  })
   await pollAutoMerge(f.options, context, f.signal)
   assert.equal(f.merges(), 0)
   assert.equal(f.requests(), 0)
 })
 
-test('owner retry preserves the same-head confirmation without asking a second question', async (t) => {
+test('a transient merge error retries with fresh facts rather than parking the head for owner', async (t) => {
   const f = await autoMergeFixture(t)
-  f.setAnswer(0.8)
-  let context = await f.context()
+  const merge = f.options.github.merge
+  let calls = 0
+  f.options.github.merge = async (...args) => {
+    if (++calls === 1) throw new Error('GitHub timed out before mutation')
+    await merge(...args)
+  }
+  const context = await f.context()
   await pollAutoMerge(f.options, context, f.signal)
-  const decision = (await listDecisions(f.store.database, f.ticket.id))[0]!
-  await completeAttempt(f.store.database, context.attempt.id, {
-    outcome: 'needs-decision',
-    summary: 'Pause for inspection',
-    artifacts: [],
-  })
-  const ask = (await f.detail()).ticket.waiting!
-  await resolveAsk(f.store.database, {
-    ticketNumber: f.ticket.number,
-    attemptId: ask.attemptId,
-    resolution: { action: 'retry' },
-  })
-  await runAttempt(f.options, await f.next(), f.signal)
-  context = await f.context()
-  await pollAutoMerge(f.options, context, f.signal)
-  assert.equal(f.requests(), 1)
-  assert.equal(
-    (await listDecisions(f.store.database, f.ticket.id))[0]!.pending,
-    true,
-  )
-  await confirmMergeDecision(
-    f.store.database,
-    f.ticket.number,
-    decision.id,
-    'merge',
+  assert.equal(f.merges(), 0)
+  assert.match(
+    (await f.store.database.query('SELECT error FROM merge_requests')).rows[0]
+      .error,
+    /timed out/,
   )
   await pollAutoMerge(f.options, context, f.signal)
   assert.equal(f.merges(), 1)
+  await pollMergeWait(f.options, context, f.signal)
+  assert.equal((await f.detail()).ticket.status, 'done')
+})
+for (const lost of ['response', 'process'] as const) {
+  test(`merged requested head is attributed to factory after lost ${lost}`, async (t) => {
+    const f = await autoMergeFixture(t)
+    const context = await f.context()
+    if (lost === 'response') {
+      const merge = f.options.github.merge
+      f.options.github.merge = async (...args) => {
+        await merge(...args)
+        throw new Error('Response lost after GitHub merged')
+      }
+      await pollAutoMerge(f.options, context, f.signal)
+    } else {
+      const { refreshMergeGate } = await import('../src/engine/merge-gate.ts')
+      const { gate } = await refreshMergeGate(f.options, context, f.signal)
+      await markMergeRequested(f.store.database, context, gate)
+      f.setPR({ state: 'MERGED', mergeCommit: { oid: f.head() } })
+    }
+    assert.equal(
+      (await f.store.database.query('SELECT succeeded_at FROM merge_requests'))
+        .rows[0].succeeded_at,
+      null,
+    )
+    await pollMergeWait(f.options, context, f.signal)
+    const request = (
+      await f.store.database.query('SELECT * FROM merge_requests')
+    ).rows[0]
+    assert.ok(request.succeeded_at)
+    assert.equal(request.error, null)
+    assert.ok(
+      (await f.detail()).events.some(
+        (e) =>
+          e.kind === 'pull-request.merged' && e.data['mergedBy'] === 'factory',
+      ),
+    )
+    assert.match(
+      (await f.detail()).attempts.at(-1)!.summary!,
+      /Merged by factory/,
+    )
+  })
+}
+test('a merge at a different requested head is attributed to owner', async (t) => {
+  const f = await autoMergeFixture(t)
+  const context = await f.context()
+  const { refreshMergeGate } = await import('../src/engine/merge-gate.ts')
+  const { gate } = await refreshMergeGate(f.options, context, f.signal)
+  await markMergeRequested(f.store.database, context, {
+    ...gate,
+    facts: { ...gate.facts, head: 'a'.repeat(40) },
+  })
+  f.setPR({ state: 'MERGED', mergeCommit: { oid: f.head() } })
+  await pollMergeWait(f.options, context, f.signal)
+  assert.ok(
+    (await f.detail()).events.some(
+      (e) => e.kind === 'pull-request.merged' && e.data['mergedBy'] === 'owner',
+    ),
+  )
 })
 
 test('pending post-merge jobs rotate so later merge commits also get checked', async (t) => {
@@ -647,4 +653,159 @@ test('pending post-merge jobs rotate so later merge commits also get checked', a
   await markPostMergePolled(f.store.database, first[1]!)
   const next = await pendingPostMergeChecks(f.store.database)
   assert.equal(next[0]!.mergeCommit, first[2]!.mergeCommit)
+})
+
+test('kit infrastructure failures are persisted and stop after three attempts', async (t) => {
+  const f = await autoMergeFixture(t)
+  await recordMergedPR(
+    f.store.database,
+    await f.context(),
+    { ...f.pr(), state: 'MERGED', mergeCommit: { oid: f.head() } },
+    false,
+  )
+  await f.store.database.query(
+    "UPDATE post_merge_checks SET created_at = now() - interval '4 minutes'",
+  )
+  f.setPostChecks({ state: 'none', failures: [] })
+  const unavailableHome = join(f.root, 'not-a-directory')
+  await writeFile(unavailableHome, 'A file prevents verification scratch setup')
+  const options = { ...f.options, home: unavailableHome }
+  for (let count = 1; count <= 3; count++) {
+    const [check] = await pendingPostMergeChecks(f.store.database)
+    assert.ok(check)
+    await checkAfterMerge(options, check, f.signal)
+    const row = (
+      await f.store.database.query('SELECT * FROM post_merge_checks')
+    ).rows[0]
+    assert.equal(row.kit_failures, count)
+    assert.equal(row.status, count === 3 ? 'unavailable' : 'pending')
+    assert.match(row.kit_error, /ENOTDIR/)
+  }
+  assert.deepEqual(await pendingPostMergeChecks(f.store.database), [])
+  assert.equal(
+    (await f.store.database.query('SELECT count(*)::int AS n FROM tickets'))
+      .rows[0].n,
+    1,
+  )
+  const notes = (await f.detail()).artifacts.filter(
+    (a) => a.title === 'Post-merge check unavailable',
+  )
+  assert.equal(notes.length, 1)
+  const stored = (
+    await f.store.database.query('SELECT checks FROM post_merge_checks')
+  ).rows[0].checks
+  assert.match(stored.failures[0].excerpt, /after 3 attempts.*ENOTDIR/s)
+})
+
+test('tester work breaks a base re-sync streak', async (t) => {
+  const f = await autoMergeFixture(t, { maxBaseSyncs: 1 })
+  await f.commit(f.source, 'advanced.txt', 'Moved base')
+  await run('git', ['push', f.bare, 'main'], { cwd: f.source })
+  await pollPullRequestBase(f.options, await f.context(), f.signal)
+  await runAttempt(f.options, await f.next(), f.signal)
+  assert.equal(await baseSyncCount(f.store.database, f.ticket.id), 1)
+  const tester = await f.next()
+  assert.equal(tester.step.id, 'test')
+  assert.equal(await baseSyncCount(f.store.database, f.ticket.id), 0)
+})
+
+test('a base merge before the first publication does not count as a re-sync', async (t) => {
+  const f = await autoMergeFixture(t, { initialBaseMove: true })
+  assert.equal((await f.detail()).ticket.currentStep, 'test')
+  assert.equal(await baseSyncCount(f.store.database, f.ticket.id), 0)
+})
+
+test('builder work resets the re-sync streak before a feedback rebuild', async (t) => {
+  const { createTicket } = await import('../src/store/tickets.ts')
+  const { workflowVersion } = await import('../src/library/library.ts')
+  const f = await autoMergeFixture(t)
+  const workflow = {
+    name: 'build-reset',
+    description: 'A feedback rebuild',
+    steps: [
+      {
+        id: 'fix',
+        kind: 'agent' as const,
+        role: 'builder' as const,
+        needs: [],
+        routes: {},
+      },
+    ],
+  }
+  const source = JSON.stringify(workflow)
+  const other = await createTicket(f.store.database, {
+    repository: f.repository.slug,
+    title: 'Feedback rebuild',
+    workflow: { workflow, source, version: workflowVersion(source) },
+  })
+  await f.store.database.query(
+    'INSERT INTO base_syncs(ticket_id, count) VALUES ($1, 3)',
+    [other.id],
+  )
+  await f.next()
+  assert.equal(await baseSyncCount(f.store.database, other.id), 0)
+})
+
+test('a background merge error with a failed gate invalidation does not reject the job or stop the scheduler', async (t) => {
+  const { listenForEvents } = await import('../src/store/events.ts')
+  const { startScheduler } = await import('../src/engine/scheduler.ts')
+  const f = await autoMergeFixture(t)
+  await f.store.database.query(
+    "CREATE FUNCTION reject_gate_update() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'gate invalidation unavailable'; END $$",
+  )
+  await f.store.database.query(
+    'CREATE TRIGGER reject_gate_update BEFORE UPDATE ON merge_gates FOR EACH ROW EXECUTE FUNCTION reject_gate_update()',
+  )
+  f.options.github.inspect = async () => {
+    throw new Error('GitHub observation failed')
+  }
+  const errors: string[] = []
+  const events = listenForEvents(f.store.database)
+  await events.ready
+  const scheduler = await startScheduler({
+    ...f.options,
+    events,
+    fallbackMs: 20,
+    mergePollMs: 20,
+    onError: (error) => {
+      errors.push(String(error))
+    },
+  })
+  try {
+    const deadline = Date.now() + 5000
+    while (
+      errors.filter((error) => error.includes('gate invalidation unavailable'))
+        .length < 2
+    ) {
+      assert.ok(
+        Date.now() < deadline,
+        'Scheduler did not continue polling after invalidation failed',
+      )
+      await new Promise((resolve) => setTimeout(resolve, 20))
+    }
+    assert.ok(
+      errors.some((error) => error.includes('GitHub observation failed')),
+    )
+  } finally {
+    await scheduler.close()
+    await events.close()
+  }
+})
+
+test('only a reviewer may return the typed owner-review field', async (t) => {
+  const { readResult } = await import('../src/engine/prompt.ts')
+  const f = await autoMergeFixture(t)
+  await writeFile(
+    join(f.home, 'result.json'),
+    JSON.stringify({
+      outcome: 'passed',
+      summary: 'Correct but sensitive',
+      artifacts: [],
+      ownerReview: { reason: 'Changes permission checks' },
+    }),
+  )
+  assert.deepEqual((await readResult(f.home, 'reviewer', f.home)).ownerReview, {
+    reason: 'Changes permission checks',
+  })
+  await assert.rejects(readResult(f.home, 'tester', f.home), /Only a reviewer/)
 })

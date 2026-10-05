@@ -84,13 +84,17 @@ store or view local evidence. Structured owner-approved unverified scenario data
 is not provided by the gate/evidence slice and is explicitly unavailable.
 
 Typed decisions, confidence bands and their override log are a parallel Wave 1
-slice. Wave 2 adds opt-in per-repository auto-merge in PostgreSQL, one factual
-safety decision per PR head, confirm-band system merge controls, fresh gate
-re-evaluation and squash merging pinned to the decided head. Hard rules, missing
-keys and errors retain owner merging. Background post-merge checks watch the
-exact merge commit (or run the kit check without CI), and atomically open one
-bug ticket and linked timeline note on failure. Consecutive base re-syncs are
-bounded by `maxBaseSyncs` (default 3), reset by owner retry or merge. A CI settle
+slice. Wave 2 adds opt-in per-repository auto-merge in PostgreSQL, based on hard
+rules and passing independent tester/reviewer verdicts at the exact PR head.
+A typed reviewer owner-review flag and missing reviewers retain owner merging;
+there is no model on the merge path. Fresh gate re-evaluation and head-matched
+squash merging protect each call. Durable requests reconcile lost responses and
+crashes. Bug workflows include a reviewer. Background post-merge checks watch
+the exact merge commit (or run the kit check without CI), and atomically open
+one bug ticket and linked timeline note on failure. Kit infrastructure retries
+are bounded before reporting unavailable. Consecutive base-moved re-syncs are
+bounded by `maxBaseSyncs` (default 3), reset by builder/tester work, owner retry
+or merge; initial publication and feedback rebuilds do not count. A CI settle
 window (default 3 minutes) protects against late registration after pushes;
 untested workflows show a needs-owner reason without being blocked. Evidence is
 copied before the ticket transaction and rolled-back copies are cleaned up.

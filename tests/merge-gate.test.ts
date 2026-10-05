@@ -14,6 +14,8 @@ const green: MergeFacts = {
   behind: 0,
   tester: { status: 'finished', outcome: 'passed', commit: head },
   hasTester: true,
+  hasReviewer: true,
+  reviewer: { status: 'finished', outcome: 'passed', commit: head },
   reproducer: null,
   hasReproducer: false,
   ci: 'passed',

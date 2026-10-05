@@ -29,23 +29,22 @@ test('repository auto-merge starts off, toggles through the API and survives rel
   await expect(toggle).not.toBeChecked()
 })
 
-test.describe('merge confirmation', () => {
+test.describe('rule-based auto-merge', () => {
   test.use({ withAutoMerge: true })
-  test('Merge authorizes a system merge, factory actor appears, and breakage links to one bug', async ({
+  test('system merge records factory actor and breakage links to one bug without model controls', async ({
     page,
     request,
     factory,
   }) => {
     await page.goto(`${factory.url}/#/tickets/${factory.tickets.proofPassed}`)
     await expect(
-      page.getByRole('button', { name: 'Merge', exact: true }),
+      page.getByRole('heading', { name: 'Factory merge pending', exact: true }),
     ).toBeVisible()
+    await expect(
+      page.getByRole('button', { name: 'Merge', exact: true }),
+    ).toHaveCount(0)
     await expect(
       page.getByRole('button', { name: 'I’ll review', exact: true }),
-    ).toBeVisible()
-    await page.getByRole('button', { name: 'Merge', exact: true }).click()
-    await expect(
-      page.getByRole('button', { name: 'Merge', exact: true }),
     ).toHaveCount(0)
     const response = await request.post('/__test/auto-merge', {
       data: { url: factory.url },
@@ -53,6 +52,12 @@ test.describe('merge confirmation', () => {
     expect(response.ok()).toBeTruthy()
     const timeline = page.getByRole('region', { name: 'What happened' })
     await expect(timeline).toContainText('Merged by factory')
+    const data = (await (
+      await request.get(
+        `${factory.url}/api/tickets/${factory.tickets.proofPassed}`,
+      )
+    ).json()) as TicketResponse
+    expect(data.decisions).toEqual([])
     const bug = timeline.getByRole('link', { name: /bug ticket #/ }).first()
     await expect(bug).toBeVisible()
     const href = await bug.getAttribute('href')
@@ -62,29 +67,30 @@ test.describe('merge confirmation', () => {
       page.getByRole('heading', { name: /Breakage after #/ }),
     ).toBeVisible()
   })
-  test('I’ll review retains the owner merge path and records the choice', async ({
-    page,
-    request,
-    factory,
-  }) => {
-    await page.goto(`${factory.url}/#/tickets/${factory.tickets.proofPassed}`)
-    await page.getByRole('button', { name: 'I’ll review', exact: true }).click()
-    await expect(
-      page.getByRole('button', { name: 'Merge', exact: true }),
-    ).toHaveCount(0)
-    await expect(
-      page.getByText(
-        'Review the pull request and merge it when you’re ready.',
-        { exact: false },
-      ),
-    ).toBeVisible()
-    const data = (await (
-      await request.get(
-        `${factory.url}/api/tickets/${factory.tickets.proofPassed}`,
+  for (const state of ['reviewer-owner', 'unreviewed']) {
+    test(`${state} shows the owner reason and preserves owner merging`, async ({
+      page,
+      request,
+      factory,
+    }) => {
+      await request.post('/__test/gate', { data: { url: factory.url, state } })
+      await page.goto(`${factory.url}/#/tickets/${factory.tickets.proofPassed}`)
+      const gate = page.getByRole('region', { name: 'Merge gate' })
+      await expect(gate.getByRole('heading')).toHaveText('Ready to merge')
+      await expect(gate).toContainText(
+        state === 'unreviewed'
+          ? 'Unreviewed workflow'
+          : 'Reviewer requests owner review: Changes public API behavior',
       )
-    ).json()) as TicketResponse
-    expect(
-      data.decisions!.find((d) => d.purpose === 'merge')!.finalOption,
-    ).toBe('owner')
-  })
+      await expect(
+        page.getByText(
+          'Review the pull request and merge it when you’re ready.',
+          { exact: false },
+        ),
+      ).toBeVisible()
+      await expect(
+        page.getByRole('button', { name: 'Merge', exact: true }),
+      ).toHaveCount(0)
+    })
+  }
 })

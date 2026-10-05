@@ -247,7 +247,8 @@ instructs the agent to write `result.json` beside it:
 }
 ```
 
-All three keys are required. Outcomes must belong to the role's catalog contract
+All three keys are required; a passed reviewer may also supply the typed
+`ownerReview` field described below. Outcomes must belong to the role's catalog contract
 or be `needs-decision`. Summary is nonempty. Artifacts use the existing lifecycle
 schema: kind (`plan`, `comment`, `finding`, `evidence`, `log`, `note`), title, and
 exactly one of Markdown `content` or a `path` to an existing file under the
@@ -548,30 +549,33 @@ slice has no structured approval data; the UI and writer say it is unavailable.
 
 Repositories store `autoMerge` in PostgreSQL, off by default. The Repositories
 page updates it through `POST /api/repositories/:id/auto-merge`; no config file or
-environment variable enables it. With the setting off, no TypeSafe request is
-made and the owner merges through GitHub as before.
+environment variable enables it. With the setting off, the owner merges through
+GitHub as before. There is no model or TypeSafe call on the merge path; `decide`
+and its decision log remain available for workflow judgements.
 
-An open `merge` wait asks one typed safety decision per PR head, only when the
-live gate is ready and has no needs-owner reasons. It uses the same TypeSafe
-client, key store, model and confidence bands as `decide`, and records in the
-existing decision log with purpose `merge`. Facts contain the gate, changed paths
-with added/removed counts, verdicts at that head, and CI; ticket/agent prose is
-excluded. A reservation survives restart: an interrupted request falls back to
-the owner rather than asking again. A different head can get a new decision.
+The system merges only when the fresh gate is ready with no needs-owner reasons
+and the latest independent tester and reviewer verdicts both passed at the exact
+PR head. Workflows without a tester or reviewer need the owner (`Untested
+workflow` / `Unreviewed workflow`). Kit, CI and migration paths and invalid
+trusted kits always prevent a factory merge.
 
-An acted `merge` answer (confidence at least 0.9) authorizes a system merge.
-A confirm-band `merge` (at least 0.6) offers **Merge** or **I’ll review**; the
-option API records the owner's choice and the scheduler performs the merge.
-An `owner` choice, low confidence, missing key or error retains GitHub owner
-merging. Kit, CI and migration paths, an untested workflow and an invalid trusted
-kit always prevent a factory merge, including after an owner confirmation.
+A reviewer can pass with `ownerReview: { reason: "…" }` in its result. The field
+is validated, accepted only for a passed reviewer verdict, and stored on that
+attempt. At that head the gate shows the reason as a needs-owner condition.
+Prose never sets the flag. Reviewers use it for correct changes involving auth,
+permissions, data deletion/rewrites, public contracts, sensitive security code or
+weakened tests. A flagged pass still proceeds through publication normally. Bug
+workflows now review after testing, with changes-needed routed to the fixer and
+limit 2.
 
 Immediately before acting, the system fetches and evaluates fresh Git, store
-and GitHub facts; a stored green gate is never authorization. The decided head
-must still match, and `gh pr merge --squash --match-head-commit` enforces that head
-at GitHub. Merge request/result metadata is durable; an error or interrupted
-merge request is left for the owner. The timeline records the factory/owner actor,
-merge commit and associated decision.
+and GitHub facts; a stored green gate is never authorization. The head must
+still match, and `gh pr merge --squash --match-head-commit` enforces it at GitHub.
+`merge_requests` records the authorized head and gate before the call. Transient
+errors remain retryable with fresh facts. If GitHub reports that requested head
+merged after a crash or lost response, the factory reconciles the request,
+clears the error and records a factory merge. The timeline records the rule
+authorization, factory/owner actor and merge commit.
 
 `post_merge_checks` owns one job per repository/merge commit, including owner
 merges. Bounded background jobs inspect all reported GitHub checks on the exact
@@ -581,15 +585,19 @@ minutes for check registration. If PR CI existed but no default-branch checks
 appear, they wait up to an hour, then use the kit's deterministic check. A
 repository with no CI uses the merged kit's setup/check in the verification
 harness's disposable exact-commit checkout, without starting an app. Missing or
-invalid kits are recorded as unavailable; API/infrastructure errors remain
-retryable. Failing checks open one `bug` ticket in the same repository with check
+invalid kits are recorded as unavailable. GitHub API errors remain retryable;
+kit infrastructure failures are persisted and bounded to three attempts, then
+recorded as unavailable with the reason. Setup/check failures open a bug. Failing checks open one `bug` ticket in the same repository with check
 excerpts, PR and merge commit, and add a linked note to the original timeline.
 Bug creation and job completion share a transaction, preventing duplicate bugs
 across retries or restarts. The job table has no general ticket-link semantics.
 
 `maintain-pr` counts consecutive base re-syncs. `maxBaseSyncs` defaults to 3;
 when the base moves again at the bound, the ticket parks for the owner before
-another merge or re-test. A merged PR or an owner retry/move resets the count.
+another merge or re-test. Only re-syncs queued from a base-moved PR wait count;
+initial publication and maintenance after feedback rebuilds do not. Starting
+builder or tester work breaks the streak. A merged PR or an owner retry/move
+also resets the count.
 
 ## Durable evidence (Slice 4, Wave 1)
 
