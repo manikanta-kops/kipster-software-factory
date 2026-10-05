@@ -203,6 +203,12 @@ export interface FactoryEvent {
 export interface TicketLink {
   readonly id: number
   readonly attemptId: number
+  readonly request: {
+    readonly repository: string
+    readonly title: string
+    readonly body: string
+    readonly workflow: string
+  }
   readonly original: Pick<
     Ticket,
     'id' | 'number' | 'title' | 'repository' | 'status' | 'pullRequestUrl'

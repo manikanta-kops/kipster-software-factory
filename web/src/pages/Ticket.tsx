@@ -38,6 +38,12 @@ export function TicketPage({
   if (query.isPending) return <p className="muted">Loading ticket…</p>
   if (query.isError) return <ErrorMessage error={query.error} />
   const { ticket, workflow } = query.data
+  const linkedWait = query.data.links?.find(
+    (link) =>
+      link.original.id === ticket.id &&
+      link.attemptId === ticket.waiting?.attemptId &&
+      ticket.waiting.for === 'other-repo',
+  )
   const current = workflow.steps.find((step) => step.id === ticket.currentStep)
   const images = query.data.artifacts.filter(
     (artifact) =>
@@ -63,8 +69,21 @@ export function TicketPage({
         </p>
         <h1>{ticket.title}</h1>
         <div className="ticket-meta">
-          <Status value={ticket.status} />
-          {['queued', 'running'].includes(ticket.status) && (
+          {linkedWait ? (
+            <span className="ticket-doing">
+              Waiting for linked ticket{' '}
+              <a
+                className="text-link"
+                href={`#/tickets/${linkedWait.linked.number}`}
+              >
+                #{linkedWait.linked.number}
+              </a>{' '}
+              <Status value={linkedWait.linked.status} />
+            </span>
+          ) : (
+            <Status value={ticket.status} />
+          )}
+          {!linkedWait && ['queued', 'running'].includes(ticket.status) && (
             <span className="ticket-doing">{doing(ticket, current)}</span>
           )}
           <PullRequest url={ticket.pullRequestUrl} />

@@ -24,6 +24,7 @@ export async function listTicketLinks(
   const { rows } = await database.query<{
     id: number
     attempt_id: number
+    request: TicketLink['request']
     original: TicketLink['original']
     linked: TicketLink['linked']
     merge_commit: string | null
@@ -42,6 +43,7 @@ export async function listTicketLinks(
   return rows.map((row) => ({
     id: row.id,
     attemptId: row.attempt_id,
+    request: row.request,
     original: row.original,
     linked: row.linked,
     mergeCommit: row.merge_commit,

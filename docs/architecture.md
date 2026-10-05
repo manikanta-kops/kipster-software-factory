@@ -584,17 +584,21 @@ and validates the target ticket. Missing registrations, unavailable workflows,
 capabilities and malformed requests go to the owner. The step schema is unchanged.
 
 Migration 008 adds `ticket_links`, unique by builder attempt and linked ticket,
-and `ticket_dependencies`, unique by ticket/repository. Creating a linked ticket,
+including the full repository/title/body/workflow request, and
+`ticket_dependencies`, unique by ticket/repository. Creating a linked ticket,
 adding its original-repository dependency, and parking the original attempt as
 `other-repo` share one ticket-locked transaction. Replaying that builder result
 returns its existing link. The linked ticket runs its own workflow version and
 approval steps. Both ticket responses show the link and its current status.
 
-Scheduler event wakes and fallback polls resolve terminal linked tickets without
-holding an executor slot. Done alone is insufficient: the linked PR must be
+The scheduler resolves terminal linked tickets at the merge-poll interval (one
+minute by default), without holding an executor slot. Event wakes do not bypass
+that interval. Done alone is insufficient: the linked PR must be
 confirmed merged with a full merge commit from GitHub. The link records that
 commit, a note retains the PR URL, and the lifecycle queues a fresh builder
-attempt of the original step. Cancelled links and completion without confirmed
+attempt of the original step with the original builder summary and full request
+alongside the PR URL and merge commit. Resolving a link preserves that builder's
+summary; the merge or cancellation explanation is a separate note. Cancelled links and completion without confirmed
 merge ask the owner. Cancelling the original never cancels the linked ticket and
 never resumes the cancelled original. Restart leaves parked attempts intact.
 
@@ -603,24 +607,41 @@ must be registered and distinct from the target; repeated case-insensitive slugs
 are deduplicated. Ticket detail responses add `dependencies` and `links`; tickets
 with neither retain the existing execution flow. The New ticket form selects
 optional dependencies; the Ticket page shows them and explains cancellation.
+A parked original displays “Waiting for linked ticket #N” and that ticket's
+current status, refreshed on linked-ticket events, with Cancel still available.
 
 Before every agent session, including proof sessions and the PR writer, the
 factory fetches each dependency's default branch through its repository cache.
 It recreates a detached checkout at that exact commit under
 `home/dependencies/<ticket-id>/<repository-id>/repo`, so different tickets cannot
 contaminate each other and restart cannot preserve agent changes. The repository
-cache retains Git objects; the dependency clone has no remote and no shared
-writable object store. Ownership checks reject unowned or symlinked directories.
+cache retains Git objects; the dependency checkout borrows them through
+`.git/objects/info/alternates`, with no object copying, no remote, and only a
+default-branch ref. A cache ref at `refs/kipster/dependencies/<ticket-id>` pins
+the checkout's commit before use. This keeps its full object graph reachable
+even when the default branch is force-pushed and the cache is garbage-collected.
+The pin changes only when that ticket prepares its next fresh session, after
+the prior executor has exited. Factory caches and their pins must not be
+removed or edited externally while dependency checkouts exist; a borrowed
+checkout cannot survive deletion of its object source. Ownership checks reject unowned or symlinked directories.
 The prompt lists repository, path and full commit and forbids edits or pushes.
 
 Files, directories and Git metadata have read-only permissions. After executor
 exit, including execution errors, cancellation and timeout, the engine compares
-contents, file modes, symlinks, ignored files and metadata to the before-session
-snapshot. Any difference fails the step to the owner with changed paths and
-recreates the checkout at the pinned commit before releasing the session. The
+contents, file modes, symlinks, ignored files, HEAD, refs and checkout
+configuration. It hashes once before and once after the session, streaming file
+contents and excluding the object database and Git packs. Any difference fails
+the step to the owner with changed paths and recreates the checkout at the pinned
+commit using the step's signal. If that signal has expired or been cancelled,
+the failure explicitly reports that restoration did not finish; the next session
+recreates the checkout. The
 factory never pushes a dependency. These are ordinary filesystem protections and
 post-session detection, not an OS sandbox: unrestricted agents run as the owner
-and can deliberately bypass permissions. Dependency caches remain in factory home.
+and can deliberately bypass permissions. After an executor has exited, terminal
+ticket cleanup makes its owned dependency directories writable, removes them and
+releases their cache pins. This also runs when a dirty or locked ticket worktree
+must be retained, or when that worktree is already absent. Repository object
+caches remain; dependency checkouts do not accumulate for done/cancelled tickets.
 
 Child tickets are deferred until a real ticket needs them; the unused child
 workflows and actions are absent from the catalog and library.

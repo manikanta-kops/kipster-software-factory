@@ -466,8 +466,8 @@ export async function linkOtherRepository(
       dependencies: [original.repository.slug],
     })
     await connection.query(
-      'INSERT INTO ticket_links (original_ticket_id, attempt_id, linked_ticket_id) VALUES ($1, $2, $3)',
-      [locked.id, attemptId, linked.id],
+      'INSERT INTO ticket_links (original_ticket_id, attempt_id, linked_ticket_id, request) VALUES ($1, $2, $3, $4)',
+      [locked.id, attemptId, linked.id, JSON.stringify(parsed.otherRepository)],
     )
     const events: NewEvent[] = []
     await insertArtifacts(
@@ -549,7 +549,7 @@ export async function resolveLinkedTicket(
       ],
       events,
     )
-    await apply(connection, locked, transition, { summary }, events)
+    await apply(connection, locked, transition, {}, events)
   })
 }
 

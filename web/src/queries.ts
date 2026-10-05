@@ -5,6 +5,7 @@ import {
   useQueryClient,
 } from '@tanstack/react-query'
 import { api } from './api.ts'
+import type { TicketResponse } from '../../src/api/contract.ts'
 
 export const queryClient = new QueryClient({
   defaultOptions: { queries: { staleTime: 30_000, retry: 1 } },
@@ -46,6 +47,20 @@ export function useLiveEvents() {
             void client.invalidateQueries({
               queryKey: ['ticket', event.ticketNumber],
             })
+            for (const [
+              queryKey,
+              detail,
+            ] of client.getQueriesData<TicketResponse>({
+              queryKey: ['ticket'],
+            }))
+              if (
+                detail?.links?.some((link) =>
+                  [link.original.number, link.linked.number].includes(
+                    event.ticketNumber!,
+                  ),
+                )
+              )
+                void client.invalidateQueries({ queryKey })
           }
           if (event.kind.startsWith('repository.'))
             void client.invalidateQueries({ queryKey: ['repositories'] })

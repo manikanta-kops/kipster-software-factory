@@ -82,7 +82,9 @@ The system creates the linked ticket and parks the original builder attempt in
 one transaction, unique per result attempt. The linked ticket follows its own
 workflow, including its approval steps, and receives the original repository as
 a read-only dependency. A confirmed merged PR on a done linked ticket queues the
-same builder step in a fresh attempt with its PR URL and merge commit. A cancelled
+same builder step in a fresh attempt with the original summary, request title/body,
+PR URL and merge commit. Terminal links are checked at the merge-poll interval;
+event wakes do not trigger extra polls. A cancelled
 link, or completion without a confirmed merged PR, asks the owner. The parked
 attempt survives restart and consumes no executor slot. Cancelling the original
 does not cancel linked tickets.

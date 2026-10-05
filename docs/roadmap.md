@@ -101,7 +101,8 @@ storage target; local evidence remains the default.
 
 Builders can request a linked ticket in another registered repository with
 `needs-other-repo`. The original waits without an executor slot, then its builder
-runs in a fresh attempt with the linked PR URL and merge commit. The linked ticket
+runs in a fresh attempt with its original explanation, full request, linked PR URL
+and merge commit. The linked ticket
 runs its own workflow and approval. Cancellation of the linked ticket asks the
 original owner; cancelling the original leaves the linked ticket independent.
 
@@ -110,6 +111,9 @@ session receives freshly fetched default-branch checkouts with paths and exact
 commits. File permissions block ordinary writes; post-session checks detect
 content, ignored-file, permission and Git metadata changes, fail to the owner and
 restore the checkouts. Linked tickets automatically read the original repository.
+Checkouts share cached objects, pin their commits through force-pushes and cache
+GC, and are removed with their pins after done/cancel even if the ticket worktree
+must be retained. Snapshots exclude Git packs; restoration uses the step signal.
 
 Child tickets are deferred. Build them only when a real ticket needs them; the
 unused child workflows and actions have been removed.

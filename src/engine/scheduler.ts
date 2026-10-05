@@ -184,13 +184,13 @@ export async function startScheduler(
         active.set(context.attempt.id, { context, controller, done })
       }
     }
-    await pollLinkedTickets(
-      runnerOptions,
-      AbortSignal.any([lifetime.signal, AbortSignal.timeout(30_000)]),
-      report,
-    ).catch(report)
     if (Date.now() >= nextMergePoll) {
       nextMergePoll = Date.now() + (options.mergePollMs ?? 60_000)
+      await pollLinkedTickets(
+        runnerOptions,
+        AbortSignal.any([lifetime.signal, AbortSignal.timeout(30_000)]),
+        report,
+      ).catch(report)
       for (const context of await listWaitingForMerge(
         database,
         'pull-request-checks',

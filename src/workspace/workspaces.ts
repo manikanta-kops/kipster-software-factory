@@ -4,6 +4,7 @@ import type { Repository, Ticket } from '../domain/records.ts'
 import { loadKit } from '../kit/kit.ts'
 import type { RepositoryKit } from '../domain/records.ts'
 import { run } from '../executors/process.ts'
+import { removeDependencies } from './dependencies.ts'
 
 export class Workspaces {
   readonly home: string
@@ -130,12 +131,51 @@ export class Workspaces {
       return path
     })
   }
+  async pinDependency(
+    ticket: Ticket,
+    repository: Repository,
+    signal: AbortSignal,
+  ): Promise<{ cache: string; branch: string; commit: string }> {
+    await this.prepareRepository(repository, signal)
+    return this.serial(repository.id, async () => {
+      const cache = this.cache(repository)
+      const git = (args: string[]) => run('git', args, { cwd: cache, signal })
+      const branch = (
+        await git(['symbolic-ref', 'refs/remotes/origin/HEAD'])
+      ).replace('refs/remotes/origin/', '')
+      const commit = await git(['rev-parse', `refs/remotes/origin/${branch}`])
+      // The borrower has no objects of its own; keep its commit reachable through cache GC and force-pushes.
+      await git([
+        'update-ref',
+        `refs/kipster/dependencies/${ticket.id}`,
+        commit,
+      ])
+      return { cache, branch, commit }
+    })
+  }
+  async unpinDependency(
+    ticket: Ticket,
+    repositoryId: number,
+    signal: AbortSignal,
+  ): Promise<void> {
+    await this.serial(repositoryId, () =>
+      run(
+        'git',
+        ['update-ref', '-d', `refs/kipster/dependencies/${ticket.id}`],
+        {
+          cwd: join(this.home, 'repositories', String(repositoryId), 'repo'),
+          signal,
+        },
+      ),
+    )
+  }
   async cleanup(
     ticket: Ticket,
     repository: Repository,
     signal: AbortSignal,
   ): Promise<boolean> {
     if (ticket.status !== 'done' && ticket.status !== 'cancelled') return false
+    await removeDependencies(this, ticket, signal)
     return this.serial(repository.id, async () => {
       const root = join(this.home, 'worktrees', String(ticket.id))
       const path = this.path(ticket)

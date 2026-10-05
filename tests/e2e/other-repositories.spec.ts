@@ -49,9 +49,11 @@ test.describe('linked tickets', () => {
   }) => {
     const { original, linked } = factory.linkedTickets!
     await page.goto(`${factory.url}/#/tickets/${original}`)
-    await expect(
-      page.getByText('Waiting for linked ticket', { exact: true }),
-    ).toBeVisible()
+    await expect(page.locator('.ticket-meta')).toContainText(
+      `Waiting for linked ticket #${linked}`,
+    )
+    await expect(page.locator('.ticket-meta')).toContainText('queued')
+    await expect(page.locator('.ticket-meta .badge.running')).toHaveCount(0)
     await expect(page.getByRole('button', { name: 'Retry step' })).toHaveCount(
       0,
     )
@@ -84,5 +86,26 @@ test.describe('linked tickets', () => {
       await request.get(`${factory.url}/api/tickets/${linked}`)
     ).json()) as TicketResponse
     expect(detail.ticket.status).toBe('queued')
+  })
+  test('the waiting header updates with the linked ticket status', async ({
+    page,
+    factory,
+    request,
+  }) => {
+    const { original, linked } = factory.linkedTickets!
+    await page.goto(`${factory.url}/#/tickets/${original}`)
+    const header = page.locator('.ticket-meta')
+    await expect(header).toContainText(`Waiting for linked ticket #${linked}`)
+    await expect(header).toContainText('queued')
+    const cancelled = await request.post(
+      `${factory.url}/api/tickets/${linked}/cancel`,
+      { data: {} },
+    )
+    expect(cancelled.ok()).toBeTruthy()
+    await expect(header).toContainText('cancelled')
+    await expect(header.locator('.badge.running')).toHaveCount(0)
+    await expect(
+      page.getByRole('button', { name: 'Cancel ticket', exact: true }),
+    ).toBeVisible()
   })
 })

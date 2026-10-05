@@ -72,7 +72,9 @@ failure seen in practice.
   linked ticket with its own workflow (default `feature`) and plan approval.
 - **Resume on confirmed merge.** The original parks without an executor slot and
   starts a fresh builder attempt after the linked ticket finishes with a confirmed
-  merged PR. That attempt receives the PR URL and merge commit. A cancelled link
+  merged PR. That attempt receives the original builder explanation, full request,
+  PR URL and merge commit. Linked tickets are polled at the merge-poll interval.
+  A cancelled link
   or an invalid request asks the owner.
 - **Keep cancellation local.** Cancelling the original does not cancel linked
   work. The ticket page states this before cancellation.

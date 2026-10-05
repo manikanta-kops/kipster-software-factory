@@ -148,12 +148,13 @@ export async function otherRepositoriesFixture() {
     setExecute(value: AgentExecutor) {
       execute = value
     },
-    async start() {
+    async start(polling: { mergePollMs?: number; fallbackMs?: number } = {}) {
       scheduler = await startScheduler({
         ...options,
         events,
         fallbackMs: 50,
         mergePollMs: 50,
+        ...polling,
         onError: (error) => errors.push(error),
       })
       return scheduler

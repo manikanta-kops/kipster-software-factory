@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto'
+import { createReadStream } from 'node:fs'
 import {
   chmod,
   lstat,
@@ -7,6 +8,7 @@ import {
   readFile,
   readlink,
   rm,
+  rmdir,
   writeFile,
 } from 'node:fs/promises'
 import { join } from 'node:path'
@@ -26,17 +28,24 @@ async function entries(
   root: string,
   visit: (path: string, relative: string) => Promise<void>,
   relative = '',
+  skipGit = false,
 ): Promise<void> {
+  if (skipGit && relative === '.git') return
   const path = join(root, relative)
   const info = await lstat(path)
   await visit(path, relative)
   if (info.isDirectory() && !info.isSymbolicLink())
     for (const name of (await readdir(path)).sort())
-      await entries(root, visit, join(relative, name))
+      await entries(root, visit, join(relative, name), skipGit)
 }
 
-async function permissions(path: string, writable: boolean): Promise<void> {
+async function permissions(
+  path: string,
+  writable: boolean,
+  signal: AbortSignal,
+): Promise<void> {
   await entries(path, async (file) => {
+    signal.throwIfAborted()
     const info = await lstat(file)
     if (info.isSymbolicLink()) return
     await chmod(
@@ -58,19 +67,83 @@ async function permissions(path: string, writable: boolean): Promise<void> {
 
 async function snapshot(root: string): Promise<Map<string, string>> {
   const files = new Map<string, string>()
-  await entries(root, async (file, relative) => {
+  const visit = async (file: string, relative: string) => {
     const info = await lstat(file)
-    const content = info.isSymbolicLink()
-      ? await readlink(file)
-      : info.isFile()
-        ? await readFile(file).catch(() => Buffer.from('unreadable'))
-        : 'directory'
-    files.set(
-      relative,
-      `${info.mode}:${createHash('sha256').update(content).digest('hex')}`,
-    )
-  })
+    const hash = createHash('sha256')
+    if (info.isSymbolicLink()) hash.update(await readlink(file))
+    else if (info.isFile())
+      for await (const chunk of createReadStream(file)) hash.update(chunk)
+    files.set(relative, `${info.mode}:${hash.digest('hex')}`)
+  }
+  await entries(root, visit, '', true)
+  const metadata = await present(join(root, '.git'))
+  if (metadata) await visit(join(root, '.git'), '.git')
+  if (!metadata?.isDirectory() || metadata.isSymbolicLink()) return files
+  // Observe HEAD, refs and checkout configuration, never scan the shared object database or Git packs.
+  for (const relative of [
+    '.git/HEAD',
+    '.git/refs',
+    '.git/packed-refs',
+    '.git/config',
+    '.git/objects/info/alternates',
+  ])
+    if (await present(join(root, relative)))
+      await entries(root, visit, relative)
   return files
+}
+
+async function present(path: string) {
+  return lstat(path).catch((error: NodeJS.ErrnoException) => {
+    if (error.code !== 'ENOENT') throw error
+    return null
+  })
+}
+
+export async function removeDependencies(
+  workspaces: Workspaces,
+  ticket: Ticket,
+  signal: AbortSignal,
+): Promise<void> {
+  const parent = join(workspaces.home, 'dependencies')
+  const root = join(parent, String(ticket.id))
+  if (!(await present(root))) return
+  for (const directory of [parent, root])
+    if ((await lstat(directory)).isSymbolicLink())
+      throw new Error('Refusing to clean a symlinked dependency directory')
+  for (const name of await readdir(root)) {
+    signal.throwIfAborted()
+    const directory = join(root, name)
+    if (!/^\d+$/.test(name) || (await lstat(directory)).isSymbolicLink())
+      throw new Error('Refusing to clean an unowned dependency directory')
+    if (
+      (await readdir(directory)).some(
+        (file) => !['owner.json', 'repo'].includes(file),
+      )
+    )
+      throw new Error(
+        'Unknown state beside dependency checkout; preserved for inspection',
+      )
+    const ownerFile = join(directory, 'owner.json')
+    if ((await lstat(ownerFile)).isSymbolicLink())
+      throw new Error('Refusing to clean a symlinked dependency owner')
+    const owner = JSON.parse(await readFile(ownerFile, 'utf8'))
+    if (owner.ticket !== ticket.id || owner.repository !== Number(name))
+      throw new Error('Dependency ownership mismatch during cleanup')
+    const cacheOwner = join(workspaces.home, 'repositories', name, 'owner.json')
+    if (
+      (await readFile(cacheOwner, 'utf8')) !==
+      JSON.stringify({ repository: owner.repository, url: owner.url })
+    )
+      throw new Error('Dependency cache ownership mismatch during cleanup')
+    const path = join(directory, 'repo')
+    const info = await present(path)
+    if (info && !info.isSymbolicLink()) await permissions(path, true, signal)
+    await rm(path, { recursive: true, force: true })
+    await workspaces.unpinDependency(ticket, owner.repository, signal)
+    await rm(ownerFile)
+    await rmdir(directory)
+  }
+  await rmdir(root)
 }
 
 export async function prepareDependencies(
@@ -89,12 +162,6 @@ export async function prepareDependencies(
   }[] = []
   for (const repository of repositories) {
     signal.throwIfAborted()
-    const branch = await workspaces.prepareRepository(repository, signal)
-    const cache = workspaces.cache(repository)
-    const commit = await run('git', ['rev-parse', `origin/${branch}`], {
-      cwd: cache,
-      signal,
-    })
     const root = join(
       workspaces.home,
       'dependencies',
@@ -127,38 +194,45 @@ export async function prepareDependencies(
       await writeFile(join(root, 'owner.json'), owner, { flag: 'wx' })
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error
+      if ((await lstat(join(root, 'owner.json'))).isSymbolicLink())
+        throw new Error('Dependency owner was replaced with a symlink', {
+          cause: error,
+        })
       if ((await readFile(join(root, 'owner.json'), 'utf8')) !== owner)
         throw new Error('Dependency ownership mismatch', { cause: error })
     }
     if (existing?.isSymbolicLink())
       throw new Error('Dependency checkout was replaced with a symlink')
-    const clone = async (lifetime: AbortSignal) => {
-      await run(
-        'git',
-        ['clone', '--no-local', '--no-checkout', '--', cache, path],
-        { signal: lifetime },
-      )
-      await run('git', ['remote', 'remove', 'origin'], {
-        cwd: path,
-        signal: lifetime,
+    const { cache, branch, commit } = await workspaces.pinDependency(
+      ticket,
+      repository,
+      signal,
+    )
+    const clone = async () => {
+      signal.throwIfAborted()
+      await run('git', ['init', '--template=', '-b', branch, '--', path], {
+        signal,
       })
-      await run(
-        'git',
-        ['fetch', '--no-tags', '--', cache, `refs/remotes/origin/${branch}`],
-        { cwd: path, signal: lifetime },
+      await writeFile(
+        join(path, '.git/objects/info/alternates'),
+        `${join(cache, '.git/objects')}\n`,
       )
+      await run('git', ['update-ref', `refs/heads/${branch}`, commit], {
+        cwd: path,
+        signal,
+      })
       await run('git', ['checkout', '--detach', commit], {
         cwd: path,
-        signal: lifetime,
+        signal,
       })
-      await permissions(path, false)
+      await permissions(path, false, signal)
     }
     // Recreate from the fetched cache so a factory crash cannot preserve agent edits or Git configuration.
     if (existing) {
-      await permissions(path, true)
+      await permissions(path, true, signal)
       await rm(path, { recursive: true })
     }
-    await clone(signal)
+    await clone()
     const checkout = { repository: repository.slug, path, commit }
     prepared.push({
       checkout,
@@ -178,9 +252,11 @@ export async function prepareDependencies(
             'Dependency ownership changed; preserved for inspection',
           )
         const info = await lstat(path).catch(() => null)
-        if (info && !info.isSymbolicLink()) await permissions(path, true)
+        signal.throwIfAborted()
+        if (info && !info.isSymbolicLink())
+          await permissions(path, true, signal)
         await rm(path, { recursive: true, force: true })
-        await clone(AbortSignal.timeout(30_000))
+        await clone()
       },
     })
   }

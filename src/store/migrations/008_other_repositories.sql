@@ -13,6 +13,7 @@ CREATE TABLE ticket_links (
   original_ticket_id integer NOT NULL REFERENCES tickets(id),
   attempt_id integer NOT NULL UNIQUE REFERENCES attempts(id),
   linked_ticket_id integer NOT NULL UNIQUE REFERENCES tickets(id),
+  request jsonb NOT NULL CHECK (jsonb_typeof(request) = 'object'),
   merge_commit text CHECK (merge_commit ~ '^[0-9a-f]{40}([0-9a-f]{24})?$'),
   resolved_at timestamptz,
   CHECK (original_ticket_id <> linked_ticket_id)

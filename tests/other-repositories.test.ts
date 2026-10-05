@@ -1,14 +1,19 @@
 import type { TicketResponse } from '../src/api/contract.ts'
 import assert from 'node:assert/strict'
-import { chmod, lstat, readFile, writeFile } from 'node:fs/promises'
+import { chmod, lstat, readFile, readdir, writeFile } from 'node:fs/promises'
+import { randomBytes } from 'node:crypto'
 import { join } from 'node:path'
 import { test } from 'node:test'
 import { run } from '../src/executors/process.ts'
 import {
+  addAttemptArtifacts,
   cancelTicket,
+  claimAttempts,
+  completeAttempt,
   decide,
   linkOtherRepository,
   listTickets,
+  markRunning,
   resolveAsk,
   setPullRequestUrl,
 } from '../src/store/tickets.ts'
@@ -19,6 +24,7 @@ import {
   packet,
   until,
 } from './helpers/other-repositories.ts'
+import { prepareDependencies } from '../src/workspace/dependencies.ts'
 
 const request = {
   outcome: 'needs-other-repo',
@@ -74,6 +80,10 @@ test('needs-other-repo creates one link across restart, releases its slot, and r
   assert.equal(parked.ticket.status, 'running')
   assert.equal(parked.links.length, 1)
   const link = parked.links[0]!
+  assert.deepEqual(link.request, {
+    ...request.otherRepository,
+    workflow: 'feature',
+  })
   const linked = await until(
     () => f.detail(link.linked.number),
     (detail) => detail.ticket.waiting?.for === 'human',
@@ -144,6 +154,13 @@ test('needs-other-repo creates one link across restart, releases its slot, and r
     /https:\/\/github.com\/fixture\/library\/pull\/42/,
   )
   assert.ok(invocation.prompt.includes('a'.repeat(40)))
+  assert.ok(invocation.prompt.includes(request.summary))
+  assert.ok(invocation.prompt.includes(request.otherRepository.title))
+  assert.ok(invocation.prompt.includes(request.otherRepository.body))
+  assert.equal(
+    resumed.attempts.find((attempt) => attempt.id === link.attemptId)!.summary,
+    request.summary,
+  )
   assert.notEqual(invocation.directory, f.invocations[0]!.directory)
   assert.equal(resumed.links[0]?.mergeCommit, 'a'.repeat(40))
   assert.deepEqual(f.errors, [])
@@ -171,6 +188,11 @@ test('cancelled linked ticket asks the owner; cancelling an original leaves its 
     (detail) => detail.ticket.waiting?.for === 'ask',
   )
   assert.match(ask.ticket.waiting!.summary!, /was cancelled/)
+  assert.equal(
+    ask.attempts.find((attempt) => attempt.id === parked.links[0]!.attemptId)!
+      .summary,
+    request.summary,
+  )
   const second = await f.ticket('Original cancelled independently')
   const secondPark = await until(
     () => f.detail(second.number),
@@ -299,6 +321,279 @@ test('dependency checkouts are fresh, detached, read-only and named with exact c
   assert.deepEqual(f.errors, [])
 })
 
+test('dependencies share cache objects, expose only the default branch, and survive force-push and cache GC', async (t) => {
+  const f = await otherRepositoriesFixture()
+  t.after(() => f.close())
+  const repository = f.repositories[1]!
+  const source = f.sources[1]!
+  await run('git', ['checkout', '-b', 'kipster/unrelated'], { cwd: source })
+  await writeFile(join(source, 'large-ticket-only.bin'), randomBytes(2_000_000))
+  await commit(source, 'Unrelated ticket objects')
+  await run('git', ['tag', 'unrelated-tag'], { cwd: source })
+  await run('git', ['push', 'origin', 'kipster/unrelated', '--tags'], {
+    cwd: source,
+  })
+  const ticket = await f.ticket('Object sharing', [repository.slug])
+  const session = await prepareDependencies(
+    f.workspaces,
+    ticket,
+    [repository],
+    new AbortController().signal,
+  )
+  const checkout = session.checkouts[0]!
+  const git = (args: string[]) => run('git', args, { cwd: checkout.path })
+  assert.equal(
+    await git(['for-each-ref', '--format=%(refname)']),
+    'refs/heads/next',
+  )
+  assert.equal(await git(['remote']), '')
+  assert.equal(
+    await readFile(join(checkout.path, '.git/objects/info/alternates'), 'utf8'),
+    `${join(f.workspaces.cache(repository), '.git/objects')}\n`,
+  )
+  assert.match(
+    await git(['count-objects', '-v']),
+    /^count: 0\nsize: 0\nin-pack: 0\npacks: 0\nsize-pack: 0\n/,
+  )
+  const bytes = async (path: string): Promise<number> => {
+    const info = await lstat(path)
+    return info.isDirectory()
+      ? (
+          await Promise.all(
+            (await readdir(path)).map((name) => bytes(join(path, name))),
+          )
+        ).reduce((sum, value) => sum + value, 0)
+      : info.size
+  }
+  assert.ok((await bytes(join(checkout.path, '.git'))) < 64_000)
+
+  await run('git', ['checkout', '--orphan', 'replacement'], { cwd: source })
+  await run('git', ['rm', '-rf', '.'], { cwd: source })
+  await writeFile(join(source, 'README.md'), 'Replaced default branch\n')
+  const replacement = await commit(source, 'Force-pushed history')
+  await run('git', ['push', '--force', 'origin', 'HEAD:next'], { cwd: source })
+  await f.workspaces.prepareRepository(repository, new AbortController().signal)
+  const cacheGit = (args: string[]) =>
+    run('git', args, { cwd: f.workspaces.cache(repository) })
+  await cacheGit(['checkout', '--detach', replacement])
+  for (const ref of [
+    'refs/heads/next',
+    'refs/remotes/origin/kipster/unrelated',
+    'refs/tags/unrelated-tag',
+  ])
+    await cacheGit(['update-ref', '-d', ref])
+  await cacheGit(['reflog', 'expire', '--expire=now', '--all'])
+  await cacheGit(['gc', '--prune=now'])
+  assert.equal(
+    await cacheGit(['rev-parse', `refs/kipster/dependencies/${ticket.id}`]),
+    checkout.commit,
+  )
+  assert.equal(await git(['show', 'HEAD:README.md']), 'library initial')
+  await session.verify()
+})
+
+test('cleanup removes read-only dependencies and cache pins even when the ticket worktree is retained', async (t) => {
+  const f = await otherRepositoriesFixture()
+  t.after(() => f.close())
+  const ticket = await f.ticket('Cleanup dependencies', ['fixture/library'])
+  const signal = new AbortController().signal
+  const path = await f.workspaces.prepare(ticket, f.repositories[0]!, signal)
+  await writeFile(join(path, 'README.md'), 'Retain this ticket change')
+  const session = await prepareDependencies(
+    f.workspaces,
+    ticket,
+    [f.repositories[1]!],
+    signal,
+  )
+  await session.verify()
+  const root = join(f.home, 'dependencies', String(ticket.id))
+  assert.equal((await lstat(session.checkouts[0]!.path)).mode & 0o222, 0)
+  assert.equal(
+    await f.workspaces.cleanup(
+      { ...ticket, status: 'done' },
+      f.repositories[0]!,
+      signal,
+    ),
+    false,
+  )
+  await assert.rejects(lstat(root), { code: 'ENOENT' })
+  assert.equal(
+    await readFile(join(path, 'README.md'), 'utf8'),
+    'Retain this ticket change',
+  )
+  assert.equal(
+    await run(
+      'git',
+      ['for-each-ref', '--format=%(refname)', 'refs/kipster/dependencies'],
+      { cwd: f.workspaces.cache(f.repositories[1]!) },
+    ),
+    '',
+  )
+})
+
+for (const terminal of ['done', 'cancelled'] as const) {
+  test(`scheduler removes read-only dependency checkouts when a ticket is ${terminal}`, async (t) => {
+    const f = await otherRepositoriesFixture()
+    t.after(() => f.close())
+    const ticket = await f.ticket('Terminal dependency cleanup', [
+      'fixture/library',
+    ])
+    await f.start()
+    const ready = await until(
+      () => f.detail(ticket.number),
+      (detail) => detail.ticket.waiting?.for === 'human',
+    )
+    const root = join(f.home, 'dependencies', String(ticket.id))
+    assert.equal(
+      (await lstat(join(root, String(f.repositories[1]!.id), 'repo'))).mode &
+        0o222,
+      0,
+    )
+    if (terminal === 'done')
+      await decide(f.database, {
+        ticketNumber: ticket.number,
+        attemptId: ready.ticket.waiting!.attemptId,
+        choice: 'approved',
+      })
+    else await cancelTicket(f.database, { ticketNumber: ticket.number })
+    await until(
+      () => lstat(root).catch(() => null),
+      (info) => info === null,
+    )
+    await until(
+      () => lstat(f.workspaces.path(ticket)).catch(() => null),
+      (info) => info === null,
+    )
+    assert.equal((await f.detail(ticket.number)).ticket.status, terminal)
+    assert.equal(
+      await run(
+        'git',
+        ['for-each-ref', '--format=%(refname)', 'refs/kipster/dependencies'],
+        { cwd: f.workspaces.cache(f.repositories[1]!) },
+      ),
+      '',
+    )
+    assert.deepEqual(f.errors, [])
+  })
+}
+
+test('dependency restoration uses the step cancellation signal', async (t) => {
+  const f = await otherRepositoriesFixture()
+  t.after(() => f.close())
+  const ticket = await f.ticket('Cancelled restoration', ['fixture/library'])
+  const controller = new AbortController()
+  const session = await prepareDependencies(
+    f.workspaces,
+    ticket,
+    [f.repositories[1]!],
+    controller.signal,
+  )
+  const path = session.checkouts[0]!.path
+  await chmod(join(path, 'README.md'), 0o644)
+  await writeFile(join(path, 'README.md'), 'Agent changed the dependency')
+  controller.abort(new Error('Step restoration was cancelled'))
+  await assert.rejects(
+    session.verify(),
+    /restoration failed.*Step restoration was cancelled.*README.md/,
+  )
+  assert.equal(
+    await readFile(join(path, 'README.md'), 'utf8'),
+    'Agent changed the dependency',
+  )
+  const restored = await prepareDependencies(
+    f.workspaces,
+    ticket,
+    [f.repositories[1]!],
+    new AbortController().signal,
+  )
+  await restored.verify()
+  assert.equal(
+    await readFile(join(path, 'README.md'), 'utf8'),
+    'library initial\n',
+  )
+})
+
+test('linked-ticket polling is throttled despite frequent scheduler wakes', async (t) => {
+  const f = await otherRepositoriesFixture()
+  t.after(() => f.close())
+  const original = await f.ticket()
+  const context = (await claimAttempts(f.database, 1))[0]!
+  await markRunning(f.database, context.attempt.id, 'codex')
+  const link = await linkOtherRepository(
+    f.database,
+    context.attempt.id,
+    request,
+    f.library.get('feature')!,
+    'b'.repeat(40),
+  )
+  const linkedPlan = (await claimAttempts(f.database, 1))[0]!
+  await markRunning(f.database, linkedPlan.attempt.id, 'codex')
+  await completeAttempt(f.database, linkedPlan.attempt.id, {
+    outcome: 'done',
+    summary: 'Plan',
+    artifacts: [],
+  })
+  let detail = await f.detail(link.linked.number)
+  await decide(f.database, {
+    ticketNumber: detail.ticket.number,
+    attemptId: detail.ticket.waiting!.attemptId,
+    choice: 'approved',
+  })
+  const linkedBuild = (await claimAttempts(f.database, 1))[0]!
+  await markRunning(f.database, linkedBuild.attempt.id, 'codex')
+  await completeAttempt(f.database, linkedBuild.attempt.id, {
+    outcome: 'done',
+    summary: 'Built',
+    artifacts: [],
+  })
+  detail = await f.detail(link.linked.number)
+  await setPullRequestUrl(
+    f.database,
+    detail.ticket.id,
+    'https://github.com/fixture/library/pull/42',
+  )
+  await decide(f.database, {
+    ticketNumber: detail.ticket.number,
+    attemptId: detail.ticket.waiting!.attemptId,
+    choice: 'approved',
+  })
+  const merge = (await claimAttempts(f.database, 1))[0]!
+  await markRunning(f.database, merge.attempt.id, 'system')
+  await completeAttempt(f.database, merge.attempt.id, {
+    outcome: 'merged',
+    summary: 'Merged',
+    artifacts: [],
+  })
+  let polls = 0
+  f.github.inspect = async () => {
+    polls++
+    throw new Error('Temporary GitHub error keeps the link unresolved')
+  }
+  await f.start({ mergePollMs: 1_500, fallbackMs: 20 })
+  await until(
+    async () => polls,
+    (count) => count === 1,
+  )
+  for (let wake = 0; wake < 4; wake++)
+    await addAttemptArtifacts(f.database, context.attempt.id, [
+      {
+        kind: 'note',
+        title: `Wake ${wake}`,
+        content: 'Poll interval should still apply.',
+      },
+    ])
+  await new Promise((resolve) => setTimeout(resolve, 250))
+  assert.equal(polls, 1)
+  await until(
+    async () => polls,
+    (count) => count === 2,
+  )
+  assert.equal(
+    (await f.detail(original.number)).ticket.waiting?.for,
+    'other-repo',
+  )
+})
+
 for (const edit of [
   'tracked',
   'ignored',
@@ -414,8 +709,6 @@ test('the creation API validates and deduplicates optional dependency repositori
 test('cached dependencies discard stale edits after a factory restart and preserve unowned paths', async (t) => {
   const f = await otherRepositoriesFixture()
   t.after(() => f.close())
-  const { prepareDependencies } =
-    await import('../src/workspace/dependencies.ts')
   const ticket = await f.ticket('Cache recovery', ['fixture/library'])
   const session = await prepareDependencies(
     f.workspaces,
@@ -463,8 +756,6 @@ for (const modify of [false, true]) {
     const f = await otherRepositoriesFixture()
     t.after(() => f.close())
     const { writePullRequest } = await import('../src/engine/pr-writer.ts')
-    const { claimAttempts, markRunning } =
-      await import('../src/store/tickets.ts')
     const ticket = await f.ticket('Writer context', ['fixture/library'])
     const [context] = await claimAttempts(f.database, 1)
     await markRunning(f.database, context!.attempt.id, 'system')
@@ -637,6 +928,5 @@ test('an instance crash still restores dependencies and reports their changed fi
   const detail = await f.detail()
   assert.match(detail.ticket.waiting!.summary!, /behaviour.txt/)
   assert.equal(await readFile(join(path, 'behaviour.txt'), 'utf8'), 'broken')
-  const { readdir } = await import('node:fs/promises')
   assert.deepEqual(await readdir(join(f.home, 'verification')), [])
 })
