@@ -167,3 +167,23 @@ endpoints and uses the artifact endpoint for media. Ready-to-merge (3) must comp
 live HEAD/base with verdict commits before treating evidence as current, and
 retest after synchronization. No workflow step fields or result.json fields were
 added by this foundation.
+
+## Merge path rules
+
+The optional `merge` section adds migration paths to the built-in rules:
+
+```yaml
+merge:
+  migrations:
+    - changes/*.sql
+    - '**/database-updates/**'
+```
+
+Paths are repository-relative, case-sensitive globs: `*` matches within one
+segment, `**` crosses directories (including zero directories), and `?` matches
+one character. Absolute paths, `..`, negation, backslashes and brace expansion
+are rejected. These globs add rules; they cannot remove the built-in rules for
+`.kipster/**`, CI configuration and migration directories. Matching files always
+need the owner, even when proof and CI pass. The gate loads these rules from the
+fetched default-branch kit, never from the ticket's candidate kit. A missing kit
+uses built-in rules; an invalid trusted kit blocks readiness for inspection.
