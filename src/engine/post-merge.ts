@@ -9,6 +9,7 @@ import { getRepositoryById } from '../store/repositories.ts'
 import { addAttemptArtifacts } from '../store/tickets.ts'
 import {
   finishPostMergeCheck,
+  recordPostMergeKitFailure,
   type PostMergeCheck,
 } from '../store/post-merge.ts'
 import {
@@ -17,6 +18,8 @@ import {
   verificationFinding,
 } from '../verification/harness.ts'
 import type { RunnerOptions } from './runner.ts'
+
+export const MAX_KIT_CHECK_FAILURES = 3
 
 export async function checkAfterMerge(
   options: RunnerOptions,
@@ -48,25 +51,20 @@ export async function checkAfterMerge(
   }
   // A PR-only workflow may have no default-branch run. Wait for registration before using the kit.
   if (check.hadCI && elapsed < 60 * 60_000) return
-  await options.workspaces.prepareRepository(repository, signal)
-  const cache = options.workspaces.cache(repository)
-  const loaded = await loadKit(cache, check.mergeCommit, signal)
-  if (!loaded.kit) {
-    await finishPostMergeCheck(options.database, check, 'unavailable', {
-      state: 'none',
-      failures: [
-        {
-          name: 'Kit check unavailable',
-          url: '',
-          excerpt: loaded.state.error ?? 'Repository has no kit check.',
-        },
-      ],
-    })
+  if (check.kitFailures >= MAX_KIT_CHECK_FAILURES) {
+    await unavailable(check.kitError ?? 'Kit verification retries exhausted.')
     return
   }
   let instance: Awaited<ReturnType<typeof startVerification>> | undefined
   let evidenceDir = ''
   try {
+    await options.workspaces.prepareRepository(repository, signal)
+    const cache = options.workspaces.cache(repository)
+    const loaded = await loadKit(cache, check.mergeCommit, signal)
+    if (!loaded.kit) {
+      await unavailable(loaded.state.error ?? 'Repository has no kit check.')
+      return
+    }
     instance = await startVerification({
       home: options.home,
       ticketId: check.ticketId,
@@ -94,13 +92,21 @@ export async function checkAfterMerge(
       ],
     })
   } catch (error) {
-    signal.throwIfAborted()
+    if (signal.aborted && signal.reason?.name !== 'TimeoutError') throw error
+    if (error instanceof VerificationError) evidenceDir = error.evidenceDir
     if (
       !(error instanceof VerificationError) ||
       !['check', 'setup'].includes(error.stage)
-    )
-      throw error
-    evidenceDir = error.evidenceDir
+    ) {
+      const reason = `Kit verification unavailable after ${MAX_KIT_CHECK_FAILURES} attempts: ${String(error)}`
+      const failures = await recordPostMergeKitFailure(
+        options.database,
+        check,
+        reason,
+      )
+      if (failures >= MAX_KIT_CHECK_FAILURES) await unavailable(reason)
+      return
+    }
     const finding = await verificationFinding(error)
     await addAttemptArtifacts(
       options.database,
@@ -121,6 +127,18 @@ export async function checkAfterMerge(
   } finally {
     await instance?.stop()
     if (evidenceDir) await cleanVerificationEvidence(options.home, evidenceDir)
+  }
+  async function unavailable(reason: string) {
+    await finishPostMergeCheck(options.database, check, 'unavailable', {
+      state: 'none',
+      failures: [
+        {
+          name: 'Kit check unavailable',
+          url: '',
+          excerpt: reason.slice(-2000),
+        },
+      ],
+    })
   }
   async function finish(
     status: 'passed' | 'failed',

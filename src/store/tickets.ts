@@ -332,6 +332,11 @@ export async function markRunning(
       )
     }
     const status = startAttempt(locked.attempts)
+    const step = stepOf(locked.workflow, attempt.stepId)
+    if (step.kind === 'agent' && ['builder', 'tester'].includes(step.role))
+      await connection.query('DELETE FROM base_syncs WHERE ticket_id = $1', [
+        locked.id,
+      ])
     const { rows } = await connection.query<AttemptRow>(
       `UPDATE attempts SET status = 'running', executor = $2, started_at = now()
        WHERE id = $1 RETURNING *`,
@@ -395,7 +400,11 @@ export async function completeAttempt(
           connection,
           locked,
           transition,
-          { summary: parsed.summary, ...completion },
+          {
+            summary: parsed.summary,
+            ...completion,
+            ...(parsed.ownerReview ? { ownerReview: parsed.ownerReview } : {}),
+          },
           events,
         )
       }),
@@ -887,6 +896,7 @@ async function apply(
     readonly executor?: string
     readonly headCommit?: string
     readonly reproductionAttemptId?: number
+    readonly ownerReview?: { readonly reason: string }
   },
   events: NewEvent[],
 ): Promise<Moved> {
@@ -896,7 +906,7 @@ async function apply(
     `UPDATE attempts
      SET status = $2, outcome = $3, next = $4, summary = coalesce($5, summary),
          error = $6, executor = coalesce($7, executor), finished_at = now(),
-         head_commit = coalesce($8, head_commit), reproduction_attempt_id = coalesce($9, reproduction_attempt_id)
+         head_commit = coalesce($8, head_commit), reproduction_attempt_id = coalesce($9, reproduction_attempt_id), owner_review = $10
      WHERE id = $1
      RETURNING *`,
     [
@@ -909,6 +919,7 @@ async function apply(
       closing.executor ?? null,
       closing.headCommit ?? null,
       closing.reproductionAttemptId ?? null,
+      closing.ownerReview ? JSON.stringify(closing.ownerReview) : null,
     ],
   )
   const closed = toAttempt(rows[0] as AttemptRow)
@@ -920,6 +931,7 @@ async function apply(
       stepId: closed.stepId,
       outcome: close.outcome,
       next: close.next,
+      ...(closing.ownerReview ? { ownerReview: closing.ownerReview } : {}),
       ...(closing.error === undefined ? {} : { error: closing.error }),
     },
   })
@@ -1158,6 +1170,7 @@ function toTicket(row: TicketRow): Ticket {
 }
 
 interface AttemptRow {
+  owner_review: { reason: string } | null
   id: number
   ticket_id: number
   step_id: string
@@ -1180,6 +1193,7 @@ interface AttemptRow {
 
 function toAttempt(row: AttemptRow): Attempt {
   return {
+    ownerReview: row.owner_review,
     id: row.id,
     ticketId: row.ticket_id,
     stepId: row.step_id,

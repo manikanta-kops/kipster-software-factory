@@ -217,8 +217,12 @@ export async function startScheduler(
         )
           .catch(async (error) => {
             if (!stopped) {
-              await invalidateMergeGate(database, context.ticket.id, error)
               report(error)
+              try {
+                await invalidateMergeGate(database, context.ticket.id, error)
+              } catch (invalidationError) {
+                report(invalidationError)
+              }
             }
           })
           .finally(() => {

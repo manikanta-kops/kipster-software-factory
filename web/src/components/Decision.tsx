@@ -54,12 +54,7 @@ export function DecisionReview({ decision: d }: { decision: DecisionRecord }) {
   const client = useQueryClient()
   const mutation = useMutation({
     mutationFn: (option: string) =>
-      d.purpose === 'merge'
-        ? api.mergeOption(d.ticketNumber, {
-            decisionId: d.id,
-            option: option === 'merge' ? 'merge' : 'owner',
-          })
-        : api.decideOption(d.ticketNumber, { attemptId: d.attemptId, option }),
+      api.decideOption(d.ticketNumber, { attemptId: d.attemptId, option }),
     onSuccess: (data) => {
       client.setQueryData(['ticket', d.ticketNumber], data)
       void client.invalidateQueries({ queryKey: ['tickets'] })
@@ -94,11 +89,7 @@ export function DecisionReview({ decision: d }: { decision: DecisionRecord }) {
           {Object.entries(d.options).map(([option, description]) => (
             <div key={option}>
               <button onClick={() => mutation.mutate(option)}>
-                {d.purpose === 'merge'
-                  ? option === 'merge'
-                    ? 'Merge'
-                    : 'I’ll review'
-                  : `Choose ${option}`}
+                Choose {option}
               </button>
               <p className="muted">{description}</p>
             </div>

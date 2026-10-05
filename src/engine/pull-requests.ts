@@ -35,8 +35,18 @@ export async function maintainPullRequest(
   )
   const missingBase =
     Number(await git(['rev-list', '--count', `HEAD..${base}`])) > 0
+  const detail = (await getTicketDetail(database, ticket.number))!
+  const previous = detail.attempts.findLast((a) => a.id < attempt.id)
+  const resync =
+    previous?.status === 'finished' &&
+    ['pull-request-checks', 'pull-request-merge'].includes(
+      previous.waitingFor ?? '',
+    ) &&
+    previous.next?.to === 'step' &&
+    previous.next.stepId === attempt.stepId
   if (
     missingBase &&
+    resync &&
     !(await beginBaseSync(database, ticket.id, params.maxBaseSyncs))
   ) {
     await completeAttempt(database, attempt.id, {
@@ -98,7 +108,6 @@ export async function maintainPullRequest(
     return
   }
   const head = await git(['rev-parse', 'HEAD'])
-  const detail = (await getTicketDetail(database, ticket.number))!
   const testerSteps = new Set(
     context.workflow.steps
       .filter((s) => s.kind === 'agent' && s.role === 'tester')

@@ -68,6 +68,7 @@ export async function refreshMergeGate(
         ),
     )
   const tester = latest('tester')
+  const reviewer = latest('reviewer')
   const reproducer = latest('reproducer')
   const verdict = (attempt: typeof tester): VerdictFact | null =>
     attempt
@@ -75,6 +76,7 @@ export async function refreshMergeGate(
           status: attempt.status,
           outcome: attempt.outcome,
           commit: attempt.headCommit,
+          ...(attempt.ownerReview ? { ownerReview: attempt.ownerReview } : {}),
         }
       : null
   const reproduction = verdict(reproducer)
@@ -121,6 +123,10 @@ export async function refreshMergeGate(
       (s) => s.kind === 'agent' && s.role === 'tester',
     ),
     tester: verdict(tester),
+    hasReviewer: context.workflow.steps.some(
+      (s) => s.kind === 'agent' && s.role === 'reviewer',
+    ),
+    reviewer: verdict(reviewer),
     hasReproducer: context.workflow.steps.some(
       (s) => s.kind === 'agent' && s.role === 'reproducer',
     ),

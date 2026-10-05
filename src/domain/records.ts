@@ -69,6 +69,7 @@ export const EVENT_KINDS = [
   'repository.ready',
   'repository.failed',
   'repository.policy',
+  'pull-request.merge-requested',
   'pull-request.merged',
   'post-merge.checked',
   'ticket.created',
@@ -145,6 +146,7 @@ export interface Ticket {
 
 /** One run of one step. */
 export interface Attempt {
+  readonly ownerReview?: { readonly reason: string } | null
   readonly reproductionAttemptId?: number | null
   readonly id: number
   readonly ticketId: number

@@ -86,6 +86,8 @@ export async function readResult(
   if (!raw || typeof raw !== 'object' || !('artifacts' in raw))
     throw new Error('result.json requires artifacts')
   const result = parseStepResult(raw)
+  if (result.ownerReview && role !== 'reviewer')
+    throw new Error('Only a reviewer can request ownerReview')
   if (
     !([...roles[role].outcomes, 'needs-decision'] as string[]).includes(
       result.outcome,

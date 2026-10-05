@@ -191,8 +191,3 @@ export interface OptionRequest {
 export interface AutoMergeRequest {
   readonly enabled: boolean
 }
-// POST /api/tickets/:number/merge-option
-export interface MergeOptionRequest {
-  readonly decisionId: number
-  readonly option: 'merge' | 'owner'
-}

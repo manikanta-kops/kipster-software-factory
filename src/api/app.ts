@@ -18,7 +18,6 @@ import { type Step, stepContract, type Workflow } from '../domain/workflow.ts'
 import type { Library } from '../library/library.ts'
 import type { Database } from '../store/database.ts'
 import type { EventSignal } from '../store/events.ts'
-import { confirmMergeDecision } from '../store/auto-merge.ts'
 import {
   createRepository,
   listRepositories,
@@ -164,19 +163,6 @@ export function createApp({
       ),
     })
   })
-  app.post('/api/tickets/:number{[0-9]+}/merge-option', async (c) => {
-    const number = ticketNumber(c)
-    const input = await body(
-      c,
-      z.strictObject({
-        decisionId: z.int().positive(),
-        option: z.enum(['merge', 'owner']),
-      }),
-    )
-    await confirmMergeDecision(database, number, input.decisionId, input.option)
-    return c.json<TicketResponse>(await ticketResponse(number))
-  })
-
   app.get('/api/decisions', async (c) =>
     c.json<DecisionsResponse>({
       decisions: await listDecisions(database),

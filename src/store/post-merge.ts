@@ -3,7 +3,6 @@ import type { PullRequest } from '../github/github.ts'
 import type { LibraryEntry } from '../library/library.ts'
 import { FactoryError } from '../domain/errors.ts'
 import { transaction, type Database, type Queryable } from './database.ts'
-import { mergeDecision } from './auto-merge.ts'
 import { recordEvents } from './events.ts'
 import { createTicketInTransaction, type AttemptContext } from './tickets.ts'
 
@@ -16,6 +15,8 @@ export interface PostMergeCheck {
   hadCI: boolean
   mergedBy: 'factory' | 'owner'
   createdAt: string
+  kitFailures: number
+  kitError: string | null
 }
 export async function recordMergedPR(
   database: Database,
@@ -26,14 +27,19 @@ export async function recordMergedPR(
   const commit = pr.mergeCommit?.oid
   if (!commit || !/^[0-9a-f]{40}([0-9a-f]{24})?$/.test(commit))
     throw new Error('Merged PR has no merge commit; retry observation')
-  const decision = pr.headRefOid
-    ? await mergeDecision(database, context.ticket.id, pr.headRefOid)
-    : undefined
-  const by = decision?.mergeSucceededAt ? 'factory' : 'owner'
+  let by: 'factory' | 'owner' = 'owner'
   await transaction(database, async (connection) => {
+    if (pr.headRefOid) {
+      const requested = await connection.query(
+        `UPDATE merge_requests SET succeeded_at = coalesce(succeeded_at, now()), error = NULL
+         WHERE ticket_id = $1 AND head_commit = $2 RETURNING ticket_id`,
+        [context.ticket.id, pr.headRefOid],
+      )
+      if (requested.rowCount) by = 'factory'
+    }
     const { rowCount } = await connection.query(
-      `INSERT INTO post_merge_checks(repository_id, merge_commit, ticket_id, attempt_id, pull_request_url, had_ci, merged_by, decision_id)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8) ON CONFLICT DO NOTHING`,
+      `INSERT INTO post_merge_checks(repository_id, merge_commit, ticket_id, attempt_id, pull_request_url, had_ci, merged_by)
+      VALUES ($1, $2, $3, $4, $5, $6, $7) ON CONFLICT DO NOTHING`,
       [
         context.repository.id,
         commit,
@@ -42,7 +48,6 @@ export async function recordMergedPR(
         pr.url,
         hadCI,
         by,
-        decision?.id ?? null,
       ],
     )
     if (rowCount)
@@ -54,7 +59,7 @@ export async function recordMergedPR(
             summary: `Merged by ${by}: ${pr.url}`,
             mergedBy: by,
             mergeCommit: commit,
-            decisionId: decision?.id ?? null,
+            head: pr.headRefOid ?? null,
           },
         },
       ])
@@ -73,6 +78,8 @@ export async function pendingPostMergeChecks(
     had_ci: boolean
     merged_by: 'factory' | 'owner'
     created_at: Date
+    kit_failures: number
+    kit_error: string | null
   }>(
     "SELECT * FROM post_merge_checks WHERE status = 'pending' ORDER BY last_polled_at NULLS FIRST, created_at LIMIT 100",
   )
@@ -85,6 +92,8 @@ export async function pendingPostMergeChecks(
     hadCI: r.had_ci,
     mergedBy: r.merged_by,
     createdAt: r.created_at.toISOString(),
+    kitFailures: r.kit_failures,
+    kitError: r.kit_error,
   }))
 }
 export async function finishPostMergeCheck(
@@ -178,4 +187,17 @@ export async function markPostMergePolled(
     "UPDATE post_merge_checks SET last_polled_at = now() WHERE repository_id = $1 AND merge_commit = $2 AND status = 'pending'",
     [check.repositoryId, check.mergeCommit],
   )
+}
+
+export async function recordPostMergeKitFailure(
+  database: Queryable,
+  check: PostMergeCheck,
+  error: string,
+) {
+  const { rows } = await database.query<{ kit_failures: number }>(
+    `UPDATE post_merge_checks SET kit_failures = kit_failures + 1, kit_error = $3
+     WHERE repository_id = $1 AND merge_commit = $2 AND status = 'pending' RETURNING kit_failures`,
+    [check.repositoryId, check.mergeCommit, error.slice(-2000)],
+  )
+  return rows[0]?.kit_failures ?? 0
 }

@@ -1,14 +1,21 @@
 ALTER TABLE repositories ADD COLUMN auto_merge boolean NOT NULL DEFAULT false;
-ALTER TABLE decision_log DROP CONSTRAINT decision_log_attempt_id_key;
-ALTER TABLE decision_log ADD COLUMN purpose text NOT NULL DEFAULT 'step' CHECK (purpose IN ('step', 'merge'));
-ALTER TABLE decision_log ADD COLUMN head_commit text;
-ALTER TABLE decision_log ADD COLUMN merge_requested_at timestamptz;
-ALTER TABLE decision_log ADD COLUMN merge_succeeded_at timestamptz;
-ALTER TABLE decision_log ADD COLUMN merge_error text;
-ALTER TABLE decision_log ADD CONSTRAINT merge_decision_head CHECK ((purpose = 'merge') = (head_commit IS NOT NULL));
-CREATE UNIQUE INDEX decision_log_step_attempt ON decision_log(attempt_id) WHERE purpose = 'step';
-CREATE UNIQUE INDEX decision_log_merge_head ON decision_log(ticket_id, head_commit) WHERE purpose = 'merge';
+ALTER TABLE attempts ADD COLUMN owner_review jsonb CHECK (
+  owner_review IS NULL OR coalesce((
+    jsonb_typeof(owner_review) = 'object' AND
+    jsonb_typeof(owner_review->'reason') = 'string' AND
+    length(btrim(owner_review->>'reason')) BETWEEN 1 AND 1000
+  ), false)
+);
 
+CREATE TABLE merge_requests (
+  ticket_id integer NOT NULL REFERENCES tickets(id),
+  head_commit text NOT NULL CHECK (head_commit ~ '^[0-9a-f]{40}([0-9a-f]{24})?$'),
+  requested_at timestamptz NOT NULL DEFAULT now(),
+  succeeded_at timestamptz,
+  error text,
+  gate jsonb NOT NULL,
+  PRIMARY KEY (ticket_id, head_commit)
+);
 CREATE TABLE base_syncs (
   ticket_id integer PRIMARY KEY REFERENCES tickets(id),
   count integer NOT NULL DEFAULT 0 CHECK (count >= 0)
@@ -21,8 +28,9 @@ CREATE TABLE post_merge_checks (
   pull_request_url text NOT NULL,
   had_ci boolean NOT NULL,
   merged_by text NOT NULL CHECK (merged_by IN ('factory', 'owner')),
-  decision_id integer REFERENCES decision_log(id),
   status text NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'passed', 'failed', 'unavailable')),
+  kit_failures integer NOT NULL DEFAULT 0 CHECK (kit_failures >= 0),
+  kit_error text,
   checks jsonb,
   bug_ticket_id integer REFERENCES tickets(id),
   created_at timestamptz NOT NULL DEFAULT now(),
