@@ -1,5 +1,7 @@
 import type {
   CreateRepositoryRequest,
+  AutoMergeRequest,
+  MergeOptionRequest,
   CreateTicketRequest,
   DecisionRequest,
   DecisionsResponse,
@@ -56,6 +58,10 @@ async function post<T>(path: string, body: unknown): Promise<T> {
 }
 
 export const api = {
+  setAutoMerge: (id: number, body: AutoMergeRequest) =>
+    post<RepositoryResponse>(`/repositories/${id}/auto-merge`, body),
+  mergeOption: (number: number, body: MergeOptionRequest) =>
+    post<TicketResponse>(`/tickets/${number}/merge-option`, body),
   decisions: (signal: AbortSignal) =>
     get<DecisionsResponse>('/decisions', signal),
   decideOption: (number: number, body: OptionRequest) =>

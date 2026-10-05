@@ -18,7 +18,12 @@ import { type Step, stepContract, type Workflow } from '../domain/workflow.ts'
 import type { Library } from '../library/library.ts'
 import type { Database } from '../store/database.ts'
 import type { EventSignal } from '../store/events.ts'
-import { createRepository, listRepositories } from '../store/repositories.ts'
+import { confirmMergeDecision } from '../store/auto-merge.ts'
+import {
+  createRepository,
+  listRepositories,
+  setAutoMerge,
+} from '../store/repositories.ts'
 import {
   cancelTicket,
   createTicket,
@@ -147,6 +152,29 @@ export function createApp({
         : { defaultBranch: input.defaultBranch }),
     })
     return c.json<RepositoryResponse>({ repository }, 201)
+  })
+
+  app.post('/api/repositories/:id{[0-9]+}/auto-merge', async (c) => {
+    const input = await body(c, z.strictObject({ enabled: z.boolean() }))
+    return c.json<RepositoryResponse>({
+      repository: await setAutoMerge(
+        database,
+        Number(c.req.param('id')),
+        input.enabled,
+      ),
+    })
+  })
+  app.post('/api/tickets/:number{[0-9]+}/merge-option', async (c) => {
+    const number = ticketNumber(c)
+    const input = await body(
+      c,
+      z.strictObject({
+        decisionId: z.int().positive(),
+        option: z.enum(['merge', 'owner']),
+      }),
+    )
+    await confirmMergeDecision(database, number, input.decisionId, input.option)
+    return c.json<TicketResponse>(await ticketResponse(number))
   })
 
   app.get('/api/decisions', async (c) =>

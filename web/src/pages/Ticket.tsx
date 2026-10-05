@@ -191,11 +191,18 @@ function Timeline({ detail }: { detail: TicketResponse }) {
         item: attempt,
         time: attempt.finishedAt ?? attempt.startedAt ?? attempt.createdAt,
       })),
-    ...(showAll ? detail.events : []).map((event) => ({
-      type: 'event' as const,
-      item: event,
-      time: event.createdAt,
-    })),
+    ...detail.events
+      .filter(
+        (event) =>
+          showAll ||
+          event.kind === 'pull-request.merged' ||
+          event.kind === 'post-merge.checked',
+      )
+      .map((event) => ({
+        type: 'event' as const,
+        item: event,
+        time: event.createdAt,
+      })),
   ].sort((a, b) => b.time.localeCompare(a.time) || b.item.id - a.item.id)
   return (
     <section aria-labelledby="timeline-heading">
@@ -242,9 +249,15 @@ function Timeline({ detail }: { detail: TicketResponse }) {
 
 function ActionPanel({ detail }: { detail: TicketResponse }) {
   const typed = detail.decisions?.find(
-    (item) => item.attemptId === detail.ticket.waiting?.attemptId,
+    (item) =>
+      item.pending &&
+      (item.purpose === 'merge' ||
+        item.attemptId === detail.ticket.waiting?.attemptId),
   )
-  if (detail.ticket.waiting?.for === 'decision' && typed)
+  if (
+    typed &&
+    (typed.purpose === 'merge' || detail.ticket.waiting?.for === 'decision')
+  )
     return <DecisionReview decision={typed} />
   return <StandardActionPanel detail={detail} />
 }
@@ -524,7 +537,25 @@ function EventEntry({ event }: { event: FactoryEvent }) {
         </span>
         <Time value={event.createdAt} />
       </div>
-      {summary && <p>{summary}</p>}
+      {summary && (
+        <p>
+          {event.kind === 'post-merge.checked' &&
+          typeof event.data['bugTicketNumber'] === 'number' ? (
+            <>
+              Post-merge breakage:{' '}
+              <a
+                className="text-link"
+                href={`#/tickets/${event.data['bugTicketNumber']}`}
+              >
+                bug ticket #{event.data['bugTicketNumber']}
+              </a>{' '}
+              opened for {String(event.data['mergeCommit'])}.
+            </>
+          ) : (
+            summary
+          )}
+        </p>
+      )}
       <details>
         <summary>Event details</summary>
         <pre>{JSON.stringify(event.data, null, 2)}</pre>

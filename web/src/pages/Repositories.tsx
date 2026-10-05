@@ -1,6 +1,9 @@
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import type { CreateRepositoryRequest } from '../../../src/api/contract.ts'
+import type {
+  CreateRepositoryRequest,
+  RepositoriesResponse,
+} from '../../../src/api/contract.ts'
 import { api } from '../api.ts'
 import { ErrorMessage, Status } from '../components/Shared.tsx'
 import { repositoriesQuery } from '../queries.ts'
@@ -46,6 +49,34 @@ export function Repositories() {
       void client.invalidateQueries({ queryKey: ['repositories'] })
     },
   })
+  const policy = useMutation({
+    mutationFn: ({ id, enabled }: { id: number; enabled: boolean }) =>
+      api.setAutoMerge(id, { enabled }),
+    onMutate: ({ id, enabled }) => {
+      void client.cancelQueries({ queryKey: ['repositories'] })
+      const previous = client.getQueryData<RepositoriesResponse>([
+        'repositories',
+      ])
+      client.setQueryData<RepositoriesResponse>(['repositories'], (data) =>
+        data
+          ? {
+              repositories: data.repositories.map((repository) =>
+                repository.id === id
+                  ? { ...repository, autoMerge: enabled }
+                  : repository,
+              ),
+            }
+          : data,
+      )
+      return previous
+    },
+    onError: (_error, _input, previous) => {
+      if (previous) client.setQueryData(['repositories'], previous)
+    },
+    onSettled: () => {
+      void client.invalidateQueries({ queryKey: ['repositories'] })
+    },
+  })
   return (
     <section>
       <header className="page-heading">
@@ -83,7 +114,7 @@ export function Repositories() {
         <ErrorMessage error={add.error} />
         {add.isSuccess && <output>Repository added. Waiting for setup.</output>}
       </form>
-      <ErrorMessage error={query.error} />
+      <ErrorMessage error={query.error ?? policy.error} />
       {query.isPending && <p className="muted">Loading repositories…</p>}
       <ul className="repository-list">
         {query.data?.repositories.map((repository) => (
@@ -113,7 +144,32 @@ export function Repositories() {
                 <p className="error">{repository.lastError}</p>
               )}
             </div>
-            <Status value={repository.status} />
+            <div>
+              <label>
+                <input
+                  type="checkbox"
+                  aria-label={`Auto-merge for ${repository.slug}`}
+                  checked={
+                    policy.isPending && policy.variables?.id === repository.id
+                      ? policy.variables.enabled
+                      : (repository.autoMerge ?? false)
+                  }
+                  disabled={policy.isPending}
+                  onChange={(event) =>
+                    policy.mutate({
+                      id: repository.id,
+                      enabled: event.target.checked,
+                    })
+                  }
+                />
+                Auto-merge safe changes
+              </label>
+              <p className="muted">
+                Independent proof and a confident decision required. Migrations,
+                kit and CI changes need your review.
+              </p>
+              <Status value={repository.status} />
+            </div>
           </li>
         ))}
       </ul>
