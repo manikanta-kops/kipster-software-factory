@@ -12,7 +12,9 @@ test('published legacy ticket links reach the matching ticket timeline', async (
   await expect(
     page.getByRole('heading', { name: 'Fix the typo on the pricing page' }),
   ).toBeVisible()
-  await expect(page.getByRole('heading', { name: 'Timeline' })).toBeVisible()
+  await expect(
+    page.getByRole('heading', { name: 'What happened' }),
+  ).toBeVisible()
 })
 
 test('open running logs refresh, closed logs stop polling, and completion loads final output', async ({

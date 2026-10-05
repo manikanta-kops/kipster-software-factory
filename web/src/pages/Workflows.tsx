@@ -46,13 +46,9 @@ export function Workflows({ selected }: { selected: string | undefined }) {
           <p className="version">version {current.version}</p>
         </header>
         <WorkflowDiagram key={current.name} workflow={current} />
-        <footer className="legend">
-          <span className="key agent">agent</span>
-          <span className="key human">you</span>
-          <span className="key system">system</span>
-          <span className="key loop">sends back</span>
-          <span>Every agent and system step can also stop and ask you.</span>
-        </footer>
+        <p className="legend muted">
+          Every agent and system step can also stop and ask you.
+        </p>
       </article>
     </div>
   )

@@ -19,6 +19,9 @@ import {
 } from '../components/Shared.tsx'
 import { repositoriesQuery, ticketQuery } from '../queries.ts'
 import { ArtifactView } from '../components/ArtifactView.tsx'
+import { RepositoryTag } from '../components/Filters.tsx'
+import { Icon } from '../components/Icon.tsx'
+import { doing, humanize, stepName } from '../words.ts'
 import { Commit, Verdict } from '../components/Verdict.tsx'
 
 export function TicketPage({ number }: { number: number }) {
@@ -27,57 +30,130 @@ export function TicketPage({ number }: { number: number }) {
   if (query.isPending) return <p className="muted">Loading ticket…</p>
   if (query.isError) return <ErrorMessage error={query.error} />
   const { ticket, workflow } = query.data
+  const current = workflow.steps.find((step) => step.id === ticket.currentStep)
+  const images = query.data.artifacts.filter(
+    (artifact) =>
+      artifact.content === null && artifact.mediaType.startsWith('image/'),
+  )
   return (
     <article className="ticket-page">
-      <a className="back-link" href="#/">
-        ‹ Needs you
+      <a className="back-link" href="#/" aria-label="Back to today">
+        <Icon name="chevronLeft" size={13} stroke={2} />
+        Today
       </a>
-      <header className="page-heading ticket-heading">
-        <div>
-          <p className="muted">
-            #{ticket.number} · {ticket.repository.slug}
-          </p>
-          <h1>{ticket.title}</h1>
-          <div className="ticket-meta">
-            <span>{workflow.name}</span>
-            <Status value={ticket.status} />
-            <PullRequest url={ticket.pullRequestUrl} />
-          </div>
+      <header className="ticket-heading">
+        <p className="ticket-kicker">
+          <RepositoryTag repository={ticket.repository} />
+          <a href={`#/workflows/${ticket.workflow.name}`}>
+            {humanize(workflow.name)}
+          </a>
+          <span>#{ticket.number}</span>
+        </p>
+        <h1>{ticket.title}</h1>
+        <div className="ticket-meta">
+          <Status value={ticket.status} />
+          {['queued', 'running'].includes(ticket.status) && (
+            <span className="ticket-doing">{doing(ticket, current)}</span>
+          )}
+          <PullRequest url={ticket.pullRequestUrl} />
         </div>
+        {ticket.body && (
+          <div className="ticket-body">
+            <MarkdownBody>{ticket.body}</MarkdownBody>
+          </div>
+        )}
       </header>
+      {ticket.waiting && ticket.waiting.for !== 'pull-request-checks' && (
+        <ActionPanel key={ticket.waiting.attemptId} detail={query.data} />
+      )}
       <Verdict
         detail={query.data}
         repository={repositories.data?.repositories.find(
           (item) => item.id === ticket.repository.id,
         )}
       />
-      {ticket.waiting && ticket.waiting.for !== 'pull-request-checks' && (
-        <ActionPanel key={ticket.waiting.attemptId} detail={query.data} />
-      )}
-      <nav className="step-track" aria-label="Ticket workflow">
-        <ol>
-          {workflow.steps.map((step) => (
-            <li
-              key={step.id}
-              aria-current={ticket.currentStep === step.id ? 'step' : undefined}
-            >
-              <span>{step.id}</span>
-              <small>
-                {step.runs} {step.runs === 1 ? 'run' : 'runs'}
-                {ticket.currentStep === step.id ? ' · current' : ''}
-              </small>
-            </li>
-          ))}
-        </ol>
-      </nav>
-      {ticket.body && (
-        <details className="ticket-description">
-          <summary>Ticket description</summary>
-          <MarkdownBody>{ticket.body}</MarkdownBody>
-        </details>
+      <StepList detail={query.data} />
+      {images.length > 0 && (
+        <section className="attachments" aria-labelledby="attachments-heading">
+          <h2 className="section-title" id="attachments-heading">
+            Attachments
+          </h2>
+          <div className="attachment-grid">
+            {images.map((artifact) => (
+              <ArtifactView key={artifact.id} artifact={artifact} />
+            ))}
+          </div>
+        </section>
       )}
       <Timeline key={ticket.id} detail={query.data} />
     </article>
+  )
+}
+
+type StepState =
+  'done' | 'now' | 'you' | 'queued' | 'again' | 'next' | 'skipped' | 'stopped'
+
+/** The workflow as a checklist: done, now, next. Loops show as run counts, never lines. */
+function StepList({ detail }: { detail: TicketResponse }) {
+  const { ticket, workflow, attempts } = detail
+  const at = workflow.steps.findIndex((step) => step.id === ticket.currentStep)
+  const active = ['queued', 'running', 'needs-you'].includes(ticket.status)
+  const state = (index: number, runs: number): StepState => {
+    if (index === at && active)
+      return ticket.status === 'needs-you'
+        ? 'you'
+        : ticket.status === 'queued'
+          ? 'queued'
+          : 'now'
+    if (index === at && ticket.status === 'cancelled') return 'stopped'
+    if (runs > 0) return active && index > at ? 'again' : 'done'
+    return ticket.status === 'done' ? 'skipped' : 'next'
+  }
+  const note = (stepId: string, value: StepState) => {
+    if (value === 'you') return 'Your turn'
+    if (value === 'queued') return 'Queued'
+    if (value === 'now') return 'Now'
+    if (value === 'stopped') return 'Stopped here'
+    if (value === 'again') return 'Runs again'
+    if (value !== 'done') return ''
+    const last = attempts.findLast(
+      (attempt) => attempt.stepId === stepId && attempt.finishedAt,
+    )
+    return last ? (last.outcome ?? '').replaceAll('-', ' ') : ''
+  }
+  return (
+    <section className="steps-card" aria-labelledby="steps-heading">
+      <h2 className="section-title" id="steps-heading">
+        Steps
+      </h2>
+      <ol className="step-list">
+        {workflow.steps.map((step, index) => {
+          const value = state(index, step.runs)
+          return (
+            <li
+              key={step.id}
+              className={`step-item ${value}`}
+              aria-current={index === at && active ? 'step' : undefined}
+            >
+              <span className="step-mark" aria-hidden="true">
+                {value === 'done' || value === 'again' ? (
+                  <Icon name="check" size={11} stroke={2.6} />
+                ) : value === 'stopped' ? (
+                  <Icon name="x" size={11} stroke={2.6} />
+                ) : null}
+              </span>
+              <span className="step-name">
+                {stepName(step)}
+                {step.runs > 1 && (
+                  <small className="step-runs">{step.runs} runs</small>
+                )}
+              </span>
+              <span className="step-note">{note(step.id, value)}</span>
+            </li>
+          )
+        })}
+      </ol>
+    </section>
   )
 }
 
@@ -108,7 +184,7 @@ function Timeline({ detail }: { detail: TicketResponse }) {
     <section aria-labelledby="timeline-heading">
       <div className="timeline-heading">
         <div>
-          <h2 id="timeline-heading">Timeline</h2>
+          <h2 id="timeline-heading">What happened</h2>
           <p className="muted timeline-hint">Newest first</p>
         </div>
         <button
