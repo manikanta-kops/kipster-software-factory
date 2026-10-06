@@ -27,7 +27,85 @@ export const REPORTED_TASK_STATUSES: readonly TaskStatus[] = [
   'failed',
 ]
 
-export type TaskState = Pick<LeadTask, 'key' | 'land' | 'status' | 'decision'>
+export type TaskState = Pick<
+  LeadTask,
+  'key' | 'land' | 'status' | 'decision' | 'instructions' | 'result'
+>
+
+export interface RepeatedFailure {
+  readonly signature: string
+  readonly count: number
+  readonly tasks: readonly string[]
+}
+
+/** Remove run-specific details while keeping the error's words. */
+export function failureSignature(text: string): string {
+  return text
+    .replace(
+      /\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/gi,
+      ' ',
+    )
+    .replace(/\b(?:0x)?[0-9a-f]{7,}\b/gi, ' ')
+    .replace(
+      /\b\d{4}[-/]\d{1,2}[-/]\d{1,2}(?:[T ]\d{1,2}:\d{2}(?::\d{2}(?:[.,]\d+)?)?(?:Z|[+-]\d{2}:?\d{2})?)?\b/gi,
+      ' ',
+    )
+    .replace(/\b\d{1,2}[-/]\d{1,2}[-/]\d{2,4}\b/g, ' ')
+    .replace(
+      /\b(?:Mon|Tues?|Wed(?:nes)?|Thurs?|Fri|Sat(?:ur)?|Sun)(?:day)?[,]?\s+/gi,
+      ' ',
+    )
+    .replace(
+      /\b(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\s+\d{1,2},?\s+(?:\d{1,2}:\d{2}:\d{2}\s+)?\d{4}\b/gi,
+      ' ',
+    )
+    .replace(
+      /\b\d{1,2}\s+(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\s+\d{4}\b/gi,
+      ' ',
+    )
+    .replace(
+      /\b\d{1,2}:\d{2}(?::\d{2}(?:[.,]\d+)?)?(?:\s*(?:AM|PM|UTC|GMT)|Z|[+-]\d{2}:?\d{2})?\b/gi,
+      ' ',
+    )
+    .replace(
+      /(["'`])(?:[A-Za-z]:[\\/]|\.{1,2}[\\/]|~[\\/]|\/|[\w.-]+[\\/])[^\r\n]*?\1/g,
+      ' ',
+    )
+    .replace(
+      /(?:[A-Za-z]:[\\/]|\.{1,2}[\\/]|~[\\/]|\/)[^\s"'`<>()[\]{},;]+|\b[\w.-]+(?:[\\/][\w.-]+)+(?::\d+(?::\d+)?)?/g,
+      ' ',
+    )
+    .replace(/\b[\w.-]+\.[a-z][\w-]*(?::\d+(?::\d+)?)?\b/gi, ' ')
+    .replace(
+      /\b(?:\d+(?:\.\d+)?\s*(?:nanoseconds?|ns|microseconds?|us|µs|μs|milliseconds?|msecs?|ms|seconds?|secs?|s|minutes?|mins?|m|hours?|hrs?|h|days?|d)\s*)+\b/gi,
+      ' ',
+    )
+    .replace(/#\d+|\d+(?:\.\d+)?/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase()
+}
+
+export function repeatedFailures(
+  tasks: readonly Pick<TaskState, 'key' | 'status' | 'result'>[],
+): RepeatedFailure[] {
+  const groups = new Map<string, string[]>()
+  for (const task of tasks) {
+    if (task.status !== 'failed' || !task.result?.trim()) continue
+    const signature = failureSignature(task.result)
+    if (!signature) continue
+    const keys = groups.get(signature) ?? []
+    keys.push(task.key)
+    groups.set(signature, keys)
+  }
+  return [...groups].flatMap(([signature, keys]) =>
+    keys.length >= 2 ? [{ signature, count: keys.length, tasks: keys }] : [],
+  )
+}
+
+function normaliseInstructions(instructions: string): string {
+  return instructions.replace(/\s+/g, ' ').trim()
+}
 
 export function isFinalTask(status: TaskStatus): boolean {
   return FINAL_TASK_STATUSES.includes(status)
@@ -126,8 +204,22 @@ export function checkDelegation(input: DelegationInput): string[] {
   }
 
   const keys = new Set(existing.map((task) => task.key))
+  const repeated = repeatedFailures(existing)
   for (const task of input.tasks) {
     const at = `task "${task.key}"`
+    for (const group of repeated) {
+      if (
+        existing.some(
+          (previous) =>
+            group.tasks.includes(previous.key) &&
+            normaliseInstructions(previous.instructions) ===
+              normaliseInstructions(task.instructions),
+        )
+      )
+        errors.push(
+          `${at}: the same instructions already failed ${group.count} times with the same error (${group.tasks.join(', ')}). The lead must classify the cause (task, plan or factory), record it as a decision artifact, and change the task or the plan, or park that line of work and continue the rest.`,
+        )
+    }
     if (keys.has(task.key))
       errors.push(`${at}: key is already used; give new work a new key`)
     keys.add(task.key)

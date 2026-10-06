@@ -158,8 +158,12 @@ kit, CI, migrations and reviewer owner-review flags for the owner. Mode-specific
 role prompts now replace product questions with recorded defaults,
 require separate explained commits and owner review for necessary forbidden-path
 changes, and ask reproducers to record alternative attempts before giving up.
-Disabled tickets retain their original role wording. Repeated-failure detection
-is a separate follow-up slice. Live overnight use with real agents remains
+Disabled tickets retain their default role wording. Leads in both modes now
+hear groups of repeated task failures with paths and run details removed. The
+engine refuses another task with the same whitespace-normalised instructions
+after two identical failures. The lead classifies task, plan or factory causes
+in a typed decision artifact, then changes the task or plan, or stops retrying
+that line while continuing the rest. Live overnight use with real agents remains
 unverified.
 Demo seeding includes synthetic lead and child decisions so the Decision log
 and child links, a parked question and a merged untested task can be inspected

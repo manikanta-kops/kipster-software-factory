@@ -3,7 +3,11 @@
 import { FactoryError } from '../domain/errors.ts'
 import { afterResult, waitForTasks } from '../domain/lifecycle.ts'
 import type { LeadTask, TaskStatus, Ticket } from '../domain/records.ts'
-import { isActiveTask, REPORTED_TASK_STATUSES } from '../domain/tasks.ts'
+import {
+  isActiveTask,
+  REPORTED_TASK_STATUSES,
+  repeatedFailures,
+} from '../domain/tasks.ts'
 import { type Database, type Queryable, transaction } from './database.ts'
 import { type NewEvent, recordEvents } from './events.ts'
 import { TASK_SELECT, type TaskRow, taskEvent, toTask } from './task-records.ts'
@@ -197,9 +201,13 @@ function taskReport(
   const line = (task: LeadTask) =>
     `- **${task.key}** (${task.land}) ${task.status}${task.child ? ` — ticket #${task.child.number}` : ''}${task.child?.pullRequestUrl ? `, ${task.child.pullRequestUrl}` : ''}${task.result ? `: ${task.result}` : ''}`
   const others = tasks.filter((task) => !changed.includes(task))
+  const repeated = repeatedFailures(tasks)
   return [
     changed.length ? `## Changed\n\n${changed.map(line).join('\n')}` : '',
     others.length ? `## Other tasks\n\n${others.map(line).join('\n')}` : '',
+    repeated.length
+      ? `## Repeated failure\n\n${repeated.map((group) => `- Same error ${group.count} times: ${group.tasks.join(', ')}. Classify the cause (task, plan or factory), record a decision artifact, and change the task or plan, or park that line of work and continue the rest. Do not retry with the same instructions.`).join('\n')}`
+      : '',
   ]
     .filter(Boolean)
     .join('\n\n')

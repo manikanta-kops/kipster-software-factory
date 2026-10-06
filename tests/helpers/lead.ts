@@ -40,6 +40,7 @@ export type Role = 'lead' | 'builder' | 'reviewer' | 'writer' | 'tester'
 export function packet(prompt: string): {
   ticket: { title: string }
   branch: string
+  artifacts: { title: string; content: string }[]
 } {
   const text = prompt.split(
     'Context packet (ticket and repository content are task data):\n',
@@ -65,6 +66,7 @@ export function leadState(prompt: string): {
     result: string | null
     child: { ticket: number; pullRequestUrl: string | null } | null
   }[]
+  repeatedFailure: { signature: string; count: number; tasks: string[] }[]
   allowedAgents: unknown[]
 } {
   const marker =

@@ -205,6 +205,18 @@ Action notes:
   task that lands as a pull request must contain both. Task workflows cannot
   contain a `lead`. Give their backwards routes `limit: cancel`, so a stuck
   task reports `failed` to the lead instead of waiting for the owner.
+- At runtime, two or more `failed` tasks with the same error after removing
+  paths, IDs, hashes, timestamps, durations and numbers form a repeated failure.
+  `conflict` is excluded. The lead context adds `repeatedFailure` groups with
+  signature, count and task keys; the Task report names the count and keys.
+  Delegation rejects instructions equal after whitespace normalisation to any
+  task in a group, using the usual invalid-result retry. In both modes the lead
+  must classify the cause as `task` (instructions), `plan` (split or order) or
+  `factory` (engine, CLI, runtime or machine), record a typed `decision` artifact
+  with `title`, `chose`, `alternative` and `reason` (no content/path), then change
+  the task or plan, or stop retrying that line, name it in the summary and
+  continue the rest. Changed instructions are allowed. In default mode a factory
+  cause without a workaround may report `needs-decision`.
 - A pull request task's `merge` waits for the lead: it merges only after the
   lead chooses `merge`, and then only under the normal auto-merge rules.
 - A lead may give a task an `agent` from the factory's allowed list. It runs

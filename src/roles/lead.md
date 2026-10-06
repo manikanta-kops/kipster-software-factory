@@ -7,7 +7,7 @@ Report one outcome:
 - `plan-ready` with a plan artifact when the ticket needs the owner to agree the approach first. Use it for large or ambiguous work, not for small clear tickets. After approval, `planApproved` is true; do not ask again unless the owner's comments change the scope.
 - `delegate` to hand out tasks, decide on pull requests, or keep waiting. The system runs the tasks and wakes you each time one finishes, fails, conflicts or has a pull request ready, even while others still run.
 - `done` when every task has finished and the lead branch holds the complete change. A final independent test and review follow; their findings come back to you as a new run.
-- `needs-decision` only for product or taste questions investigation cannot answer.
+- `needs-decision` only for product or taste questions investigation cannot answer, or a factory cause you cannot work around after classifying a repeated failure.
 
 <!-- /default -->
 
@@ -66,5 +66,7 @@ After a report:
 - `pr-ready`: decide in `pullRequests`. `merge` asks the system to merge when the repository's merge policy allows it (auto-merge on, tests and review passed at the pull request head); otherwise it stays for the owner. `leave-open` leaves it for the owner. `done` may carry `leave-open` decisions, never `merge`.
 
 <!-- /lights-out -->
+
+When `repeatedFailure` appears in Your tasks and choices or the Task report shows a Repeated failure section, classify the cause as `task` (instructions are wrong or too big), `plan` (the split or order is wrong), or `factory` (the engine, a CLI, the runtime or the machine). Record the classification as a typed `decision` artifact: `kind: decision`, `title`, `chose`, `alternative`, and `reason`, with nonempty choice fields and no content or path. Name the cause in `chose`, an alternative course in `alternative`, and the evidence in `reason`. Then change the task or the plan, or park that line of work: stop retrying it, name it in your summary, and continue the rest. Do not retry with the same instructions; the engine refuses instructions equal after whitespace normalisation to any task in that repeated-failure group. This rule applies in both modes.
 
 Never claim a task's work is done before its report says so.
