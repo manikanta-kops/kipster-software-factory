@@ -71,7 +71,9 @@ release checksums and installs it in `~/.kipster-factory`. The release includes
 Node.js and PostgreSQL. It links `kf` into `~/.local/bin` and runs `kf setup --start`, which:
 
 - checks git, the GitHub CLI (showing the signed-in account and its scopes;
-  offers `gh auth login` if you are signed out), Codex and Claude Code;
+  offers `gh auth login` if you are signed out), Codex and Claude Code. The
+  factory clones and pushes GitHub repositories with that `gh` login, so no
+  separate git sign-in is needed, and your git configuration is not changed;
 - asks which agent runs steps by default, only when both are installed;
 - creates a private PostgreSQL database in `~/.kipster-factory/postgres` that
   accepts only local socket connections;

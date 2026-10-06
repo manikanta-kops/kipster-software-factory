@@ -1,3 +1,4 @@
+import { signInToGitHubWithCli } from './github/credentials.ts'
 import { fileURLToPath } from 'node:url'
 import { serve } from '@hono/node-server'
 import { createApp } from './api/app.ts'
@@ -46,6 +47,7 @@ export interface RunningFactory {
 export async function startFactory(
   options: FactoryOptions,
 ): Promise<RunningFactory> {
+  signInToGitHubWithCli()
   const loaded = await loadLibrary(options.workflows ?? BUILT_IN_WORKFLOWS)
   if (!loaded.ok) {
     throw new Error(`Invalid workflows:\n  ${loaded.errors.join('\n  ')}`)
