@@ -44,6 +44,21 @@ describe('store', () => {
     }
   })
 
+  test('an idle connection closed by the server does not crash the process', async () => {
+    const pool = openDatabase(testDatabase.url)
+    try {
+      const { rows } = await pool.query<{ pid: number }>(
+        'SELECT pg_backend_pid() AS pid',
+      )
+      const removed = new Promise((resolve) => pool.once('remove', resolve))
+      await database.query('SELECT pg_terminate_backend($1)', [rows[0]!.pid])
+      await removed
+      assert.equal((await pool.query('SELECT 1 AS one')).rows[0].one, 1)
+    } finally {
+      await pool.end()
+    }
+  })
+
   test('workflow versions are recorded once', async () => {
     const loaded = await loadLibrary(BUILT_IN_WORKFLOWS)
     assert.ok(loaded.ok)

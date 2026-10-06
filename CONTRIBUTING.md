@@ -21,10 +21,12 @@ npm run dev
 
 ## Releases
 
-The owner releases by bumping `version` in `package.json` on `next`, merging
-`next` into `master` and pushing a matching `v<version>` tag on `master`. The
-release workflow builds and smoke-tests both macOS bundles, then publishes them
-with `install.sh` and `SHA256SUMS`. To try a bundle locally:
+The owner releases by bumping `version` in `package.json` on `next` and merging
+`next` into `master`. On every push to `master` the release workflow builds and
+smoke-tests both macOS bundles. If `v<version>` is not released yet, it tags
+that commit and publishes the bundles with `install.sh` and `SHA256SUMS`. A
+push that keeps an already released version publishes nothing. To retry a
+failed release, run the workflow manually on `master`. To try a bundle locally:
 
 ```sh
 node scripts/bundle.ts            # writes release/ for this Mac's architecture
