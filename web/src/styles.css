@@ -1612,6 +1612,12 @@ button.more-toggle:hover {
 .verdict.stale h2 {
   color: var(--red-ink);
 }
+.verdict.waiting {
+  background: color-mix(in srgb, var(--amber) 7%, var(--card));
+}
+.verdict.waiting h2 {
+  color: var(--amber);
+}
 .verdict p {
   margin: 6px 0 0;
 }

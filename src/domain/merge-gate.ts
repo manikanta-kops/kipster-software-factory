@@ -180,3 +180,41 @@ export interface GateSnapshot {
   latest: MergeGate
   lastGreen: MergeGate | null
 }
+
+export interface GateBlockers {
+  /** Real problems: something failed or needs a decision. */
+  problems: string[]
+  /** What the gate is waiting on while work is still in progress, such as "CI". */
+  waits: string[]
+}
+/** Splits a gate's blockers into real problems and normal in-progress waits. */
+export function classifyBlockers(gate: MergeGate): GateBlockers {
+  const { facts } = gate
+  const verdictIn = (v: VerdictFact | null | undefined) =>
+    v?.status === 'finished' && v.commit === facts.head
+  const problems: string[] = []
+  const waits = new Set<string>()
+  for (const blocker of gate.blockers) {
+    if (blocker === 'CI pending') waits.add('CI')
+    else if (blocker === 'Build work is queued or running')
+      waits.add('build work')
+    // The build's own commits are not pushed yet.
+    else if (
+      blocker === 'Ticket branch differs from the PR head' &&
+      facts.buildWork
+    )
+      waits.add('build work')
+    else if (
+      blocker === 'Tester verdict is not passing at the current head' &&
+      !verdictIn(facts.tester)
+    )
+      waits.add('the tester')
+    else if (
+      blocker === 'Reviewer verdict is not passing at the current head' &&
+      !verdictIn(facts.reviewer)
+    )
+      waits.add('the reviewer')
+    else problems.push(blocker)
+  }
+  return { problems, waits: [...waits] }
+}
