@@ -80,6 +80,56 @@ async function fixture(t: TestContext) {
   }
 }
 
+test('verification retains fetched comparison bases without remotes, including when the cache branch is stale', async (t) => {
+  const f = await fixture(t)
+  const git = (args: string[]) =>
+    execFileSync('git', args, {
+      cwd: f.repository,
+      encoding: 'utf8',
+    }).trim()
+  git(['update-ref', 'refs/remotes/origin/next', f.commit])
+  git(['symbolic-ref', 'refs/remotes/origin/HEAD', 'refs/remotes/origin/next'])
+  await writeFile(join(f.repository, 'base.txt'), 'fetched base')
+  git(['add', 'base.txt'])
+  git([
+    '-c',
+    'user.name=Fixture',
+    '-c',
+    'user.email=fixture@example.test',
+    'commit',
+    '-m',
+    'Base advanced',
+  ])
+  const base = git(['rev-parse', 'HEAD'])
+  git(['update-ref', 'refs/remotes/origin/next', base])
+  git(['reset', '--hard', f.commit])
+  const instance = await startVerification({
+    ...f,
+    check: true,
+    checkOnly: true,
+    kit: {
+      version: 1,
+      setup: `test "$(git rev-parse origin/next)" = ${base}`,
+      check:
+        'test "$(git show origin/next:base.txt)" = "fetched base" && test -z "$(git remote)" && test ! -f base.txt',
+    },
+  })
+  t.after(() => instance.stop())
+  assert.equal(
+    execFileSync('git', ['rev-parse', 'HEAD'], {
+      cwd: instance.checkout,
+      encoding: 'utf8',
+    }).trim(),
+    f.commit,
+  )
+  assert.throws(() =>
+    execFileSync('git', ['symbolic-ref', 'refs/remotes/origin/HEAD'], {
+      cwd: instance.checkout,
+      stdio: 'pipe',
+    }),
+  )
+})
+
 test('harness runs exact detached commit, setup/check, isolated ports/database and retains logs after idempotent stop', async (t) => {
   const f = await fixture(t)
   const unrelated = spawn(process.execPath, [
