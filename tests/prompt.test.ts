@@ -8,7 +8,7 @@ import { buildPrompt } from '../src/engine/prompt.ts'
 import { loadTrustedInstructions } from '../src/kit/kit.ts'
 import { autoMergeFixture } from './helpers/auto-merge.ts'
 
-// Captured before this change at lead head d58038df682e2090bbf29696ee1c02f1091b4fd7.
+// Default fixtures; the lead includes the shared repeated-failure rule.
 const defaults = JSON.parse(
   await readFile(
     new URL('./fixtures/roles-default.json', import.meta.url),
@@ -94,7 +94,7 @@ const variants: Partial<
 }
 
 for (const role of Object.keys(roles) as RoleName[]) {
-  test(`${role} prompt preserves default bytes and renders lights-out rules`, async (t) => {
+  test(`${role} prompt matches the default fixture and renders lights-out rules`, async (t) => {
     const f = await autoMergeFixture(t)
     const detail = await f.detail()
     const source = await readFile(
@@ -112,6 +112,21 @@ for (const role of Object.keys(roles) as RoleName[]) {
         home: f.home,
       })
       assert.doesNotMatch(prompt, /<!--\s*\/?(?:default|lights-out)\s*-->/)
+      if (role === 'lead') {
+        assert.match(prompt, /When `repeatedFailure` appears/)
+        assert.match(prompt, /`task` .*`plan` .*`factory`/)
+        assert.match(
+          prompt,
+          /Record the classification as a typed `decision` artifact/,
+        )
+        assert.match(prompt, /Do not retry with the same instructions/)
+        assert.match(
+          prompt,
+          /stop retrying it, name it in your summary, and continue the rest/,
+        )
+        if (!lightsOut)
+          assert.match(prompt, /factory cause you cannot work around/)
+      }
       if (!lightsOut) {
         assert.equal(prompt.slice(0, defaults[role].length), defaults[role])
       } else {

@@ -1,4 +1,4 @@
-import { writeFile } from 'node:fs/promises'
+import { readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { proofContext } from './fixtures/proof-agent.ts'
 import { untestedReasons } from '../src/domain/task-testing.ts'
@@ -16,6 +16,7 @@ import {
   deferred,
   leadFixture,
   leadState,
+  packet,
   result,
   until,
 } from './helpers/lead.ts'
@@ -138,6 +139,172 @@ test('a lead runs branch tasks in parallel, hears each finish while others run, 
   assert.equal(done.ticket.status, 'needs-you')
   assert.deepEqual(f.errors, [])
 })
+
+for (const lightsOut of [false, true])
+  test(`repeated failures reach the lead and refuse identical instructions, then accept changed instructions (lights-out ${lightsOut})`, async (t) => {
+    const f = await leadFixture()
+    t.after(() => f.close())
+    let attemptedRetry = false
+    let sawRefusal = false
+    f.setBehaviour(async (role, invocation, title) => {
+      if (role === 'lead') {
+        const { tasks, repeatedFailure } = leadState(invocation.prompt)
+        if (!tasks.length) {
+          assert.deepEqual(repeatedFailure, [])
+          return result(invocation.directory, {
+            outcome: 'delegate',
+            summary: 'Try two exports',
+            artifacts: [],
+            tasks: ['a', 'b'].map((key) => ({
+              key,
+              title: key,
+              instructions: 'Run the export',
+            })),
+          })
+        }
+        if (tasks.filter((task) => task.status === 'failed').length < 2)
+          return result(invocation.directory, {
+            outcome: 'delegate',
+            summary: 'Waiting for exports',
+            artifacts: [],
+          })
+        assert.equal(repeatedFailure.length, 1)
+        assert.equal(repeatedFailure[0]!.count, 2)
+        assert.deepEqual(repeatedFailure[0]!.tasks, ['a', 'b'])
+        assert.match(repeatedFailure[0]!.signature, /codex crashed/)
+        assert.ok(
+          packet(invocation.prompt).artifacts.some(
+            (artifact) =>
+              artifact.title === 'Task report' &&
+              /## Repeated failure\n\n- Same error 2 times: a, b\./.test(
+                artifact.content,
+              ),
+          ),
+        )
+        if (!attemptedRetry) {
+          attemptedRetry = true
+          return result(invocation.directory, {
+            outcome: 'delegate',
+            summary: 'Try the same instructions once more',
+            artifacts: [],
+            tasks: [
+              {
+                key: 'identical',
+                title: 'Identical',
+                instructions: '  Run\n the   export ',
+              },
+            ],
+          })
+        }
+        if (!tasks.some((task) => task.key === 'changed')) {
+          assert.match(invocation.prompt, /Previous result validation failed/)
+          assert.match(
+            invocation.prompt,
+            /same instructions already failed 2 times with the same error/,
+          )
+          assert.match(
+            invocation.prompt,
+            /classify the cause \(task, plan or factory\), record it as a decision artifact/,
+          )
+          sawRefusal = true
+          return result(invocation.directory, {
+            outcome: 'delegate',
+            summary: 'Use an offline export to work around the factory crash',
+            artifacts: [
+              {
+                kind: 'decision',
+                title: 'Repeated export failure',
+                chose: 'factory: use an offline export',
+                alternative: 'Retry the same Codex export',
+                reason:
+                  'Two identical Codex crashes after removing run details',
+              },
+            ],
+            tasks: [
+              {
+                key: 'changed',
+                title: 'Changed',
+                instructions: 'Write an offline export to recovered.txt',
+              },
+            ],
+          })
+        }
+        return result(invocation.directory, {
+          outcome:
+            tasks.find((task) => task.key === 'changed')!.status === 'merged'
+              ? 'done'
+              : 'delegate',
+          summary: 'Offline export completes the work',
+          artifacts: [],
+        })
+      }
+      if (role === 'builder')
+        return build(
+          invocation,
+          title === 'Changed' ? 'recovered.txt' : `${title}.txt`,
+          'export\n',
+        )
+      return result(invocation.directory, {
+        outcome: title === 'Changed' ? 'passed' : 'changes-needed',
+        summary:
+          title === 'Changed'
+            ? 'Offline export works'
+            : title === 'a'
+              ? 'Codex crashed at /tmp/export-a/run.ts:12 for attempt #123 at 2026-10-06T12:34:56Z after 1.5 seconds'
+              : 'Codex crashed at /Users/test/export-b/cli.ts:98 for attempt #456 at 2026-10-07T09:10:11Z after 250 ms',
+        artifacts: [],
+      })
+    })
+    const lead = await f.lead('Repeated failures', lightsOut)
+    await f.start()
+    const done = await until(
+      () => f.detail(lead.number),
+      (detail) =>
+        detail.ticket.currentStep === 'confirm' ||
+        detail.ticket.status === 'needs-you',
+    )
+    assert.equal(
+      done.ticket.currentStep,
+      'confirm',
+      JSON.stringify(done.attempts),
+    )
+    assert.ok(sawRefusal)
+    assert.deepEqual(
+      done.tasks.map((task) => [task.key, task.status]),
+      [
+        ['a', 'failed'],
+        ['b', 'failed'],
+        ['changed', 'merged'],
+      ],
+    )
+    assert.ok(
+      done.artifacts.some(
+        (artifact) =>
+          artifact.title === 'Task report' &&
+          /## Repeated failure\n\n- Same error 2 times: a, b\./.test(
+            artifact.content ?? '',
+          ),
+      ),
+    )
+    assert.ok(
+      done.artifacts.some(
+        (artifact) =>
+          artifact.decision?.chose === 'factory: use an offline export',
+      ),
+    )
+    const refused = f.invocations.find(
+      (invocation) =>
+        invocation.role === 'lead' &&
+        !invocation.prompt.includes('Previous result validation failed') &&
+        leadState(invocation.prompt).repeatedFailure.length > 0,
+    )!
+    assert.match(
+      await readFile(join(refused.directory, 'result-error.txt'), 'utf8'),
+      /Invalid lead result:.*same instructions already failed 2 times/,
+    )
+
+    assert.deepEqual(f.errors, [])
+  })
 
 test('failed and conflicting tasks reach the lead, and done is refused while tasks still run', async (t) => {
   const f = await leadFixture()

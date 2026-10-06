@@ -5,7 +5,11 @@ import { FactoryError } from '../domain/errors.ts'
 import { stepOf, type StepResult } from '../domain/lifecycle.ts'
 import type { LeadTask, Repository, Ticket } from '../domain/records.ts'
 import { resolveAgent } from '../domain/settings.ts'
-import { checkDelegation, delegateTarget } from '../domain/tasks.ts'
+import {
+  checkDelegation,
+  delegateTarget,
+  repeatedFailures,
+} from '../domain/tasks.ts'
 import type { AgentStep } from '../domain/workflow.ts'
 import {
   BUILT_IN_WORKFLOWS,
@@ -62,6 +66,7 @@ export async function leadContext(
     delegateTarget(context.workflow, context.step.id)?.with ?? {},
   )
   return {
+    repeatedFailure: repeatedFailures(detail.tasks),
     tasks: detail.tasks.map((task) => ({
       key: task.key,
       title: task.title,

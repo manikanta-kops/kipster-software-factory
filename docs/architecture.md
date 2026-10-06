@@ -844,6 +844,16 @@ scheduler tick, `engine/tasks.ts` advances each parked lead:
 Each lead run is a fresh session. Its prompt adds the current task table,
 limits, workflows, allowed agents and the repository's auto-merge setting;
 the ticket's notes, comments and step summaries carry the history.
+Failed tasks are grouped by a pure signature of their stored result, removing
+paths, IDs, hashes, timestamps, durations and numbers. Conflicts are excluded.
+Groups of two or more appear as `repeatedFailure` (signature, count, task keys)
+in the lead context and in a Repeated failure section of the Task report.
+At runtime, delegation refuses instructions matching any task in such a group
+after whitespace normalisation, through the existing invalid-result retry path.
+In both modes the lead must classify the cause as `task`, `plan` or `factory`,
+record a typed decision artifact (`chose`, `alternative`, `reason`), and change
+the task or plan, or stop retrying that line, name it in the summary and continue
+the rest. In default mode an unworkable factory cause may use `needs-decision`.
 Cancelling a lead cancels its unfinished tasks and their child tickets in the
 same transaction. A child ticket shows its lead and task; a lead ticket shows
 each task with its child, status, result and pull request. The API adds

@@ -6,6 +6,8 @@ import { parseStepResult } from '../src/domain/lifecycle.ts'
 import { ticketStatus } from '../src/domain/lifecycle.ts'
 import {
   checkDelegation,
+  failureSignature,
+  repeatedFailures,
   type DelegationInput,
   taskWorkflowProblem,
 } from '../src/domain/tasks.ts'
@@ -208,11 +210,86 @@ describe('lead results', () => {
     )
   })
 
+  test('refuses repeated failure instructions, allowing whitespace changes only before repetition', async () => {
+    const existing = ['a', 'b'].map((key) => ({
+      key,
+      land: 'branch' as const,
+      status: 'failed' as const,
+      decision: null,
+      instructions: key === 'a' ? 'Run the export' : 'Try the smaller export',
+      result: `Codex crashed in /tmp/${key}/run.log at 2026-10-06T12:00:00Z`,
+    }))
+    for (const instructions of [
+      ' Run\n the   export ',
+      'Try the smaller export',
+    ]) {
+      const errors = checkDelegation(
+        await input({
+          existing,
+          tasks: [request('retry', { instructions })],
+        }),
+      ).join('\n')
+      assert.match(
+        errors,
+        /same instructions already failed 2 times with the same error \(a, b\)/,
+      )
+      assert.match(
+        errors,
+        /classify the cause \(task, plan or factory\), record it as a decision artifact/,
+      )
+      assert.match(
+        errors,
+        /change the task or the plan, or park that line of work and continue the rest/,
+      )
+    }
+    assert.deepEqual(
+      checkDelegation(
+        await input({
+          existing,
+          tasks: [
+            request('retry', {
+              instructions: 'Use the offline export instead',
+            }),
+          ],
+        }),
+      ),
+      [],
+    )
+    assert.deepEqual(
+      checkDelegation(
+        await input({
+          existing: existing.slice(0, 1),
+          tasks: [request('retry', { instructions: 'Run the export' })],
+        }),
+      ),
+      [],
+    )
+    assert.deepEqual(
+      checkDelegation(
+        await input({
+          existing: existing.map((task) => ({
+            ...task,
+            status: 'conflict' as const,
+          })),
+          tasks: [request('retry', { instructions: 'Run the export' })],
+        }),
+      ),
+      [],
+    )
+  })
+
   test('rejects reused keys, unknown or mismatched workflows, other agents and too many tasks', async () => {
     const errors = checkDelegation(
       await input({
         existing: [
-          { key: 'api', land: 'branch', status: 'merged', decision: null },
+          {
+            key: 'api',
+            land: 'branch',
+            status: 'merged',
+            instructions: 'Existing task',
+            result: null,
+            decision: null,
+          },
         ],
         tasks: [
           request('api'),
@@ -235,18 +312,24 @@ describe('lead results', () => {
         key: 'ready',
         land: 'pr' as const,
         status: 'pr-ready' as const,
+        instructions: 'Existing task',
+        result: null,
         decision: null,
       },
       {
         key: 'branch',
         land: 'branch' as const,
         status: 'running' as const,
+        instructions: 'Existing task',
+        result: null,
         decision: null,
       },
       {
         key: 'decided',
         land: 'pr' as const,
         status: 'pr-ready' as const,
+        instructions: 'Existing task',
+        result: null,
         decision: 'merge' as const,
       },
     ]
@@ -279,7 +362,14 @@ describe('lead results', () => {
       checkDelegation(
         await input({
           existing: [
-            { key: 'a', land: 'branch', status: 'merged', decision: null },
+            {
+              key: 'a',
+              land: 'branch',
+              status: 'merged',
+              instructions: 'Existing task',
+              result: null,
+              decision: null,
+            },
           ],
         }),
       ).join(),
@@ -289,7 +379,14 @@ describe('lead results', () => {
       checkDelegation(
         await input({
           existing: [
-            { key: 'a', land: 'branch', status: 'running', decision: null },
+            {
+              key: 'a',
+              land: 'branch',
+              status: 'running',
+              instructions: 'Existing task',
+              result: null,
+              decision: null,
+            },
           ],
         }),
       ),
@@ -303,12 +400,16 @@ describe('lead results', () => {
         key: 'a',
         land: 'branch' as const,
         status: 'merged' as const,
+        instructions: 'Existing task',
+        result: null,
         decision: null,
       },
       {
         key: 'b',
         land: 'pr' as const,
         status: 'pr-ready' as const,
+        instructions: 'Existing task',
+        result: null,
         decision: null,
       },
     ]
@@ -336,6 +437,103 @@ describe('lead results', () => {
       ).join(),
       /merge needs delegate/,
     )
+  })
+})
+
+describe('task failure signatures', () => {
+  test('crashes differing only in paths, IDs, hashes, timestamps, durations and numbers match', () => {
+    const first =
+      'Child ticket #123 was cancelled after build: Codex crashed at /Users/alex/work/run.ts:12:3 with attempt #456 UUID 550e8400-e29b-41d4-a716-446655440000 commit abcdef1234567890 at 2026-10-06T12:34:56.123Z after 1.5 seconds, exit 137. Stack ./src/cli.ts ../tmp/error.log src/engine/tasks.ts'
+    const second =
+      'Child ticket #789 was cancelled after build: CODEX crashed at /tmp/other/entry.ts:99:7 with attempt #987 UUID 4e6749d2-8536-44b6-91d2-26e48ec76665 commit 1234567abcdefabc at 2026-11-07T09:10:11.987+02:00 after 250 ms, exit 1. Stack ./lib/main.ts ../logs/crash.txt tests/helpers/lead.ts'
+    assert.equal(failureSignature(first), failureSignature(second))
+    assert.match(failureSignature(first), /codex crashed/)
+    assert.notEqual(
+      failureSignature(first),
+      failureSignature(first.replace('Codex crashed', 'Permission denied')),
+    )
+  })
+
+  test('normalises Windows and relative paths, common timestamp formats and durations', () => {
+    for (const [first, second] of [
+      [
+        'Error in C:\\work\\a.ts:10 and logs\\a.log',
+        'Error in D:\\temp\\b.ts:20 and output\\b.log',
+      ],
+      ['Crash at 10/06/2026 12:34:56 UTC', 'Crash at 11/07/2026 01:23:45 GMT'],
+      [
+        'Crash at Tue, 06 Oct 2026 12:34:56 GMT',
+        'Crash at Wed, 07 Oct 2026 01:23:45 GMT',
+      ],
+      [
+        'Crash at October 6, 2026 12:34 PM',
+        'Crash at November 7, 2026 01:23 AM',
+      ],
+      ['Crash after 1m30s', 'Crash after 200ms'],
+      ['Crash at Tue Oct 6 12:34:56 2026', 'Crash at Wed Nov 7 01:23:45 2026'],
+      [
+        'Error in input.csv and schema.xml',
+        'Error in output.bin and data.custom',
+      ],
+      [
+        'Error in "/tmp/My Run/trace.log"',
+        'Error in "/Users/test/Other Run/error.txt"',
+      ],
+      [
+        'Error in crash.log and ./cache/data.csv',
+        'Error in other.txt and ../tmp/data.json',
+      ],
+      ['Error with deadbeef and #123', 'Error with 0123456789abcdef and #456'],
+      [
+        'Crash at address 0x7ffdeadbeef after 30µs',
+        'Crash at address 0x123abcdef after 20ns',
+      ],
+    ] as const)
+      assert.equal(failureSignature(first), failureSignature(second), first)
+    assert.equal(
+      failureSignature('  CODEX\n crashed\t unexpectedly  '),
+      'codex crashed unexpectedly',
+    )
+  })
+
+  test('groups only failed tasks with nonempty signatures, preserving every key and count', () => {
+    const tasks = [
+      {
+        key: 'a',
+        status: 'failed' as const,
+        result: 'Codex crashed at /tmp/a.log',
+      },
+      {
+        key: 'b',
+        status: 'failed' as const,
+        result: 'Codex crashed at /tmp/b.log',
+      },
+      {
+        key: 'c',
+        status: 'failed' as const,
+        result: 'Codex crashed at ./logs/c.log',
+      },
+      {
+        key: 'different',
+        status: 'failed' as const,
+        result: 'Permission denied',
+      },
+      ...(
+        ['conflict', 'cancelled', 'merged', 'running', 'parked'] as const
+      ).map((status) => ({
+        key: status,
+        status,
+        result: 'Codex crashed at /tmp/d.log',
+      })),
+      { key: 'missing', status: 'failed' as const, result: null },
+      { key: 'empty', status: 'failed' as const, result: ' ' },
+      { key: 'numeric', status: 'failed' as const, result: '123' },
+    ]
+    assert.deepEqual(repeatedFailures(tasks), [
+      { signature: 'codex crashed at', count: 3, tasks: ['a', 'b', 'c'] },
+    ])
+    assert.deepEqual(repeatedFailures(tasks.slice(0, 1)), [])
+    assert.deepEqual(repeatedFailures([]), [])
   })
 })
 
