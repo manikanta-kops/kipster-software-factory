@@ -255,3 +255,14 @@ export interface SettingsResponse {
 export type SettingsRequest = Settings
 
 export type { SkippedStep } from '../domain/task-testing.ts'
+
+export type { Lesson, LessonStatus } from '../domain/lessons.ts'
+export interface LessonsResponse {
+  readonly lessons: readonly import('../domain/lessons.ts').Lesson[]
+}
+export interface LessonResponse {
+  readonly lesson: import('../domain/lessons.ts').Lesson
+}
+export interface RetireLessonRequest {
+  readonly reason: string
+}

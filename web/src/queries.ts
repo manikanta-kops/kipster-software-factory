@@ -14,6 +14,11 @@ export const decisionsQuery = queryOptions({
   queryKey: ['decisions'],
   queryFn: ({ signal }) => api.decisions(signal),
 })
+export const lessonsQuery = (status: 'proposed' | 'accepted') =>
+  queryOptions({
+    queryKey: ['lessons', status],
+    queryFn: ({ signal }) => api.lessons(status, signal),
+  })
 export const ticketsQuery = queryOptions({
   queryKey: ['tickets'],
   queryFn: ({ signal }) => api.tickets(signal),
@@ -66,6 +71,8 @@ export function useLiveEvents() {
               )
                 void client.invalidateQueries({ queryKey })
           }
+          if (event.kind.startsWith('lesson.'))
+            void client.invalidateQueries({ queryKey: ['lessons'] })
           if (event.kind.startsWith('repository.'))
             void client.invalidateQueries({ queryKey: ['repositories'] })
         },

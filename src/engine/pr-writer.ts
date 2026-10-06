@@ -91,6 +91,7 @@ Only evidence at this exact commit counts. If the workflow has no tester, state 
     await mkdir(directory, { recursive: true })
     const session = await dependencySession(options, detail, signal)
     const prompt = await buildPrompt({
+      database: options.database,
       dependencies: session.dependencies,
       step: {
         id: step.id,

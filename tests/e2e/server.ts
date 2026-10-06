@@ -1,3 +1,5 @@
+import { insertLessonProposals } from '../../src/store/lessons.ts'
+import { transaction } from '../../src/store/database.ts'
 import { readFile } from 'node:fs/promises'
 import { parseUpload } from '../../src/library/library.ts'
 import { mergePolicy } from '../../src/domain/auto-merge.ts'
@@ -75,6 +77,34 @@ const router = new Hono()
 router.post('/__test/fixtures', async (c) => {
   const fixture = await createDemoStore()
   const fixtureHome = fixture.home
+  if (c.req.query('lessons') === 'true') {
+    const ticket = (await getTicketDetail(
+      fixture.database,
+      fixture.tickets.running,
+    ))!.ticket
+    await transaction(fixture.database, (connection) =>
+      insertLessonProposals(
+        connection,
+        [
+          {
+            repositoryId: ticket.repository.id,
+            text: 'Check empty inputs before review',
+            source: 'changes-needed',
+            sourceTicketId: ticket.id,
+            key: 'demo-empty',
+          },
+          {
+            repositoryId: null,
+            text: 'Validate agent result files before reporting completion',
+            source: 'repeated-failure',
+            sourceTicketId: ticket.id,
+            key: 'demo-result',
+          },
+        ],
+        [],
+      ),
+    )
+  }
   const verdict = c.req.query('verdict')
   if (verdict === 'changes-needed' || verdict === 'unobserved') {
     const detail = await getTicketDetail(

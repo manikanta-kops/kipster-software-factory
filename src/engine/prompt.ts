@@ -1,5 +1,7 @@
+import { acceptedLessons } from '../store/lessons.ts'
+import type { Database } from '../store/database.ts'
 import type { DependencyCheckout } from '../workspace/dependencies.ts'
-import { readFile, realpath, stat } from 'node:fs/promises'
+import { readFile, realpath, stat, writeFile, rm } from 'node:fs/promises'
 import { dirname, resolve, relative, isAbsolute, sep } from 'node:path'
 import { roles, type RoleName } from '../domain/catalog.ts'
 import type { TicketDetail } from '../store/tickets.ts'
@@ -11,6 +13,7 @@ import { reviewHistory } from '../domain/review.ts'
 import { renderRole } from '../domain/role.ts'
 
 export async function buildPrompt(input: {
+  database: Database | null
   step: AgentStep
   detail: TicketDetail
   directory: string
@@ -58,8 +61,20 @@ export async function buildPrompt(input: {
           (await readFile(await artifactPath(home, artifact.path!), 'utf8')),
       })),
   )
+  const lessons = input.database
+    ? await acceptedLessons(input.database, detail.ticket.repository.id)
+    : []
+  const lessonsPath = resolve(directory, 'lessons.md')
+  if (lessons.length)
+    await writeFile(lessonsPath, lessons.map((l) => l.text).join('\n') + '\n')
+  else await rm(lessonsPath, { force: true })
   return [
     base,
+    ...(lessons.length
+      ? [
+          `Past mistakes in this repository: ${lessonsPath}. Read it when planning or when stuck.`,
+        ]
+      : []),
     ...(step.role === 'onboarder'
       ? [await readFile(new URL('../../docs/kit.md', import.meta.url), 'utf8')]
       : []),

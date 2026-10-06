@@ -90,3 +90,10 @@ factory auto-merge. Older tickets with no stored summary retain their existing
 view. Resumed tickets hide their last parked report. Summary events refresh both
 views. The appearance suite covers these reports at 390px and 1280px in both
 themes, including the details control.
+
+Today's compact Lessons group lists proposed repository and engine mistakes
+with Accept and Reject controls. Repository filters narrow repository lessons;
+engine lessons remain visible and workflow filters do not filter lessons.
+Repositories has an Accepted lessons section with a required reason for retiring.
+No new routes are added. `lesson.*` events refresh both lists, including changes
+from another browser. Suggestions are independent of ticket decisions.

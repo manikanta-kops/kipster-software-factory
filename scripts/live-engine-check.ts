@@ -58,6 +58,7 @@ for (const role of ['planner', 'builder'] as const) {
   await mkdir(directory)
   const step = { kind: 'agent' as const, id: role, role, routes: {}, needs: [] }
   const prompt = await buildPrompt({
+    database: null,
     step,
     detail,
     directory,

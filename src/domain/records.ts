@@ -84,6 +84,8 @@ export const EVENT_KINDS = [
   'task.updated',
   'ticket.status',
   'ticket.summary',
+  'lesson.proposed',
+  'lesson.decided',
   'ticket.pull-request',
   'attempt.queued',
   'attempt.claimed',

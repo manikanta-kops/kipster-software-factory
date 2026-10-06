@@ -104,6 +104,7 @@ for (const role of Object.keys(roles) as RoleName[]) {
     assert.equal(renderRole(source, { lightsOut: false }), defaults[role])
     for (const lightsOut of [false, true]) {
       const prompt = await buildPrompt({
+        database: f.store.database,
         step: { id: 'role', kind: 'agent', role, needs: [], routes: {} },
         detail: { ...detail, ticket: { ...detail.ticket, lightsOut } },
         trusted: { roleInstructions: '', contextIndex: '' },
@@ -150,6 +151,7 @@ for (const role of Object.keys(roles) as RoleName[]) {
 test('agents are told to solve setup themselves and where the factory runtimes are', async (t) => {
   const f = await autoMergeFixture(t)
   const prompt = await buildPrompt({
+    database: f.store.database,
     step: {
       id: 'build',
       kind: 'agent',
@@ -188,6 +190,7 @@ test('lights-out instructions are present only when enabled, with typed decision
   const detail = await f.detail()
   for (const lightsOut of [false, true]) {
     const prompt = await buildPrompt({
+      database: f.store.database,
       step: {
         id: 'build',
         kind: 'agent',

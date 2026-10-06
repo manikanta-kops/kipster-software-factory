@@ -1,3 +1,5 @@
+import { proposeLessons } from '../domain/lessons.ts'
+import { insertLessonProposals, listLessons } from './lessons.ts'
 import { summarizeTicket, type TicketSummary } from '../domain/summary.ts'
 import { getMergeGate } from './gate-records.ts'
 import {
@@ -1426,6 +1428,46 @@ export async function refreshTicketSummary(
   const artifacts = await listArtifacts(connection, ticket.id)
   const tasks = await listTasks(connection, ticket.id)
   const gate = await getMergeGate(connection, ticket.id)
+  const childErrors = await connection.query<{ id: number; error: string }>(
+    `SELECT a.id, a.error FROM attempts a JOIN tasks t ON t.child_ticket_id = a.ticket_id
+     WHERE t.ticket_id = $1 AND a.status = 'failed' AND a.error IS NOT NULL`,
+    [ticket.id],
+  )
+  await insertLessonProposals(
+    connection,
+    proposeLessons({
+      ticket,
+      workflow,
+      attempts,
+      artifacts,
+      existing: [
+        ...(await listLessons(connection, {
+          repositoryId: ticket.repository.id,
+        })),
+        ...(await listLessons(connection, { repositoryId: null })),
+      ],
+      failures: [
+        ...attempts
+          .filter((a) => a.status === 'failed' && a.error)
+          .map((a) => ({ id: a.id, error: a.error! })),
+        ...childErrors.rows,
+        ...tasks
+          .filter(
+            (task) =>
+              task.status === 'failed' &&
+              /^(?:Could not start:|Could not merge into the lead branch:)/.test(
+                task.result ?? '',
+              ),
+          )
+          .map((task) => ({ id: `task-${task.id}`, error: task.result! })),
+      ].map((a) => ({
+        key: String(a.id),
+        status: 'failed' as const,
+        result: a.error,
+      })),
+    }),
+    events,
+  )
   const summary = summarizeTicket({
     ticket,
     workflow,

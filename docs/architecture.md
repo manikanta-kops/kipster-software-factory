@@ -134,6 +134,36 @@ The API adds the summary to listed tickets and ticket detail. Ticket pages
 show it above the details; Today shows compact rows for attention and tickets
 finished in the last 24 hours. Reports hide while a ticket resumes running.
 
+### Lessons
+
+Migration 017 stores proposed, accepted, rejected and retired lessons per
+repository, or with a null repository for the engine. The lifecycle summary hook
+proposes them in the same transaction, without changing routing or waiting state.
+The pure `domain/lessons.ts` uses finding titles repeated in distinct
+`changes-needed` reviewer rounds, repeated recorded attempt errors (including
+child attempts and system-recorded task startup/integration errors), and comments on human `changes-needed` or `rejected` answers.
+It never reads agent summaries or task result prose. CLI crashes and result.json
+validation failures become engine lessons; other errors stay with the repository.
+Cross-ticket review finding aggregation is not implemented.
+
+Texts collapse whitespace and stop at 200 characters. Dedup keys use the source
+and normalised fact text, bounded to 240 characters. A unique scope/key index
+also suppresses rejected and retired lessons on later parks. `GET /api/lessons`
+filters by numeric `repository` (or `engine`) and `status`; POST endpoints under
+`/api/lessons/:id` accept, reject or retire (with a nonempty `reason`). Decisions
+emit `lesson.decided`; proposals emit `lesson.proposed`. Accepting a 31st
+repository lesson returns a conflict asking the owner to retire one first.
+A scope advisory lock serialises concurrent accepts. Engine lessons have no cap.
+
+Before each agent invocation, the shared prompt builder writes accepted
+repository lessons followed by engine lessons to the step directory's
+`lessons.md`. This includes indexed parallel reviewers, proof retries and PR
+writers. Only an absolute-path pointer goes into the prompt; no accepted lesson
+text is embedded. With no accepted lessons, the file and pointer are absent.
+Each step takes a fresh snapshot, so owner decisions affect subsequent steps.
+Today offers compact Accept/Reject controls. Repositories lists accepted lessons
+with a retirement reason form. These controls never gate ticket work.
+
 ## Repositories on disk
 
 A repository is cloned once into the factory home and kept: setup, caches and

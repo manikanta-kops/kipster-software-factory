@@ -1,4 +1,7 @@
 import type {
+  LessonsResponse,
+  LessonResponse,
+  LessonStatus,
   CreateRepositoryRequest,
   AutoMergeRequest,
   CreateTicketRequest,
@@ -71,6 +74,17 @@ async function post<T>(path: string, body: unknown): Promise<T> {
 }
 
 export const api = {
+  lessons: (status: LessonStatus, signal: AbortSignal) =>
+    get<LessonsResponse>(`/lessons?status=${status}`, signal),
+  decideLesson: (
+    id: number,
+    action: 'accept' | 'reject' | 'retire',
+    reason?: string,
+  ) =>
+    post<LessonResponse>(
+      `/lessons/${id}/${action}`,
+      action === 'retire' ? { reason } : {},
+    ),
   retryRepository: (id: number) =>
     post<RepositoryResponse>(`/repositories/${id}/retry`, {}),
   setAutoMerge: (id: number, body: AutoMergeRequest) =>
