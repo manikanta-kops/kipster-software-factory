@@ -1,6 +1,6 @@
 {
   "name": "kipster-software-factory",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "Turns tickets into verified pull requests through workflows of agent, human and system steps.",
   "license": "Apache-2.0",
   "private": true,
@@ -13,6 +13,7 @@
     "dev": "node scripts/dev.ts",
     "start": "node src/cli.ts serve",
     "kf": "node src/cli.ts",
+    "seed:demo": "node scripts/seed-demo.ts",
     "build": "vite build",
     "check": "npm run lint && npm run format:check && npm run typecheck",
     "lint": "oxlint",
@@ -23,7 +24,10 @@
     "test:e2e": "playwright test"
   },
   "dependencies": {
+    "@clack/prompts": "1.8.1",
     "@hono/node-server": "2.1.3",
+    "@napi-rs/keyring": "2.1.0",
+    "@typesafe-ai/sdk": "0.6.0",
     "hono": "4.13.13",
     "pg": "8.23.1",
     "yaml": "2.9.1",
@@ -31,6 +35,7 @@
   },
   "devDependencies": {
     "@playwright/test": "1.63.0",
+    "@tanstack/react-query": "5.104.1",
     "@types/node": "26.6.4",
     "@types/pg": "8.23.1",
     "@types/react": "19.3.0",
@@ -40,6 +45,8 @@
     "prettier": "3.9.9",
     "react": "19.3.0",
     "react-dom": "19.3.0",
+    "react-markdown": "10.1.0",
+    "remark-gfm": "4.0.1",
     "typescript": "7.0.2",
     "vite": "8.3.2"
   }

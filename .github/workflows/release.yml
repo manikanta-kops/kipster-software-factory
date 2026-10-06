@@ -1,0 +1,117 @@
+name: Release
+
+# Pull requests that touch installation build and smoke-test the bundles without
+# publishing. A v* tag on master publishes them as a GitHub release.
+on:
+  push:
+    tags: ['v*']
+  pull_request:
+    branches: [next, master]
+    paths:
+      - install.sh
+      - scripts/bundle.ts
+      - src/cli.ts
+      - src/config.ts
+      - src/service.ts
+      - src/setup.ts
+      - src/store/cluster.ts
+      - package.json
+      - package-lock.json
+      - .github/workflows/release.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  bundle:
+    name: Bundle (${{ matrix.arch }})
+    strategy:
+      matrix:
+        include:
+          - arch: arm64
+            runner: macos-15
+          - arch: x64
+            runner: macos-15-intel
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - run: node scripts/bundle.ts --arch ${{ matrix.arch }} --out release
+      - name: Install from the bundle and serve with its own PostgreSQL
+        run: |
+          home="$RUNNER_TEMP/kf"
+          sh install.sh --from release --home "$home" --bin-dir "$RUNNER_TEMP/bin" \
+            --no-start --no-modify-path
+          kf="$RUNNER_TEMP/bin/kf"
+          "$kf" --version
+          "$kf" serve --home "$home" --port 4690 --no-scheduler > "$RUNNER_TEMP/serve.log" 2>&1 &
+          server=$!
+          healthy=false
+          for _ in $(seq 1 60); do
+            if curl -fs http://127.0.0.1:4690/api/health; then healthy=true; break; fi
+            sleep 1
+          done
+          cat "$RUNNER_TEMP/serve.log"
+          [ "$healthy" = true ]
+          curl -fs http://127.0.0.1:4690/ | grep -q '<div id="root">'
+          curl -fs http://127.0.0.1:4690/api/workflows | grep -q '"name":"feature"'
+          kill -TERM "$server"
+          wait "$server"
+          if "$home/current/postgres/bin/pg_ctl" -D "$home/postgres" status; then
+            echo "::error::serve left its PostgreSQL running"
+            exit 1
+          fi
+      - uses: actions/upload-artifact@v7
+        with:
+          name: bundle-${{ matrix.arch }}
+          path: release/kf-darwin-${{ matrix.arch }}.tar.gz
+          retention-days: 7
+
+  publish:
+    name: Publish
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: bundle
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: Tag matches the package version and is on master
+        run: |
+          version=$(jq -r .version package.json)
+          if [ "v$version" != "$GITHUB_REF_NAME" ]; then
+            echo "::error::Tag $GITHUB_REF_NAME does not match package.json version $version"
+            exit 1
+          fi
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/master; then
+            echo "::error::Release tags must point at a commit on master"
+            exit 1
+          fi
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: bundle-*
+          merge-multiple: true
+          path: release
+      - name: Checksums
+        run: |
+          cp install.sh release/
+          cd release
+          shasum -a 256 kf-darwin-arm64.tar.gz kf-darwin-x64.tar.gz install.sh > SHA256SUMS
+          cat SHA256SUMS
+      - name: Create the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" release/* \
+            --title "Kipster Software Factory $GITHUB_REF_NAME" --generate-notes

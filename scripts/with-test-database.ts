@@ -5,7 +5,7 @@ import { spawn } from 'node:child_process'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { constants } from 'node:os'
 import { join } from 'node:path'
-import { clusterUrl, startCluster, stopCluster } from './postgres.ts'
+import { clusterUrl, startCluster, stopCluster } from '../src/store/cluster.ts'
 
 const [command, ...args] = process.argv.slice(2)
 if (!command) {

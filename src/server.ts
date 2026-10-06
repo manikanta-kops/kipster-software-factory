@@ -1,21 +1,40 @@
 import { fileURLToPath } from 'node:url'
 import { serve } from '@hono/node-server'
 import { createApp } from './api/app.ts'
-import { BUILT_IN_WORKFLOWS, loadLibrary } from './library/library.ts'
+import { engineConfig, type EngineConfig, defaultHome } from './config.ts'
+import {
+  addUploads,
+  BUILT_IN_WORKFLOWS,
+  loadLibrary,
+} from './library/library.ts'
 import { openDatabase } from './store/database.ts'
+import { listenForEvents } from './store/events.ts'
 import { migrate } from './store/migrate.ts'
-import { recordWorkflowVersions } from './store/workflows.ts'
+import { startScheduler } from './engine/scheduler.ts'
+import {
+  listUploadedWorkflows,
+  recordWorkflowVersions,
+} from './store/workflows.ts'
 
 export const BUILT_WEB_APP = fileURLToPath(
   new URL('../dist/web/', import.meta.url),
 )
 
 export interface FactoryOptions {
+  readonly evidenceRetentionDays?: number
+  readonly concurrency?: number
+  readonly stepTimeoutMinutes?: number
+  readonly agents?: EngineConfig['agents']
+  /** Serve without executing tickets, for demo data and UI development. */
+  readonly scheduler?: boolean
   readonly databaseUrl: string
   readonly port: number
   readonly host?: string
   readonly workflows?: string
   readonly webRoot?: string
+  /** Factory home (default: ~/.kipster-factory). */
+  readonly home?: string
+  readonly allowedOrigins?: readonly string[]
 }
 
 export interface RunningFactory {
@@ -36,14 +55,44 @@ export async function startFactory(
   try {
     await migrate(database)
     await recordWorkflowVersions(database, loaded.library)
+    for (const warning of addUploads(
+      loaded.library,
+      await listUploadedWorkflows(database),
+    ))
+      console.warn(warning)
   } catch (error) {
     await database.end()
     throw error
   }
 
+  const events = listenForEvents(database)
+  let scheduler: Awaited<ReturnType<typeof startScheduler>> | undefined
+  try {
+    await events.ready
+    if (options.scheduler !== false)
+      scheduler = await startScheduler({
+        database,
+        events,
+        library: loaded.library,
+        home: options.home ?? defaultHome(),
+        config: engineConfig.parse(options),
+        ...(loaded.library.get('bug')
+          ? { bugWorkflow: loaded.library.get('bug')! }
+          : {}),
+      })
+  } catch (error) {
+    await events.close()
+    await database.end()
+    throw error
+  }
   const app = createApp({
     database,
     library: loaded.library,
+    events,
+    home: options.home ?? defaultHome(),
+    ...(options.allowedOrigins === undefined
+      ? {}
+      : { allowedOrigins: options.allowedOrigins }),
     ...(options.webRoot === undefined ? {} : { webRoot: options.webRoot }),
   })
   const host = options.host ?? '127.0.0.1'
@@ -55,14 +104,23 @@ export async function startFactory(
       )
       listening.once('error', reject)
     },
-  )
+  ).catch(async (error) => {
+    await scheduler?.close()
+    await events.close()
+    await database.end()
+    throw error
+  })
 
   return {
     url: `http://${host}:${options.port}`,
     async close() {
-      await new Promise<void>((resolve, reject) =>
-        server.close((error) => (error ? reject(error) : resolve())),
-      )
+      await scheduler?.close()
+      await events.close()
+      await new Promise<void>((resolve, reject) => {
+        server.close((error) => (error ? reject(error) : resolve()))
+        // Event streams stay open until their clients leave; don't wait for them.
+        if ('closeAllConnections' in server) server.closeAllConnections()
+      })
       await database.end()
     },
   }

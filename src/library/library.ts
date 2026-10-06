@@ -14,19 +14,21 @@ export interface LibraryEntry {
   /** Content hash of the source; a ticket keeps the version it started with. */
   readonly version: string
   readonly source: string
+  /** Added through the API rather than loaded from a workflow file. */
+  readonly uploaded?: true
 }
 
 export type Library = ReadonlyMap<string, LibraryEntry>
 
 export type LoadResult =
-  | { readonly ok: true; readonly library: Library }
+  | { readonly ok: true; readonly library: Map<string, LibraryEntry> }
   | { readonly ok: false; readonly errors: readonly string[] }
 
 export function workflowVersion(source: string): string {
   return createHash('sha256').update(source).digest('hex').slice(0, 12)
 }
 
-/** Loads every `<name>.yml` in a directory and checks references between workflows. */
+/** Loads every `<name>.yml` in a directory and validates each workflow. */
 export async function loadLibrary(directory: string): Promise<LoadResult> {
   const files = (await readdir(directory))
     .filter((file) => extname(file) === '.yml')
@@ -55,18 +57,53 @@ export async function loadLibrary(directory: string): Promise<LoadResult> {
     })
   }
 
-  for (const [name, { workflow }] of library) {
-    for (const step of workflow.steps) {
-      if (step.kind !== 'system' || step.action !== 'split') continue
-      const child = step.with['workflow']
-      if (typeof child === 'string' && !library.has(child)) {
-        errors.push(
-          `${name}.yml: step "${step.id}" splits into unknown workflow "${child}"`,
-        )
-      }
-    }
-  }
-
   if (files.length === 0) errors.push(`${directory}: no workflow files found`)
   return errors.length > 0 ? { ok: false, errors } : { ok: true, library }
+}
+
+export type UploadResult =
+  | { readonly ok: true; readonly entry: LibraryEntry }
+  | { readonly ok: false; readonly errors: readonly string[] }
+
+/** Validates workflow source added through the API. */
+export function parseUpload(source: string): UploadResult {
+  const result = parseWorkflow(source)
+  if (!result.ok) return result
+  return {
+    ok: true,
+    entry: {
+      workflow: result.workflow,
+      version: workflowVersion(source),
+      source,
+      uploaded: true,
+    },
+  }
+}
+
+/**
+ * Adds saved uploads to a library loaded from files. A workflow file keeps its
+ * name, and an upload the current catalog no longer accepts is left out.
+ */
+export function addUploads(
+  library: Map<string, LibraryEntry>,
+  uploads: readonly { readonly name: string; readonly source: string }[],
+): readonly string[] {
+  const warnings: string[] = []
+  for (const { name, source } of uploads) {
+    if (library.has(name)) {
+      warnings.push(
+        `Uploaded workflow "${name}" is hidden by the workflow file with the same name`,
+      )
+      continue
+    }
+    const result = parseUpload(source)
+    if (!result.ok) {
+      warnings.push(
+        `Uploaded workflow "${name}" is no longer valid: ${result.errors.join('; ')}`,
+      )
+      continue
+    }
+    library.set(name, result.entry)
+  }
+  return warnings
 }

@@ -1,0 +1,37 @@
+name: task-pr
+description: One task from a lead that lands as its own pull request. The lead decides whether the system merges it.
+steps:
+  - id: build
+    kind: agent
+    role: builder
+
+  - id: test
+    kind: agent
+    role: tester
+    needs: [verify]
+    limit: 3
+    routes:
+      changes-needed: build
+      limit: cancel
+
+  - id: review
+    kind: agent
+    role: reviewer
+    limit: 2
+    routes:
+      changes-needed: build
+      limit: cancel
+
+  - id: maintain-pr
+    kind: system
+    action: maintain-pr
+    routes:
+      conflict: build
+      ci-failed: build
+      base-moved: test
+
+  - id: merge
+    kind: system
+    action: merge
+    routes:
+      changes-needed: build

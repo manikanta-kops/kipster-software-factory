@@ -1,78 +1,116 @@
-import type { MouseEvent, ReactNode } from 'react'
-import { api } from './api.ts'
+import { DecisionsPage } from './pages/Decisions.tsx'
+import { useEffect, useRef, useState } from 'react'
 import { Logo } from './components/Logo.tsx'
 import { NeedsYou } from './pages/NeedsYou.tsx'
 import { Workflows } from './pages/Workflows.tsx'
-import { navigate, usePath } from './router.ts'
-import { useResource } from './useResource.ts'
+import { NewTicket } from './pages/NewTicket.tsx'
+import { TicketPage } from './pages/Ticket.tsx'
+import { Repositories } from './pages/Repositories.tsx'
+import { usePath } from './router.ts'
+import { useLiveEvents } from './queries.ts'
+import { noFilter, type TicketFilter } from './components/Filters.tsx'
 
 export function App() {
   const path = usePath()
-  const health = useResource(api.health)
+  const live = useLiveEvents()
+  const main = useRef<HTMLElement>(null)
+  const [filter, setFilter] = useState<TicketFilter>(noFilter)
+  useEffect(() => {
+    document.title =
+      path === '/'
+        ? 'Today · Kipster'
+        : `${path.split('/').filter(Boolean).join(' / ')} · Kipster`
+    main.current?.focus()
+  }, [path])
+  const ticket = /^\/tickets\/(\d+)(?:\/evidence\/(\d+))?$/.exec(path)
   const onWorkflows = path.startsWith('/workflows')
-
   return (
     <div className="shell">
+      <a
+        className="skip-link"
+        href="#main"
+        onClick={(event) => {
+          event.preventDefault()
+          main.current?.focus()
+        }}
+      >
+        Skip to content
+      </a>
       <header className="bar">
-        <Link to="/" className="brand">
-          <Logo />
-          <span>Kipster Software Factory</span>
-        </Link>
-        <nav aria-label="Main">
-          <Link to="/" current={!onWorkflows}>
-            Needs you
-          </Link>
-          <Link to="/workflows" current={onWorkflows}>
-            Workflows
-          </Link>
-        </nav>
-        <output
-          className={`status ${health.state}`}
-          title={health.state === 'failed' ? health.error : undefined}
-        >
-          {health.state === 'ready'
-            ? 'Online'
-            : health.state === 'loading'
-              ? 'Connecting'
-              : 'Offline'}
-        </output>
+        <div className="bar-inner">
+          <a
+            href="#/"
+            className="brand"
+            aria-label="Kipster Software Factory home"
+          >
+            <Logo />
+            <span>Kipster</span>
+          </a>
+          <nav aria-label="Main">
+            <a href="#/" aria-current={path === '/' ? 'page' : undefined}>
+              Today
+            </a>
+            <a
+              href="#/repositories"
+              aria-current={path === '/repositories' ? 'page' : undefined}
+            >
+              Repositories
+            </a>
+            <a
+              href="#/workflows"
+              aria-current={onWorkflows ? 'page' : undefined}
+            >
+              Workflows
+            </a>
+            <a
+              href="#/decisions"
+              aria-current={path === '/decisions' ? 'page' : undefined}
+            >
+              Decisions
+            </a>
+          </nav>
+          <output
+            className={`status ${live}`}
+            aria-live="polite"
+            title="Live updates"
+          >
+            {live === 'ready'
+              ? 'Live'
+              : live === 'connecting'
+                ? 'Connecting'
+                : 'Reconnecting'}
+          </output>
+          <a className="button primary new-ticket" href="#/tickets/new">
+            New ticket
+          </a>
+        </div>
       </header>
-      <main>
-        {onWorkflows ? (
+      <main id="main" ref={main} tabIndex={-1}>
+        {path === '/' ? (
+          <NeedsYou filter={filter} onFilter={setFilter} />
+        ) : path === '/tickets/new' ? (
+          <NewTicket />
+        ) : ticket ? (
+          <TicketPage
+            key={ticket[1]}
+            number={Number(ticket[1])}
+            {...(ticket[2] ? { evidenceId: Number(ticket[2]) } : {})}
+          />
+        ) : path === '/repositories' ? (
+          <Repositories />
+        ) : path === '/decisions' ? (
+          <DecisionsPage />
+        ) : onWorkflows ? (
           <Workflows selected={path.split('/')[2]} />
         ) : (
-          <NeedsYou />
+          <section className="quiet">
+            <h1>Page not found</h1>
+            <a href="#/" className="text-link">
+              Back to today
+            </a>
+          </section>
         )}
       </main>
     </div>
-  )
-}
-
-function Link({
-  to,
-  current,
-  className,
-  children,
-}: {
-  to: string
-  current?: boolean
-  className?: string
-  children: ReactNode
-}) {
-  const follow = (event: MouseEvent<HTMLAnchorElement>) => {
-    if (event.metaKey || event.ctrlKey || event.shiftKey || event.button !== 0)
-      return
-    event.preventDefault()
-    navigate(to)
-  }
-  return (
-    <a
-      href={to}
-      onClick={follow}
-      className={className}
-      aria-current={current ? 'page' : undefined}
-    >
-      {children}
-    </a>
   )
 }

@@ -7,9 +7,12 @@ You describe a problem and agree the outcome. The factory plans, builds, proves
 the change by running the real app, keeps the pull request ready, and only
 interrupts you for decisions that are yours to make.
 
-> **Status: foundation.** Workflows load, validate and render, and the server,
-> database and web app run. Tickets and agents arrive in the next slices; see
-> the [roadmap](docs/roadmap.md).
+> **Status: Slices 1–3 complete.** Onboard a repository, approve a ticket, and
+> let fresh agents build, prove and review it. The factory attaches real browser
+> evidence to the tested commit, synchronizes base changes, waits for required
+> CI, and routes PR feedback back to the builder. Proven with real agents on the
+> private factory-floor test bed; the owner merges. Decisions and merge policy
+> come next in the [roadmap](docs/roadmap.md).
 
 ## How it works
 
@@ -20,7 +23,7 @@ a list of steps of three kinds:
 | ------ | --------------------------------------------------------------------- |
 | agent  | A fresh agent session in a fixed **role** (planner, builder, tester…) |
 | human  | The ticket waits for you to approve, request changes or reject        |
-| system | Deterministic work: keep the PR current, merge, split, decide         |
+| system | Deterministic work: keep the PR current, merge, decide                |
 
 Each step reports an outcome, and **routes** send the ticket forward, back to
 an earlier step, or to you. Loops have limits, so nothing spins forever.
@@ -55,7 +58,31 @@ folder, so the engine stays the same for every project.
 - [Workflow format](docs/workflows.md): every field, outcome and default
 - [Workflow guide](docs/workflow-guide.md): principles for workflows you can trust
 
-## Run it
+## Install
+
+On macOS (Apple Silicon or Intel):
+
+```sh
+curl -fsSL https://github.com/manikanta-kops/kipster-software-factory/releases/latest/download/install.sh | sh
+```
+
+The installer downloads the release for your Mac, checks its SHA-256 against the
+release checksums and installs it in `~/.kipster-factory`. The release includes
+Node.js and PostgreSQL. It links `kf` into `~/.local/bin` and runs `kf setup --start`, which:
+
+- checks git, the GitHub CLI (showing the signed-in account and its scopes;
+  offers `gh auth login` if you are signed out), Codex and Claude Code;
+- asks which agent runs steps by default, only when both are installed;
+- creates a private PostgreSQL database in `~/.kipster-factory/postgres` that
+  accepts only local socket connections;
+- starts the factory in the background, now and at login, and opens it.
+
+The built-in workflows (`feature`, `bug`, `quick-change`, `onboard-repo`, and
+`lead` with its `task` and `task-pr` task workflows) are ready immediately. Re-run the command, or `kf update`, to update; your
+configuration, secrets and database are kept. `kf status`, `kf logs -f`,
+`kf stop` and `kf start` manage the background factory.
+
+## Run from source
 
 Requires Node.js 26.10 (see `.nvmrc`) and PostgreSQL 18 (`initdb` and `pg_ctl`
 on `PATH`).
@@ -66,16 +93,42 @@ npm ci
 npm run dev        # local database, API on :4600 and the web app on :5173
 ```
 
-`npm run dev` keeps its database in `.local/`. To run against your own
-database, build the web app and serve:
+`npm run dev` does not restart the factory on source edits, so active agent steps
+keep running. Stop and start it explicitly to load server changes, or opt into
+automatic restarts with `npm run dev -- --watch`. Vite still hot-reloads the web app.
+Startup also builds the web app for the API origin on :4600, so PR evidence and
+ticket links work there; :5173 remains the live development UI.
+
+`npm run dev` keeps its database in `.local/`. To run a source checkout like an
+installation, build the web app, set up and serve:
 
 ```sh
 npm run build
-npm run kf -- serve --database-url postgresql://localhost/factory
+npm run kf -- setup
+npm start
 ```
 
-Or put `{"databaseUrl": "…", "port": 4600}` in `~/.kipster-factory/config.json`
-and run `npm start`.
+`kf setup` creates and migrates a private PostgreSQL cluster in the factory home
+unless you pass `--database-url <url>` to use your own database. It keeps the
+configured port, or picks the first free port from 4600 on first setup. Re-run it to
+update settings; other configuration fields are retained. For scripts, use
+`npm run kf -- setup --non-interactive`. Use `--home <directory>` on setup and
+serve for a separate factory.
+
+TypeSafe is optional: its key powers decision steps (for example judging whether
+a PR is safe to auto-merge). Without it those decisions come to you. Store a key
+with `kf secret set typesafe`, or validate one from stdin during setup with
+`--typesafe-stdin`.
+
+Manage secrets with `npm run kf -- secret set <name>`, `secret list`, and
+`secret remove <name>`. Set reads hidden terminal input or piped stdin; list
+shows names and backends only. Secrets use the OS credential store, with a
+mode-0600 `secrets.json` fallback if it is unavailable. No environment variables
+or .env files configure integrations. `--secret-backend file` explicitly chooses
+the file store for headless installations and tests. Only macOS Keychain has been
+tested; Linux Secret Service is supported but unverified, and Windows validation
+is deferred. Browsers on other origins may call the API only if they are
+listed in `allowedOrigins` (default: the Vite dev server and the Tauri shell).
 
 ## Develop
 
@@ -84,6 +137,18 @@ npm run check      # lint, format and type checks
 npm test           # unit and integration tests against a throwaway PostgreSQL
 npm run test:e2e   # browser tests against the built app
 npm run kf -- check [dir]   # validate a directory of workflow files
+npm run dev -- --no-scheduler # serve UI without running agents
+npm run seed:demo  # fill the dev database with tickets in every state
 ```
+
+Demo seeding requires an empty database with no running scheduler. Stop the
+normal dev server, seed, then use `npm run dev -- --no-scheduler` (or
+`kf serve --no-scheduler`). A database marked as demo refuses to start a
+scheduler, including after a restart. Keep real runs in a separate checkout's
+`.local/` database. Development workspaces and evidence also live under
+`.local/factory/`. Demo media is generated there (synthetic images/video/logs,
+never real verification evidence); seed with `--home <directory>` when serving a
+different home. The demo includes valid/invalid kits and current/stale feature
+verdicts with recorded commits. Override with `npm run dev -- --home <directory>`.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md). Licensed under [Apache-2.0](LICENSE).

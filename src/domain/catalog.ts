@@ -79,6 +79,13 @@ export const roles = {
     success: 'done',
     outcomes: ['done'],
   },
+  lead: {
+    summary:
+      'Splits the ticket into tasks for other agents, reads their reports and decides what happens next.',
+    changes: 'nothing',
+    success: 'done',
+    outcomes: ['done', 'delegate', 'plan-ready'],
+  },
 } as const satisfies Record<string, Role>
 
 export type RoleName = keyof typeof roles
@@ -91,6 +98,67 @@ export const humanContract: StepContract = {
 const slug = z
   .string()
   .regex(/^[a-z][a-z0-9-]*$/, 'use lowercase letters, digits and hyphens')
+
+export const otherRepositoryRequestSchema = z.strictObject({
+  repository: z
+    .string()
+    .trim()
+    .regex(/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/, 'use owner/name')
+    .refine(
+      (value) =>
+        value.split('/').every((part) => part !== '.' && part !== '..'),
+      'use owner/name',
+    ),
+  title: z.string().trim().min(1).max(200),
+  body: z.string().trim().min(1).max(100_000),
+  workflow: slug.default('feature'),
+})
+export type OtherRepositoryRequest = z.infer<
+  typeof otherRepositoryRequestSchema
+>
+
+export const AGENT_CLIS = ['codex', 'claude'] as const
+export const EFFORTS = [
+  'minimal',
+  'low',
+  'medium',
+  'high',
+  'xhigh',
+  'max',
+] as const
+
+/** Which CLI, model and effort run an agent session. */
+export const agentChoiceSchema = z.strictObject({
+  cli: z.enum(AGENT_CLIS),
+  model: z.string().min(1).optional(),
+  effort: z.enum(EFFORTS).optional(),
+})
+export type AgentChoice = z.infer<typeof agentChoiceSchema>
+
+/** A lead's request for one task: a child ticket that lands on the lead's branch or as its own pull request. */
+export const taskRequestSchema = z.strictObject({
+  key: slug,
+  title: z.string().trim().min(1).max(200),
+  instructions: z.string().trim().min(1).max(100_000),
+  land: z.enum(['branch', 'pr']).default('branch'),
+  workflow: slug.optional(),
+  agent: agentChoiceSchema.optional(),
+})
+export type TaskRequest = z.infer<typeof taskRequestSchema>
+
+export const pullRequestDecisionSchema = z.strictObject({
+  task: slug,
+  decision: z.enum(['merge', 'leave-open']),
+})
+export type PullRequestDecision = z.infer<typeof pullRequestDecisionSchema>
+
+export const runTasksParams = z.strictObject({
+  workflow: slug.default('task'),
+  prWorkflow: slug.default('task-pr'),
+  maxParallel: z.int().positive().default(3),
+  maxTasks: z.int().positive().default(12),
+})
+export type RunTasksParams = z.infer<typeof runTasksParams>
 
 const confidence = z.number().min(0).max(1)
 
@@ -109,8 +177,6 @@ export const decideParams = z.strictObject({
     .default({ act: 0.9, confirm: 0.6 }),
 })
 
-export const splitParams = z.strictObject({ workflow: slug })
-
 const noParams = z.strictObject({})
 
 function fixed(success: string, outcomes: readonly string[]) {
@@ -118,6 +184,12 @@ function fixed(success: string, outcomes: readonly string[]) {
 }
 
 export const actions = {
+  'verify-kit': {
+    summary:
+      'Proves the committed kit with setup, check and an isolated running instance.',
+    params: noParams,
+    contract: fixed('passed', ['passed', 'failed']),
+  },
   decide: {
     summary:
       'Asks the decision model a typed question and routes on its answer and confidence.',
@@ -131,7 +203,11 @@ export const actions = {
   'maintain-pr': {
     summary:
       'Keeps the pull request mergeable: syncs with base, waits for CI and refreshes the description.',
-    params: noParams,
+    params: z.strictObject({
+      ciTimeoutMinutes: z.number().positive().default(60),
+      ciSettleMinutes: z.number().nonnegative().default(3),
+      maxBaseSyncs: z.int().nonnegative().default(3),
+    }),
     contract: fixed('ready', ['ready', 'conflict', 'ci-failed', 'base-moved']),
   },
   merge: {
@@ -140,16 +216,11 @@ export const actions = {
     params: noParams,
     contract: fixed('merged', ['merged', 'changes-needed', 'rejected']),
   },
-  split: {
+  'run-tasks': {
     summary:
-      'Creates one child ticket per planned phase, each running the named workflow.',
-    params: splitParams,
-    contract: fixed('done', ['done']),
-  },
-  'wait-children': {
-    summary: 'Waits until every child ticket has finished or been deferred.',
-    params: noParams,
-    contract: fixed('done', ['done', 'deferred']),
+      "Runs a lead's tasks as child tickets and reports back each time one finishes.",
+    params: runTasksParams,
+    contract: fixed('reported', ['reported']),
   },
 } as const satisfies Record<string, Action>
 

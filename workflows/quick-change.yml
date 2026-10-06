@@ -1,0 +1,34 @@
+name: quick-change
+description: Agree a plan with you, build it, have it reviewed and land it. Needs nothing from the repository's kit.
+steps:
+  - id: plan
+    kind: agent
+    role: planner
+
+  - id: approve-plan
+    kind: human
+    routes:
+      changes-needed: plan
+
+  - id: build
+    kind: agent
+    role: builder
+
+  - id: review
+    kind: agent
+    role: reviewer
+    limit: 2
+    routes:
+      changes-needed: build
+
+  - id: maintain-pr
+    kind: system
+    action: maintain-pr
+    routes:
+      conflict: build
+      ci-failed: build
+      base-moved: review
+
+  - id: merge
+    kind: system
+    action: merge

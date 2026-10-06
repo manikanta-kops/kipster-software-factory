@@ -3,6 +3,11 @@
 Workflows are YAML files named `<name>.yml`. Validate a directory with
 `npm run kf -- check <dir>`.
 
+Add a workflow by uploading its file on the Workflows page, or put it in the
+factory's workflow directory and restart. Uploads cannot reuse a workflow
+file's name; uploading an existing uploaded name creates a new version. To have
+a model write one, give it `skills/kipster-workflows/SKILL.md`.
+
 ```yaml
 name: feature # lowercase, digits and hyphens; matches the file name
 description: One line saying what the workflow is for.
@@ -48,11 +53,86 @@ System steps take an `action` and its parameters under `with`:
 | decide            | one per option; no success outcome     |
 | maintain-pr       | ready, conflict, ci-failed, base-moved |
 | merge             | merged, changes-needed, rejected       |
-| split             | done                                   |
-| wait-children     | done, deferred                         |
+| lead              | done, delegate, plan-ready             |
+| run-tasks         | reported                               |
 
 Agent and system steps can also report `needs-decision`, which always pauses
 the ticket for you unless routed.
+
+## Builder requests for another repository
+
+`needs-other-repo` has factory behaviour before ordinary outcome routing. The
+builder's `result.json` adds `otherRepository`:
+
+```json
+{
+  "outcome": "needs-other-repo",
+  "summary": "The caller needs the library API first.",
+  "artifacts": [],
+  "otherRepository": {
+    "repository": "owner/library",
+    "title": "Expose the library API",
+    "body": "Describe the needed change and why the original ticket needs it.",
+    "workflow": "feature"
+  }
+}
+```
+
+Repository, title and body are required and nonempty. `workflow` is optional,
+with default `feature`; it must be a loaded workflow. Only builders can report
+this request, and other outcomes must omit `otherRepository`. The target must be
+another registered, ready repository with the workflow's capabilities. Invalid
+results get the normal one fresh retry, then ask the owner; unregistered or
+unavailable targets and workflows ask immediately. No link is opened on failure.
+
+The system creates the linked ticket and parks the original builder attempt in
+one transaction, unique per result attempt. The linked ticket follows its own
+workflow, including its approval steps, and receives the original repository as
+a read-only dependency. A confirmed merged PR on a done linked ticket queues the
+same builder step in a fresh attempt with the original summary, request title/body,
+PR URL and merge commit. Terminal links are checked at the merge-poll interval;
+event wakes do not trigger extra polls. A cancelled
+link, or completion without a confirmed merged PR, asks the owner. The parked
+attempt survives restart and consumes no executor slot. Cancelling the original
+does not cancel linked tickets.
+
+## Lead tasks
+
+A `lead` step's `delegate` must route to a `run-tasks` step, which runs the
+tasks as child tickets and reports `reported` each time one finishes, fails,
+conflicts or has a pull request ready. `run-tasks` takes optional `with`
+parameters: `workflow` (default `task`) and `prWorkflow` (default `task-pr`)
+for the two lands, `maxParallel` (default 3) and `maxTasks` (default 12).
+
+A lead's `result.json` adds:
+
+```json
+{
+  "outcome": "delegate",
+  "summary": "Split into API and UI work",
+  "artifacts": [],
+  "tasks": [
+    {
+      "key": "api-export",
+      "title": "Add the CSV export endpoint",
+      "instructions": "Self-contained instructions for the task's agents.",
+      "land": "branch",
+      "workflow": "task",
+      "agent": { "cli": "claude", "model": "opus", "effort": "high" }
+    }
+  ],
+  "pullRequests": [{ "task": "docs-fix", "decision": "merge" }]
+}
+```
+
+`tasks` only come with `delegate`. `pullRequests` come with `delegate`, or
+with `done` when every decision is `leave-open`. `land` defaults to `branch`:
+the task starts from the lead's branch and the system merges it back. A `pr`
+task starts from the default branch and opens its own pull request; its
+workflow must contain `maintain-pr` and `merge`, and a `branch` task's must
+contain neither. `agent` must match an entry of `agents.allowed` in the
+factory configuration. `done` is refused while a task is still pending,
+running or waiting for a decision.
 
 ## Defaults for unrouted outcomes
 

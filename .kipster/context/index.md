@@ -1,0 +1,24 @@
+# Repository reading map
+
+- [Working rules](../../AGENTS.md): read before changing code or reporting completion.
+- [Claude entry point](../../CLAUDE.md): read when using Claude; it points to the same working rules.
+- [Overview and source commands](../../README.md): read for prerequisites, CLI usage and development modes.
+- [Contributing](../../CONTRIBUTING.md): read for validation, release and branch conventions.
+- [Security](../../SECURITY.md): read for trust boundaries and vulnerability reporting.
+- [Architecture](../../docs/architecture.md): read before changing behaviour, persistence, execution, proof or merge gates.
+- [Kit contract](../../docs/kit.md): read before editing repository setup, verification or trusted kit rules.
+- [Workflow principles](../../docs/workflow-guide.md): read before changing workflows or role additions.
+- [Workflow format](../../docs/workflows.md): read for step fields, routing, outcomes and linked repository requests.
+- [Roadmap](../../docs/roadmap.md): read to distinguish implemented slices from planned capabilities.
+- [Web app](../../web/README.md): read before changing hash routes, API connection, live updates or evidence rendering.
+- [Workflow skill rules](../../skills/kipster-workflows/AGENTS.md): read before changing the workflow skill or its covered behaviour.
+- [Workflow authoring skill](../../skills/kipster-workflows/SKILL.md): read when authoring workflows or changing catalog, routing or action behaviour.
+- [Self-verification isolation](isolation.md): read before running checks or working on the factory through the factory.
+- [Verification guide](../verify/README.md): read before driving a supplied instance; it links each feature map.
+- [Planner base role](../../src/roles/planner.md): read when changing the planner's factory-owned instructions.
+- [Builder base role](../../src/roles/builder.md): read when changing builder permissions or results.
+- [Tester base role](../../src/roles/tester.md): read when changing independent proof requirements.
+- [Reproducer base role](../../src/roles/reproducer.md): read when changing base-instance reproduction.
+- [Reviewer base role](../../src/roles/reviewer.md): read when changing review or typed owner-review rules.
+- [Writer base role](../../src/roles/writer.md): read when changing PR descriptions and evidence references.
+- [Onboarder base role](../../src/roles/onboarder.md): read when changing onboarding and kit verification.

@@ -19,6 +19,21 @@ npm ci
 npm run dev
 ```
 
+## Releases
+
+The owner releases by bumping `version` in `package.json` on `next`, merging
+`next` into `master` and pushing a matching `v<version>` tag on `master`. The
+release workflow builds and smoke-tests both macOS bundles, then publishes them
+with `install.sh` and `SHA256SUMS`. To try a bundle locally:
+
+```sh
+node scripts/bundle.ts            # writes release/ for this Mac's architecture
+sh install.sh --from release --home /tmp/kf-try --bin-dir /tmp/kf-try-bin --no-modify-path
+```
+
+`--home` gives the trial its own launchd service; remove it with
+`/tmp/kf-try-bin/kf stop --home /tmp/kf-try`.
+
 ## Pull requests
 
 - Branch from `next` and open the pull request against `next`.
