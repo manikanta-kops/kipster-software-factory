@@ -158,5 +158,8 @@ scheduler, including after a restart. Keep real runs in a separate checkout's
 never real verification evidence); seed with `--home <directory>` when serving a
 different home. The demo includes valid/invalid kits and current/stale feature
 verdicts with recorded commits. Override with `npm run dev -- --home <directory>`.
+It also includes **Overnight report export (synthetic demo)**, a lights-out lead
+with a Decision log and a link to its child task's recorded choice. These are
+synthetic choices for UI inspection; no agents or real verification ran.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md). Licensed under [Apache-2.0](LICENSE).

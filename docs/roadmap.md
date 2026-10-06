@@ -151,3 +151,5 @@ parallel slot while siblings continue. The existing merge gate still leaves
 kit, CI, migrations and reviewer owner-review flags for the owner. Role-file
 rewrites, untested-task handling and repeated-failure detection are separate
 follow-up slices. Live overnight use with real agents remains unverified.
+Demo seeding includes synthetic lead and child decisions so the Decision log
+and child links can be inspected with the scheduler disabled.

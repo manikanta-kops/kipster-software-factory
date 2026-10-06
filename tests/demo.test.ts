@@ -63,7 +63,38 @@ describe('demo data', () => {
       assert.equal(ticket.status, status, `#${number}`)
       assert.equal(ticket.waiting?.for ?? null, waitingFor, `#${number}`)
     }
-    assert.equal((await listTickets(demo.database)).length, 9)
+    assert.equal((await listTickets(demo.database)).length, 11)
+  })
+
+  test('lights-out demo exposes typed decisions and a linked child without running agents', async () => {
+    const lead = await detail(demo.tickets.lightsOutLead)
+    const child = await detail(demo.tickets.lightsOutChild)
+    assert.equal(lead.ticket.lightsOut, true)
+    assert.equal(lead.ticket.waiting?.for, 'tasks')
+    assert.equal(child.ticket.lightsOut, true)
+    assert.equal(child.parentTask?.parent.number, lead.ticket.number)
+    assert.equal(lead.tasks[0]?.child?.number, child.ticket.number)
+    assert.equal(lead.tasks[0]?.status, 'running')
+    assert.deepEqual(
+      lead.artifacts.find((artifact) => artifact.kind === 'decision')?.decision,
+      {
+        chose: 'CSV',
+        alternative: 'An Excel workbook',
+        reason:
+          'CSV works with the existing report data and common spreadsheet tools.',
+      },
+    )
+    assert.deepEqual(
+      child.artifacts.find((artifact) => artifact.kind === 'decision')
+        ?.decision,
+      {
+        chose: 'Use the displayed report column order',
+        alternative: 'Sort columns alphabetically',
+        reason: 'Matching the report makes the export familiar to shop owners.',
+      },
+    )
+    assert.equal(child.attempts.at(-1)?.stepId, 'test')
+    assert.equal(child.attempts.at(-1)?.status, 'running')
   })
 
   test('the plan waiting for approval is a markdown artifact', async () => {

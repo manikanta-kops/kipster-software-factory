@@ -5,13 +5,15 @@ import { setArtifactHome } from '../src/store/database.ts'
 import { defaultHome } from '../src/config.ts'
 import { writeDemoEvidence } from './demo-evidence.ts'
 import { resolve } from 'node:path'
-// Fills a database with repositories and quick-change tickets in every state, using the
+// Fills a database with repositories and tickets in every state, using the
 // same store functions the engine and API use. The web app can be built against it
 // before the engine exists.
 import type { ArtifactInput } from '../src/domain/lifecycle.ts'
+import type { TaskRequest } from '../src/domain/catalog.ts'
 import type { Library } from '../src/library/library.ts'
 import type { Database } from '../src/store/database.ts'
 import { acquireSchedulerLock } from '../src/store/scheduler.ts'
+import { listTasks, parkForTasks, startTask } from '../src/store/tasks.ts'
 import { migrate } from '../src/store/migrate.ts'
 import {
   createRepository,
@@ -43,6 +45,8 @@ export interface DemoTickets {
   readonly cancelled: number
   readonly running: number
   readonly queued: number
+  readonly lightsOutLead: number
+  readonly lightsOutChild: number
 }
 
 export async function seedDemo(
@@ -114,6 +118,7 @@ async function seedLocked(
       outcome: string
       summary: string
       artifacts?: ArtifactInput[]
+      tasks?: TaskRequest[]
     },
     executor = 'claude-code',
     headCommit?: string,
@@ -433,6 +438,76 @@ async function seedLocked(
       )
   }
 
+  // Synthetic lights-out choices and a child task, available without an agent session.
+  const leadWorkflow = library.get('lead')
+  const taskWorkflow = library.get('task')
+  if (!leadWorkflow || !taskWorkflow)
+    throw new Error('The library has no lead or task workflow')
+  const lightsOutLead = (
+    await createTicket(database, {
+      repository: DEMO_REPOSITORY,
+      workflow: leadWorkflow,
+      title: 'Overnight report export (synthetic demo)',
+      body: 'Synthetic lights-out demo: inspect the Decision log and follow the child task link. No real agents ran.',
+    })
+  ).number
+  await run(lightsOutLead, {
+    outcome: 'plan-ready',
+    summary: 'Prepared the synthetic export plan for automatic approval.',
+    artifacts: [
+      { kind: 'plan', title: 'Plan', content: planFor('report export') },
+      {
+        kind: 'decision',
+        title: 'Export format (synthetic demo)',
+        chose: 'CSV',
+        alternative: 'An Excel workbook',
+        reason:
+          'CSV works with the existing report data and common spreadsheet tools.',
+      },
+    ],
+  })
+  await run(lightsOutLead, {
+    outcome: 'delegate',
+    summary: 'Delegated the synthetic export endpoint task.',
+    tasks: [
+      {
+        key: 'export-endpoint',
+        title: 'Add the report export endpoint (synthetic demo)',
+        instructions: 'Add a CSV export for the existing report data.',
+        land: 'branch',
+      },
+    ],
+  })
+  const taskRun = await run(lightsOutLead, undefined, 'system')
+  await parkForTasks(database, taskRun.attempt.id)
+  const [exportTask] = await listTasks(database, taskRun.ticket.id)
+  const child = await startTask(
+    database,
+    exportTask!.id,
+    {
+      repository: DEMO_REPOSITORY,
+      workflow: taskWorkflow,
+      title: exportTask!.title,
+      body: 'Synthetic child task with a recorded decision; no real code or verification was executed.',
+    },
+    null,
+  )
+  const lightsOutChild = child!.number
+  await run(lightsOutChild, {
+    outcome: 'done',
+    summary: 'Recorded a synthetic implementation choice for the export.',
+    artifacts: [
+      {
+        kind: 'decision',
+        title: 'CSV column order (synthetic demo)',
+        chose: 'Use the displayed report column order',
+        alternative: 'Sort columns alphabetically',
+        reason: 'Matching the report makes the export familiar to shop owners.',
+      },
+    ],
+  })
+  await run(lightsOutChild, undefined, 'codex')
+
   // Running: the planner is working on it.
   const running = await create(
     'Fix the typo on the pricing page',
@@ -456,6 +531,8 @@ async function seedLocked(
     cancelled,
     running,
     queued,
+    lightsOutLead,
+    lightsOutChild,
   }
 }
 
