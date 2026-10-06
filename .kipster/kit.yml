@@ -1,0 +1,12 @@
+version: 1
+setup: npm ci && VITE_API_BASE_URL= npm run build
+check: npm run check && npx --no-install prettier --check .kipster && npx --no-install oxlint .kipster/verify/*.mjs && npm test && node .kipster/verify/e2e.mjs
+verify:
+  start: >-
+    node scripts/seed-demo.ts --home .local/verification-home --database-url {databaseUrl} &&
+    exec node src/cli.ts serve --home .local/verification-home --database-url {databaseUrl}
+    --port {port} --no-scheduler --secret-backend file
+  ready: http://127.0.0.1:{port}/api/health
+  ports: 1
+  database: postgres
+  timeoutSeconds: 120
