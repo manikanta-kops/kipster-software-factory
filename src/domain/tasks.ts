@@ -20,6 +20,7 @@ export const FINAL_TASK_STATUSES: readonly TaskStatus[] = [
 
 /** Changes the lead is woken for. `left-open` and `cancelled` come from the lead or the owner. */
 export const REPORTED_TASK_STATUSES: readonly TaskStatus[] = [
+  'parked',
   'pr-ready',
   'merged',
   'conflict',
@@ -37,6 +38,7 @@ export function isActiveTask(task: Pick<TaskState, 'status' | 'decision'>) {
   return (
     task.status === 'pending' ||
     task.status === 'running' ||
+    task.status === 'parked' ||
     (task.status === 'pr-ready' && task.decision === 'merge')
   )
 }

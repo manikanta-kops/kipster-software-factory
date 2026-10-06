@@ -23,6 +23,7 @@ export const createRepositoryRequest = z.strictObject({
 }) satisfies z.ZodType<CreateRepositoryRequest>
 
 export const createTicketRequest = z.strictObject({
+  lightsOut: z.boolean().optional(),
   repository: text.min(1),
   dependencies: z
     .array(text.regex(REPOSITORY_SLUG, 'use owner/name'))

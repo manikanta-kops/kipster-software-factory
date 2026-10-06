@@ -130,6 +130,8 @@ export interface ListedTicket extends Ticket {
 
 // POST /api/tickets (201, TicketResponse)
 export interface CreateTicketRequest {
+  /** Defaults on for lead and program-lead, off for other workflows. */
+  readonly lightsOut?: boolean | undefined
   /** The repository's `owner/name`. */
   readonly repository: string
   /** Other registered repositories available as read-only context. */

@@ -16,7 +16,7 @@ test('home separates attention, progress and finished tickets', async ({
     /pull\/42$/,
   )
   await expect(page.getByText('Add a dark mode toggle')).toBeHidden()
-  await page.getByText('Show finished (2)').click()
+  await page.getByText('Show finished (3)').click()
   await expect(page.getByText('Add a dark mode toggle')).toBeVisible()
 })
 
@@ -232,7 +232,7 @@ test('create a ticket and explain unavailable workflows', async ({
     }),
   ).toBeVisible()
   await expect(page).toHaveURL(/#\/tickets\/\d+$/)
-  await expect(page.locator('.ticket-meta .badge')).toHaveText('queued')
+  await expect(page.locator('.ticket-meta .badge.queued')).toHaveText('queued')
 })
 
 test('pending repositories disable every workflow', async ({

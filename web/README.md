@@ -69,3 +69,11 @@ Screenshots are attached to Playwright test results.
 A task whose tester was skipped shows **Untested** near its status, including
 the missing capability and skipped step. Lead tickets also show this warning
 for merged untested tasks. These warnings persist independently of verdicts.
+
+New ticket offers `bug`, `lead`, `onboard-repo` and uploaded workflows; child
+workflows stay hidden. The Lights-out checkbox defaults on for `lead` and
+`program-lead`, follows workflow changes until touched, and is saved with the
+ticket. Enabled tickets show a Lights-out badge. Their Decision log shows
+typed choices, alternatives and reasons, with links to child decision logs.
+A child awaiting a decision stays unfinished as a parked task while siblings
+continue. Lights-out leaves the merge gate and untested warnings in effect.

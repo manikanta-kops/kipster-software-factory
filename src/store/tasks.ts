@@ -66,9 +66,13 @@ export async function startTask(
     ])
     const task = rows[0]
     if (!task || task.status !== 'pending') return null
+    const parent = await connection.query<{ lights_out: boolean }>(
+      'SELECT lights_out FROM tickets WHERE id = $1',
+      [task.ticket_id],
+    )
     const ticket = await createTicketInTransaction(
       connection,
-      child,
+      { ...child, lightsOut: parent.rows[0]!.lights_out },
       true,
       true,
     )
@@ -92,8 +96,9 @@ export async function updateTask(
 ): Promise<boolean> {
   return transaction(database, async (connection) => {
     const { rows } = await connection.query<{ ticket_id: number; key: string }>(
-      `UPDATE tasks SET status = $2, result = coalesce($3, result), updated_at = now()
-       WHERE id = $1 AND status IN ('pending', 'running', 'pr-ready') AND status <> $2
+      `UPDATE tasks SET status = $2, result = coalesce($3, result), updated_at = now(),
+         reported_status = CASE WHEN status = 'parked' AND $2 = 'running' THEN NULL ELSE reported_status END
+       WHERE id = $1 AND status IN ('pending', 'running', 'parked', 'pr-ready') AND status <> $2
        RETURNING ticket_id, key`,
       [taskId, status, result],
     )

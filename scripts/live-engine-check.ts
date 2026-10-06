@@ -27,6 +27,7 @@ const detail: TicketDetail = {
   tasks: [],
   parentTask: null,
   ticket: {
+    lightsOut: false,
     id: 0,
     number: 0,
     repository: { id: 0, slug: 'local/throwaway' },

@@ -9,9 +9,16 @@ import { resolve } from 'node:path'
 // same store functions the engine and API use. The web app can be built against it
 // before the engine exists.
 import type { ArtifactInput } from '../src/domain/lifecycle.ts'
+import type { TaskRequest } from '../src/domain/catalog.ts'
 import type { Library } from '../src/library/library.ts'
 import type { Database } from '../src/store/database.ts'
 import { acquireSchedulerLock } from '../src/store/scheduler.ts'
+import {
+  listTasks,
+  parkForTasks,
+  startTask,
+  updateTask,
+} from '../src/store/tasks.ts'
 import { migrate } from '../src/store/migrate.ts'
 import {
   createRepository,
@@ -43,6 +50,9 @@ export interface DemoTickets {
   readonly cancelled: number
   readonly running: number
   readonly queued: number
+  readonly lightsOutLead: number
+  readonly lightsOutChild: number
+  readonly lightsOutUntestedChild: number
 }
 
 export async function seedDemo(
@@ -102,6 +112,7 @@ async function seedLocked(
       await createTicket(database, {
         repository: DEMO_REPOSITORY,
         workflow,
+        lightsOut: false,
         title,
         body,
       })
@@ -114,6 +125,7 @@ async function seedLocked(
       outcome: string
       summary: string
       artifacts?: ArtifactInput[]
+      tasks?: TaskRequest[]
     },
     executor = 'claude-code',
     headCommit?: string,
@@ -306,6 +318,7 @@ async function seedLocked(
       await createTicket(database, {
         repository: DEMO_REPOSITORY,
         workflow,
+        lightsOut: false,
         title: stale
           ? 'Cart proof needs another run'
           : 'Cart quantity changes are proven',
@@ -441,6 +454,112 @@ async function seedLocked(
       )
   }
 
+  // Synthetic lights-out choices and a child task, available without an agent session.
+  const leadWorkflow = library.get('lead')
+  const taskWorkflow = library.get('task')
+  if (!leadWorkflow || !taskWorkflow)
+    throw new Error('The library has no lead or task workflow')
+  const lightsOutLead = (
+    await createTicket(database, {
+      repository: DEMO_REPOSITORY,
+      workflow: leadWorkflow,
+      title: 'Overnight report export (synthetic demo)',
+      body: 'Synthetic lights-out demo: inspect the Decision log and follow the child task link. No real agents ran.',
+    })
+  ).number
+  await run(lightsOutLead, {
+    outcome: 'plan-ready',
+    summary: 'Prepared the synthetic export plan for automatic approval.',
+    artifacts: [
+      { kind: 'plan', title: 'Plan', content: planFor('report export') },
+      {
+        kind: 'decision',
+        title: 'Export format (synthetic demo)',
+        chose: 'CSV',
+        alternative: 'An Excel workbook',
+        reason:
+          'CSV works with the existing report data and common spreadsheet tools.',
+      },
+    ],
+  })
+  await run(lightsOutLead, {
+    outcome: 'delegate',
+    summary: 'Delegated the synthetic export endpoint task.',
+    tasks: [
+      {
+        key: 'export-endpoint',
+        title: 'Add the report export endpoint (synthetic demo)',
+        instructions: 'Add a CSV export for the existing report data.',
+        land: 'branch',
+      },
+      {
+        key: 'export-notes',
+        title: 'Document report exports (synthetic untested demo)',
+        instructions:
+          'Document CSV exports in the repository without a verify capability.',
+        land: 'branch',
+      },
+    ],
+  })
+  const taskRun = await run(lightsOutLead, undefined, 'system')
+  await parkForTasks(database, taskRun.attempt.id)
+  const [exportTask, notesTask] = await listTasks(database, taskRun.ticket.id)
+  const child = await startTask(
+    database,
+    exportTask!.id,
+    {
+      repository: DEMO_REPOSITORY,
+      workflow: taskWorkflow,
+      title: exportTask!.title,
+      body: 'Synthetic child task with a recorded decision; no real code or verification was executed.',
+    },
+    null,
+  )
+  const lightsOutChild = child!.number
+  await run(lightsOutChild, {
+    outcome: 'needs-decision',
+    summary:
+      'Synthetic question: may the export include private customer data?',
+    artifacts: [
+      {
+        kind: 'decision',
+        title: 'CSV column order (synthetic demo)',
+        chose: 'Use the displayed report column order',
+        alternative: 'Sort columns alphabetically',
+        reason: 'Matching the report makes the export familiar to shop owners.',
+      },
+    ],
+  })
+  await updateTask(
+    database,
+    exportTask!.id,
+    'parked',
+    'Synthetic question: may the export include private customer data?',
+  )
+  const notesChild = await startTask(
+    database,
+    notesTask!.id,
+    {
+      repository: 'kipster/invalid-kit',
+      workflow: taskWorkflow,
+      title: notesTask!.title,
+      body: 'Synthetic untested task: no agents, code changes or verification ran.',
+    },
+    null,
+  )
+  const lightsOutUntestedChild = notesChild!.number
+  await run(lightsOutUntestedChild, {
+    outcome: 'done',
+    summary:
+      'Synthetic documentation task finished without a verify capability.',
+  })
+  await updateTask(
+    database,
+    notesTask!.id,
+    'merged',
+    'Synthetic merged task. Untested: no verify capability (skipped test). No real merge ran.',
+  )
+
   // Running: the lead is working on it.
   const running = await create(
     'Fix the typo on the pricing page',
@@ -464,6 +583,9 @@ async function seedLocked(
     cancelled,
     running,
     queued,
+    lightsOutLead,
+    lightsOutChild,
+    lightsOutUntestedChild,
   }
 }
 
