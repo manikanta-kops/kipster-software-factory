@@ -10,7 +10,9 @@ test('a lead ticket lists its tasks and each child links back to its lead', asyn
 }) => {
   const { lead, child } = factory.taskTickets!
   await page.goto(`${factory.url}/#/tickets/${lead}`)
-  await expect(page.locator('.ticket-meta')).toContainText('Waiting for tasks')
+  await expect(page.getByRole('region', { name: 'Now' })).toContainText(
+    'Waiting for tasks',
+  )
   await expect(page.getByRole('button', { name: 'Retry step' })).toHaveCount(0)
   const tasks = page.getByRole('region', { name: 'Tasks' })
   await expect(tasks.getByRole('heading', { name: 'Tasks' })).toBeVisible()

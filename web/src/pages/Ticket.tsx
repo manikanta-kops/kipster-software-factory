@@ -1,7 +1,13 @@
 import { MergeGatePanel } from '../components/MergeGate.tsx'
 import { EvidenceIndex } from '../components/EvidenceIndex.tsx'
 import { DecisionReview, DecisionDetails } from '../components/Decision.tsx'
-import { useEffect, useState } from 'react'
+import {
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type CSSProperties,
+} from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import type {
   Artifact,
@@ -11,6 +17,7 @@ import type {
   ResolveRequest,
   TicketResponse,
 } from '../../../src/api/contract.ts'
+import { describeAgent } from '../../../src/domain/settings.ts'
 import { api } from '../api.ts'
 import {
   attention,
@@ -21,8 +28,9 @@ import {
 } from '../components/Shared.tsx'
 import { repositoriesQuery, ticketQuery } from '../queries.ts'
 import { ArtifactView } from '../components/ArtifactView.tsx'
+import { isMedia, MediaGallery } from '../components/Media.tsx'
 import { RepositoryTag } from '../components/Filters.tsx'
-import { Icon } from '../components/Icon.tsx'
+import { Icon, stepHue, stepIcon } from '../components/Icon.tsx'
 import { agentLabel, doing, humanize, stepName } from '../words.ts'
 import { Commit, Verdict } from '../components/Verdict.tsx'
 
@@ -44,22 +52,23 @@ export function TicketPage({
       link.attemptId === ticket.waiting?.attemptId &&
       ticket.waiting.for === 'other-repo',
   )
-  const current = workflow.steps.find((step) => step.id === ticket.currentStep)
-  const images = query.data.artifacts.filter(
+  const media = query.data.artifacts.filter(
     (artifact) =>
-      artifact.content === null &&
-      artifact.mediaType.startsWith('image/') &&
+      isMedia(artifact) &&
       !query.data.evidenceIndex?.some(
         (item) => item.artifactId === artifact.id,
       ),
   )
+  const awaitingAction =
+    ticket.waiting &&
+    !['pull-request-checks', 'other-repo', 'tasks'].includes(ticket.waiting.for)
   return (
     <article className="ticket-page">
-      <a className="back-link" href="#/" aria-label="Back to today">
-        <Icon name="chevronLeft" size={13} stroke={2} />
-        Today
-      </a>
       <header className="ticket-heading">
+        <a className="back-link" href="#/" aria-label="Back to today">
+          <Icon name="chevronLeft" size={13} stroke={2} />
+          Today
+        </a>
         <p className="ticket-kicker">
           <RepositoryTag repository={ticket.repository} />
           <a href={`#/workflows/${ticket.workflow.name}`}>
@@ -83,49 +92,230 @@ export function TicketPage({
           ) : (
             <Status value={ticket.status} />
           )}
-          {!linkedWait && ['queued', 'running'].includes(ticket.status) && (
-            <span className="ticket-doing">{doing(ticket, current)}</span>
-          )}
-          <PullRequest url={ticket.pullRequestUrl} />
         </div>
-        {ticket.body && (
-          <div className="ticket-body">
-            <MarkdownBody>{ticket.body}</MarkdownBody>
-          </div>
-        )}
       </header>
-      {ticket.waiting &&
-        !['pull-request-checks', 'other-repo', 'tasks'].includes(
-          ticket.waiting.for,
-        ) && <ActionPanel key={ticket.waiting.attemptId} detail={query.data} />}
-      <RepositoryContext detail={query.data} />
-      <Tasks detail={query.data} />
-      <MergeGatePanel detail={query.data} />
-      <Verdict
-        detail={query.data}
-        repository={repositories.data?.repositories.find(
-          (item) => item.id === ticket.repository.id,
+      <div className="ticket-primary">
+        {awaitingAction ? (
+          <ActionPanel key={ticket.waiting!.attemptId} detail={query.data} />
+        ) : (
+          <NowCard detail={query.data} />
         )}
-      />
-      <EvidenceIndex
-        detail={query.data}
-        {...(evidenceId === undefined ? {} : { selected: evidenceId })}
-      />
-      <StepList detail={query.data} />
-      {images.length > 0 && (
-        <section className="attachments" aria-labelledby="attachments-heading">
-          <h2 className="section-title" id="attachments-heading">
-            Attachments
-          </h2>
-          <div className="attachment-grid">
-            {images.map((artifact) => (
-              <ArtifactView key={artifact.id} artifact={artifact} />
-            ))}
-          </div>
-        </section>
-      )}
-      <Timeline key={ticket.id} detail={query.data} />
+        {ticket.body && <Description body={ticket.body} />}
+        <Tasks detail={query.data} />
+        <MergeGatePanel detail={query.data} />
+        <Verdict
+          detail={query.data}
+          repository={repositories.data?.repositories.find(
+            (item) => item.id === ticket.repository.id,
+          )}
+        />
+        <EvidenceIndex
+          detail={query.data}
+          {...(evidenceId === undefined ? {} : { selected: evidenceId })}
+        />
+        {media.length > 0 && (
+          <section
+            className="attachments evidence-card"
+            aria-labelledby="attachments-heading"
+          >
+            <h2 className="section-title" id="attachments-heading">
+              Screenshots and recordings
+              <span className="steps-progress">{media.length}</span>
+            </h2>
+            <MediaGallery artifacts={media} ticketNumber={ticket.number} />
+          </section>
+        )}
+      </div>
+      <aside className="ticket-side">
+        <StepList detail={query.data} />
+        <Details detail={query.data} />
+        <RepositoryContext detail={query.data} />
+      </aside>
+      <div className="ticket-history">
+        <Timeline key={ticket.id} detail={query.data} />
+      </div>
     </article>
+  )
+}
+
+/** What the factory is doing right now, so the page answers that before anything else. */
+function NowCard({ detail }: { detail: TicketResponse }) {
+  const { ticket, workflow, attempts } = detail
+  if (!['queued', 'running'].includes(ticket.status)) return null
+  const at = workflow.steps.findIndex((step) => step.id === ticket.currentStep)
+  const step = workflow.steps[at]
+  const running = attempts.findLast(
+    (attempt) => attempt.stepId === ticket.currentStep && !attempt.finishedAt,
+  )
+  const latest = attempts.findLast(
+    (attempt) => attempt.finishedAt && attempt.summary,
+  )
+  const queued = ticket.status === 'queued'
+  return (
+    <section className={`now-card${queued ? ' queued' : ''}`} aria-label="Now">
+      <span className={`now-icon hue-${stepHue(step)}`} aria-hidden="true">
+        <Icon name={queued ? 'clock' : stepIcon(step)} size={18} />
+      </span>
+      <div className="now-main">
+        <h2>{doing(ticket, step)}</h2>
+        <p className="now-meta">
+          {at >= 0 && (
+            <span>
+              Step {at + 1} of {workflow.steps.length}
+              {step ? ` · ${stepName(step)}` : ''}
+            </span>
+          )}
+          {running?.executor && <span>{running.executor}</span>}
+          {running?.startedAt && <AttemptDuration attempt={running} />}
+        </p>
+        {latest && (
+          <div className="now-latest">
+            <span className="now-latest-label">
+              Latest from {humanize(latest.stepId)}
+            </span>
+            <ClampedText lines={3}>{latest.summary!}</ClampedText>
+          </div>
+        )}
+      </div>
+    </section>
+  )
+}
+
+function Description({ body }: { body: string }) {
+  const [open, setOpen] = useState(false)
+  const [long, setLong] = useState(false)
+  const content = useRef<HTMLDivElement>(null)
+  useLayoutEffect(() => {
+    const inner = content.current?.firstElementChild
+    if (!inner) return
+    const measure = () => setLong(inner.scrollHeight > 300)
+    measure()
+    const observer = new ResizeObserver(measure)
+    observer.observe(inner)
+    return () => observer.disconnect()
+  }, [])
+  return (
+    <section className="description-card" aria-label="Description">
+      <h2 className="section-title">Description</h2>
+      <div
+        ref={content}
+        className={`description-body${long && !open ? ' folded' : ''}`}
+      >
+        <MarkdownBody>{body}</MarkdownBody>
+      </div>
+      {long && (
+        <button
+          type="button"
+          className="quiet more-toggle"
+          aria-expanded={open}
+          onClick={() => setOpen(!open)}
+        >
+          {open ? 'Show less' : 'Show full description'}
+          <Icon name={open ? 'chevronDown' : 'chevronRight'} size={12} />
+        </button>
+      )}
+    </section>
+  )
+}
+
+/** Text clamped to a few lines, with a toggle only when it overflows. */
+function ClampedText({ children, lines }: { children: string; lines: number }) {
+  const [open, setOpen] = useState(false)
+  const [overflows, setOverflows] = useState(false)
+  const content = useRef<HTMLDivElement>(null)
+  useLayoutEffect(() => {
+    const element = content.current
+    const inner = element?.firstElementChild
+    if (!element || !inner || open) return
+    const measure = () =>
+      setOverflows(element.scrollHeight > element.clientHeight + 2)
+    measure()
+    const observer = new ResizeObserver(measure)
+    observer.observe(inner)
+    return () => observer.disconnect()
+  }, [open])
+  return (
+    <div className="clamped">
+      <div
+        ref={content}
+        className={open ? undefined : overflows ? 'clamp faded' : 'clamp'}
+        style={{ '--lines': lines } as CSSProperties}
+      >
+        <MarkdownBody>{children}</MarkdownBody>
+      </div>
+      {(overflows || open) && (
+        <button
+          type="button"
+          className="quiet more-toggle"
+          aria-expanded={open}
+          onClick={() => setOpen(!open)}
+        >
+          {open ? 'Show less' : 'Show more'}
+        </button>
+      )}
+    </div>
+  )
+}
+
+function Details({ detail }: { detail: TicketResponse }) {
+  const { ticket } = detail
+  const pullRequest =
+    ticket.pullRequestUrl && /^https?:\/\//i.test(ticket.pullRequestUrl)
+      ? ticket.pullRequestUrl
+      : null
+  return (
+    <section className="side-card" aria-label="Details">
+      <h2 className="section-title">Details</h2>
+      <dl className="details-list">
+        <div>
+          <dt>Pull request</dt>
+          <dd>
+            {pullRequest ? (
+              <a
+                className="text-link"
+                href={pullRequest}
+                target="_blank"
+                rel="noreferrer"
+              >
+                #{/\/pull\/(\d+)/.exec(pullRequest)?.[1] ?? 'Open'} ↗
+              </a>
+            ) : (
+              <span className="muted">Not opened yet</span>
+            )}
+          </dd>
+        </div>
+        <div>
+          <dt>Repository</dt>
+          <dd>
+            <RepositoryTag repository={ticket.repository} />
+          </dd>
+        </div>
+        <div>
+          <dt>Workflow</dt>
+          <dd>
+            <a href={`#/workflows/${ticket.workflow.name}`}>
+              {humanize(ticket.workflow.name)}
+            </a>
+          </dd>
+        </div>
+        {ticket.branch && (
+          <div>
+            <dt>Branch</dt>
+            <dd>
+              <code className="branch" title={ticket.branch}>
+                {ticket.branch}
+              </code>
+            </dd>
+          </div>
+        )}
+        <div>
+          <dt>Started</dt>
+          <dd>
+            <Time value={ticket.createdAt} />
+          </dd>
+        </div>
+      </dl>
+    </section>
   )
 }
 
@@ -133,7 +323,7 @@ function RepositoryContext({ detail }: { detail: TicketResponse }) {
   const { ticket, dependencies = [], links = [] } = detail
   if (!dependencies.length && !links.length) return null
   return (
-    <section className="steps-card" aria-label="Repository context">
+    <section className="side-card" aria-label="Repository context">
       {dependencies.length > 0 && (
         <>
           <h2 className="section-title">Read-only dependencies</h2>
@@ -322,9 +512,18 @@ function StepList({ detail }: { detail: TicketResponse }) {
     return last ? (last.outcome ?? '').replaceAll('-', ' ') : ''
   }
   return (
-    <section className="steps-card" aria-labelledby="steps-heading">
+    <section className="side-card" aria-labelledby="steps-heading">
       <h2 className="section-title" id="steps-heading">
         Steps
+        {at >= 0 && (
+          <span className="steps-progress">
+            {Math.min(
+              at + (ticket.status === 'done' ? 1 : 0),
+              workflow.steps.length,
+            )}{' '}
+            of {workflow.steps.length} done
+          </span>
+        )}
       </h2>
       <ol className="step-list">
         {workflow.steps.map((step, index) => {
@@ -554,13 +753,14 @@ function StandardActionPanel({ detail }: { detail: TicketResponse }) {
                   value={note}
                   onChange={(event) => setNote(event.target.value)}
                 />
-                <div className="actions">
+                <div className="ask-actions">
                   <button className="primary" onClick={() => resolve('retry')}>
                     Retry step
                   </button>
-                </div>
-                <label htmlFor="move-step">Move to step</label>
-                <div className="input-row">
+                  <span className="ask-or">or</span>
+                  <label htmlFor="move-step" className="sr-only">
+                    Move to step
+                  </label>
                   <select
                     id="move-step"
                     value={stepId}
@@ -574,13 +774,13 @@ function StandardActionPanel({ detail }: { detail: TicketResponse }) {
                     ))}
                   </select>
                   <button onClick={() => resolve('move')}>Move ticket</button>
+                  <button
+                    className="danger cancel-ticket"
+                    onClick={() => resolve('cancel')}
+                  >
+                    Cancel ticket
+                  </button>
                 </div>
-                <button
-                  className="danger cancel-ticket"
-                  onClick={() => resolve('cancel')}
-                >
-                  Cancel ticket
-                </button>
               </>
             )}
           </fieldset>
@@ -683,7 +883,11 @@ function AttemptEntry({
       </div>
       <div className="attempt-meta">
         <Status value={outcome} />
-        <span>{attempt.executor ?? 'Unassigned'}</span>
+        <span>
+          {attempt.agent
+            ? describeAgent(attempt.agent)
+            : (attempt.executor ?? 'Unassigned')}
+        </span>
         <AttemptDuration attempt={attempt} />
         {attempt.headCommit && (
           <span>
@@ -697,20 +901,66 @@ function AttemptEntry({
         .map((item) => (
           <DecisionDetails key={item.id} decision={item} />
         ))}
-      {attempt.summary && <MarkdownBody>{attempt.summary}</MarkdownBody>}
+      {attempt.summary && (
+        <ClampedText lines={4}>{attempt.summary}</ClampedText>
+      )}
       {attempt.error && <p className="error">{attempt.error}</p>}
-      {artifacts.map((artifact) => (
+      {artifacts.some(isMedia) && (
+        <MediaGallery
+          artifacts={artifacts.filter(isMedia)}
+          ticketNumber={detail.ticket.number}
+          compact
+        />
+      )}
+      <FileList
+        files={artifacts.filter((artifact) => !isMedia(artifact))}
+        attempt={attempt}
+        ticketNumber={detail.ticket.number}
+      />
+    </li>
+  )
+}
+const FILES_SHOWN = 3
+
+function FileList({
+  files,
+  attempt,
+  ticketNumber,
+}: {
+  files: readonly Artifact[]
+  attempt: Attempt
+  ticketNumber: number
+}) {
+  const [all, setAll] = useState(false)
+  if (!files.length) return null
+  const shown = all ? files : files.slice(0, FILES_SHOWN)
+  return (
+    <div className="file-list">
+      {shown.map((artifact) => (
         <ArtifactView
           key={artifact.id}
           artifact={artifact}
-          ticketNumber={detail.ticket.number}
+          ticketNumber={ticketNumber}
           defaultOpen={attempt.executor === 'human' && artifact.kind === 'note'}
           live={attempt.status === 'running' && artifact.kind === 'log'}
         />
       ))}
-    </li>
+      {files.length > FILES_SHOWN && (
+        <button
+          type="button"
+          className="quiet more-toggle"
+          aria-expanded={all}
+          onClick={() => setAll(!all)}
+        >
+          {all
+            ? 'Show fewer files'
+            : `Show ${files.length - FILES_SHOWN} more files`}
+        </button>
+      )}
+    </div>
   )
 }
+
 function EventEntry({ event }: { event: FactoryEvent }) {
   const summary =
     typeof event.data['summary'] === 'string'

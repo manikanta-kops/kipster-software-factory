@@ -1,6 +1,6 @@
 {
   "name": "kipster-software-factory",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "Turns tickets into verified pull requests through workflows of agent, human and system steps.",
   "license": "Apache-2.0",
   "private": true,

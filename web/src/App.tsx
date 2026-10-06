@@ -6,6 +6,7 @@ import { Workflows } from './pages/Workflows.tsx'
 import { NewTicket } from './pages/NewTicket.tsx'
 import { TicketPage } from './pages/Ticket.tsx'
 import { Repositories } from './pages/Repositories.tsx'
+import { SettingsPage } from './pages/Settings.tsx'
 import { usePath } from './router.ts'
 import { useLiveEvents } from './queries.ts'
 import { noFilter, type TicketFilter } from './components/Filters.tsx'
@@ -68,6 +69,12 @@ export function App() {
             >
               Decisions
             </a>
+            <a
+              href="#/settings"
+              aria-current={path === '/settings' ? 'page' : undefined}
+            >
+              Settings
+            </a>
           </nav>
           <output
             className={`status ${live}`}
@@ -100,6 +107,8 @@ export function App() {
           <Repositories />
         ) : path === '/decisions' ? (
           <DecisionsPage />
+        ) : path === '/settings' ? (
+          <SettingsPage />
         ) : onWorkflows ? (
           <Workflows selected={path.split('/')[2]} />
         ) : (

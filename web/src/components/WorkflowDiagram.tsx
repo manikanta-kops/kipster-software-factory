@@ -68,12 +68,14 @@ export function WorkflowDiagram({ workflow }: { workflow: WorkflowSummary }) {
     <figure className="track-figure" aria-label={`${workflow.name} workflow`}>
       <div className="track-tools">
         <label className="switch">
-          <input
-            type="checkbox"
-            checked={all}
-            onChange={(event) => setAll(event.target.checked)}
-          />
-          <span aria-hidden="true" />
+          <span className="toggle">
+            <input
+              type="checkbox"
+              checked={all}
+              onChange={(event) => setAll(event.target.checked)}
+            />
+            <span aria-hidden="true" />
+          </span>
           Show all loops
         </label>
         <span className="muted">

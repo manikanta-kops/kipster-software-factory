@@ -16,6 +16,7 @@ import {
   RepositoryTag,
   type TicketFilter,
 } from '../components/Filters.tsx'
+import { Building } from '../components/Building.tsx'
 import { Icon, stepHue, stepIcon } from '../components/Icon.tsx'
 import {
   repositoriesQuery,
@@ -118,55 +119,60 @@ export function NeedsYou({
           onChange={onFilter}
         />
       </header>
-      <section className="needs" aria-label="Needs you">
-        {needsYou.length ? (
-          <>
-            <h2 className="section-title attention">
-              <i aria-hidden="true" />
-              Needs you
-            </h2>
-            {needsYou.map((ticket) => (
-              <DecisionCard
-                key={ticket.id}
-                ticket={ticket}
-                detail={detailByNumber.get(ticket.number)}
-                now={now}
-              />
-            ))}
-          </>
-        ) : isFiltered(filter) ? (
-          <p className="quiet-line">Nothing{scope} needs you.</p>
-        ) : (
-          <h2 className="quiet-line">Nothing needs you.</h2>
-        )}
-      </section>
-      <section className="moving" aria-labelledby="moving-heading">
-        <h2 className="section-title" id="moving-heading">
-          Moving
-        </h2>
-        {moving.length ? (
-          <ul className="rows">
-            {moving.map((ticket) => (
-              <MovingRow
-                key={ticket.id}
-                ticket={ticket}
-                factoryMerge={factoryMerges.has(ticket.number)}
-                workflow={workflows.data?.workflows.find(
-                  (item) => item.name === ticket.workflow.name,
-                )}
-                now={now}
-              />
-            ))}
-          </ul>
-        ) : (
-          <p className="quiet-line">
-            {scope ? `Nothing is moving${scope}.` : 'Nothing is moving.'}{' '}
-            <a className="text-link" href="#/tickets/new">
-              Start a ticket
-            </a>
-          </p>
-        )}
-      </section>
+      {needsYou.length === 0 && moving.length === 0 && !scope ? (
+        <EmptyFactory
+          hasRepositories={repositories.data?.repositories.length !== 0}
+        />
+      ) : (
+        <>
+          <section className="needs" aria-label="Needs you">
+            {needsYou.length ? (
+              <>
+                <h2 className="section-title attention">
+                  <i aria-hidden="true" />
+                  Needs you
+                </h2>
+                {needsYou.map((ticket, index) => (
+                  <DecisionCard
+                    key={ticket.id}
+                    ticket={ticket}
+                    detail={detailByNumber.get(ticket.number)}
+                    now={now}
+                    index={index}
+                  />
+                ))}
+              </>
+            ) : (
+              <h2 className="all-clear">
+                <span className="all-clear-mark" aria-hidden="true">
+                  <Icon name="check" size={11} stroke={2.6} />
+                </span>
+                Nothing{scope} needs you.
+              </h2>
+            )}
+          </section>
+          {moving.length > 0 && (
+            <section className="moving" aria-labelledby="moving-heading">
+              <h2 className="section-title" id="moving-heading">
+                Moving
+              </h2>
+              <ul className="rows">
+                {moving.map((ticket) => (
+                  <MovingRow
+                    key={ticket.id}
+                    ticket={ticket}
+                    factoryMerge={factoryMerges.has(ticket.number)}
+                    workflow={workflows.data?.workflows.find(
+                      (item) => item.name === ticket.workflow.name,
+                    )}
+                    now={now}
+                  />
+                ))}
+              </ul>
+            </section>
+          )}
+        </>
+      )}
       {finished.length > 0 && (
         <details className="finished">
           <summary>
@@ -200,6 +206,28 @@ export function NeedsYou({
   )
 }
 
+function EmptyFactory({ hasRepositories }: { hasRepositories: boolean }) {
+  return (
+    <section className="empty-state" aria-labelledby="empty-heading">
+      <Building />
+      <h2 id="empty-heading">
+        {hasRepositories ? 'Ready to build' : 'Add a repository to start'}
+      </h2>
+      <p>
+        {hasRepositories
+          ? 'Describe a change. Kipster plans it, builds it and proves it in a pull request.'
+          : 'Kipster turns tickets into pull requests in a repository you add.'}
+      </p>
+      <a
+        className="button primary"
+        href={hasRepositories ? '#/tickets/new' : '#/repositories'}
+      >
+        {hasRepositories ? 'Start a ticket' : 'Add a repository'}
+      </a>
+    </section>
+  )
+}
+
 function lastImage(detail: TicketResponse | undefined) {
   return detail?.artifacts.findLast(
     (artifact) =>
@@ -217,10 +245,12 @@ function DecisionCard({
   ticket,
   detail,
   now,
+  index,
 }: {
   ticket: Ticket
   detail: TicketResponse | undefined
   now: number
+  index: number
 }) {
   const waiting = ticket.waiting
   const image = lastImage(detail)
@@ -236,7 +266,12 @@ function DecisionCard({
   return (
     <article
       className="decision"
-      style={repositoryTone(ticket.repository.id) as CSSProperties}
+      style={
+        {
+          ...repositoryTone(ticket.repository.id),
+          '--i': index,
+        } as CSSProperties
+      }
       aria-labelledby={`decision-${ticket.id}`}
     >
       <div className="decision-main">

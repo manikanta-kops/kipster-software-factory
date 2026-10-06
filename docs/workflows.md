@@ -131,7 +131,8 @@ the task starts from the lead's branch and the system merges it back. A `pr`
 task starts from the default branch and opens its own pull request; its
 workflow must contain `maintain-pr` and `merge`, and a `branch` task's must
 contain neither. `agent` must match an entry of `agents.allowed` in the
-factory configuration. `done` is refused while a task is still pending,
+factory settings, and runs only the child's builder steps; its tester and
+reviewer keep their own settings. `done` is refused while a task is still pending,
 running or waiting for a decision.
 
 ## Defaults for unrouted outcomes

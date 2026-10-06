@@ -163,6 +163,8 @@ export interface Attempt {
   readonly summary: string | null
   /** Who ran it, such as `claude-code`, `codex` or `system`; `human` for decisions and resolved asks. */
   readonly executor: string | null
+  /** The CLI, model and effort an agent attempt ran with; absent before it started. */
+  readonly agent?: AgentChoice | null
   readonly error: string | null
   /** What a waiting attempt waits for. Kept after it finishes, so asks and human steps stay recognisable. */
   readonly waitingFor: WaitingFor | null

@@ -130,7 +130,10 @@ A `lead` role splits a ticket into tasks; `run-tasks` runs them as child
 tickets, up to a parallel limit, and wakes the lead each time one finishes,
 fails, conflicts or has a pull request ready. Branch tasks merge into the
 lead's branch; pull request tasks merge when the lead chooses and the merge
-policy allows. A lead may give a task an allowed agent, model and effort. A live
+policy allows. A lead may give a task's builder an allowed agent, model and
+effort; its reviewer keeps its own setting. The Settings page edits
+concurrency, the step timeout and agents, with per-workflow overrides, without
+a restart. A live
 smoke with real Claude sessions on a throwaway repository ran a lead, three
 branch tasks two at a time, a report after each and a final `done`. Pull
 request tasks, testers inside tasks and Codex leads have not run live, nor on

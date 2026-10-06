@@ -101,7 +101,7 @@ Only evidence at this exact commit counts. If the workflow has no tester, state 
       { kind: 'log', title: `writer run ${retry}`, path: log },
     ])
     await session.execute({
-      config: await agentFor(options, ticket, 'writer'),
+      config: await agentFor(options, context, 'writer'),
       cwd,
       directory,
       prompt,

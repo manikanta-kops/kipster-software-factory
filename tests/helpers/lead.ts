@@ -108,6 +108,20 @@ steps:
       changes-needed: build
       limit: cancel
 `,
+  'data-task': `name: data-task
+description: Branch task fixture with its own agent settings
+steps:
+  - id: build
+    kind: agent
+    role: builder
+  - id: review
+    kind: agent
+    role: reviewer
+    limit: 1
+    routes:
+      changes-needed: build
+      limit: cancel
+`,
   'task-pr': `name: task-pr
 description: Pull request task fixture
 steps:
