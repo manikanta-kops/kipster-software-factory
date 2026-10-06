@@ -55,7 +55,10 @@ gated workflows offer one-click onboarding when the repository is ready.
 form validates with the same schema as the server (`src/domain/settings.ts`)
 before sending, shows each problem next to its field, and shows the server's
 issues when it rejects a save. Attempts show the agent CLI, model and effort
-they ran with.
+they ran with. Global and workflow reviewer lists have add/remove controls;
+workflow lists can inherit the global list. Same-family reviewer choices warn
+without blocking a save. Independence replacements and exceptions appear as
+notes in the ticket timeline.
 
 ## Browser verification
 

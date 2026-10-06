@@ -1007,6 +1007,7 @@ test('saved settings reach steps that start later without a restart', async (t) 
       default: { cli: 'codex' },
       roles: { planner: sonnet },
       allowed: [],
+      reviewers: [],
     },
     workflows: {},
   } satisfies Settings

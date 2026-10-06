@@ -200,6 +200,7 @@ export interface AgentDecision {
 }
 
 export interface Artifact {
+  readonly file?: string | null
   readonly decision?: AgentDecision | null
   /** Factory-observed proof surface commit; agents cannot set it in result.json. */
   readonly observedCommit?: string | null

@@ -49,8 +49,9 @@ export const engineConfig = z.object({
       roles: roleAgentsSchema.default({}),
       /** The agents a lead may choose for a task. Empty: tasks use the role settings. */
       allowed: z.array(agentSettingSchema).default([]),
+      reviewers: z.array(agentSettingSchema).default([]),
     })
-    .default({ default: DEFAULT_AGENT, roles: {}, allowed: [] }),
+    .default({ default: DEFAULT_AGENT, roles: {}, allowed: [], reviewers: [] }),
 })
 export type EngineConfig = z.infer<typeof engineConfig>
 export type AgentConfig = z.infer<typeof agentConfig>

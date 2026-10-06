@@ -27,7 +27,7 @@ import { z } from 'zod'
 import { DEFAULT_ALLOWED_ORIGINS } from '../config.ts'
 import { FactoryError } from '../domain/errors.ts'
 import { runsOf } from '../domain/lifecycle.ts'
-import { describeRoutes } from '../domain/routing.ts'
+import { describeRoutes, stepLimit } from '../domain/routing.ts'
 import { type Step, stepContract, type Workflow } from '../domain/workflow.ts'
 import { type LibraryEntry, parseUpload } from '../library/library.ts'
 import type { Database } from '../store/database.ts'
@@ -198,7 +198,9 @@ export function createApp({
     if (!c.req.header('Content-Type')?.startsWith('application/json'))
       throw new FactoryError('invalid', 'Send the settings as JSON')
     const input = await body(c, settingsSchema)
-    const problems = settingsProblems(input, await settingsWorkflows())
+    const problems = settingsProblems(input, await settingsWorkflows()).filter(
+      (problem) => !problem.includes(': warning: '),
+    )
     if (problems.length)
       throw new InvalidRequest(problems, 'The settings are not valid')
     await saveSettings(database, input)
@@ -531,6 +533,7 @@ function summarize(workflow: Workflow, step: Step): StepSummary {
         ? step.action
         : undefined
   const { success } = stepContract(step)
+  const limit = stepLimit(step)
   return {
     id: step.id,
     kind: step.kind,
@@ -539,7 +542,7 @@ function summarize(workflow: Workflow, step: Step): StepSummary {
     ...(step.instructions === undefined
       ? {}
       : { instructions: step.instructions }),
-    ...(step.limit === undefined ? {} : { limit: step.limit }),
+    ...(limit === undefined ? {} : { limit }),
     needs: step.kind === 'human' ? [] : step.needs,
     routes: describeRoutes(workflow, step),
   }

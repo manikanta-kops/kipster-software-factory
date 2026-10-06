@@ -37,9 +37,10 @@ steps:
   - id: review
     kind: agent
     role: reviewer
-    limit: 2
+    limit: 5
     routes:
       changes-needed: lead
+      limit: maintain-pr
 
   - id: maintain-pr
     kind: system

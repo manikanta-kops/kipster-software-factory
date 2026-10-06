@@ -34,8 +34,10 @@ failure seen in practice.
 - **Route on typed outcomes,** never on free text.
 - **Every loop has a limit.** Running out means "needs you" with everything
   attached, or an explicit route such as opening the PR with notes.
-- **Review once.** A fresh reviewer always finds one more thing; block only on
-  serious findings and let the author decline the rest in writing.
+- **Bound review.** Leads use up to five rounds, with parallel reviewers from
+  configured CLI families. Later rounds check earlier corrections and serious
+  problems added by fixes. Other workflows retain their explicit review limits;
+  block only on serious findings and let the author decline the rest in writing.
 - **Agents propose, the system acts.** Only system steps push, open pull
   requests or merge.
 

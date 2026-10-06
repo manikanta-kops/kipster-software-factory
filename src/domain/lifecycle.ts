@@ -40,6 +40,7 @@ import {
 export const MAX_ARTIFACT_CONTENT = 1_000_000
 
 export interface ArtifactInput {
+  readonly file?: string | undefined
   readonly chose?: string | undefined
   readonly alternative?: string | undefined
   readonly reason?: string | undefined
@@ -79,6 +80,19 @@ const contentArtifactSchema = z
       .enum(['passed', 'failed', 'unverified', 'reproduced'])
       .optional(),
     scenario: z.string().trim().min(1).max(200).optional(),
+    file: z
+      .string()
+      .min(1)
+      .refine(
+        (file) =>
+          !file.startsWith('/') &&
+          !file.includes('\\') &&
+          !file
+            .split('/')
+            .some((part) => part === '..' || part === '.' || !part),
+        'use a repository-relative file path',
+      )
+      .optional(),
     kind: z.enum(ARTIFACT_KINDS.filter((kind) => kind !== 'decision')),
     title: z.string().trim().min(1).max(200),
     content: z.string().max(MAX_ARTIFACT_CONTENT).optional(),

@@ -4,7 +4,12 @@ import { type RoleName, runTasksParams } from '../domain/catalog.ts'
 import { FactoryError } from '../domain/errors.ts'
 import { stepOf, type StepResult } from '../domain/lifecycle.ts'
 import type { LeadTask, Repository, Ticket } from '../domain/records.ts'
-import { resolveAgent } from '../domain/settings.ts'
+import {
+  resolveAgent,
+  independentAgent,
+  describeAgent,
+} from '../domain/settings.ts'
+import type { ArtifactInput } from '../domain/lifecycle.ts'
 import {
   checkDelegation,
   delegateTarget,
@@ -31,21 +36,100 @@ import {
 } from '../store/tickets.ts'
 import type { RunnerOptions } from './runner.ts'
 
-/** The agent for a step of this ticket: a child ticket's task agent sets only its builder. */
-export async function agentFor(
+/** All selections for one attempt, computed from its settings snapshot before execution. */
+export async function agentsFor(
   options: Pick<RunnerOptions, 'database' | 'config'>,
   context: Pick<AttemptContext, 'ticket' | 'workflow'>,
   role: RoleName,
-): Promise<AgentConfig> {
-  const owned =
-    role === 'builder'
-      ? await getTaskOfChild(options.database, context.ticket.id)
-      : null
-  return resolveAgent(options.config, {
-    workflow: context.workflow.name,
+): Promise<{ agents: AgentConfig[]; notes: ArtifactInput[] }> {
+  const { config, database } = options
+  const workflow = context.workflow.name
+  const owned = await getTaskOfChild(database, context.ticket.id)
+  const original = resolveAgent(config, {
+    workflow,
     role,
     taskAgent: owned?.task.agent,
   })
+  if (!['reviewer', 'tester'].includes(role))
+    return { agents: [original], notes: [] }
+  const detail = (await getTicketDetail(database, context.ticket.number))!
+  const builderAgents = (item: TicketDetail) =>
+    item.attempts.flatMap((attempt) =>
+      attempt.agent &&
+      item.workflow.steps.some(
+        (step) =>
+          step.id === attempt.stepId &&
+          step.kind === 'agent' &&
+          step.role === 'builder',
+      )
+        ? [attempt.agent]
+        : [],
+    )
+  const builders = builderAgents(detail)
+  const children = await Promise.all(
+    detail.tasks.flatMap((task) =>
+      task.child ? [getTicketDetail(database, task.child.number)] : [],
+    ),
+  )
+  for (const child of children)
+    if (child) builders.push(...builderAgents(child))
+  if (!builders.length)
+    builders.push(
+      resolveAgent(config, {
+        workflow,
+        role: 'builder',
+        taskAgent: owned?.task.agent,
+      }),
+    )
+  const override = config.workflows?.[workflow]
+  const reviewers = override?.reviewers ?? config.agents.reviewers
+  const candidates = [
+    ...(role === 'reviewer' ? (override?.reviewers ?? []) : []),
+    ...(override?.roles?.[role] ? [override.roles[role]!] : []),
+    ...(config.agents.roles[role] ? [config.agents.roles[role]!] : []),
+    ...config.agents.reviewers,
+    ...config.agents.allowed,
+    config.agents.default,
+  ]
+  const isLead = context.workflow.steps.some(
+    (step) => step.kind === 'agent' && step.role === 'lead',
+  )
+  const originals =
+    role === 'reviewer' && isLead && reviewers.length ? reviewers : [original]
+  const notes: ArtifactInput[] = []
+  const agents = originals.map((agent) => {
+    const selection = independentAgent(agent, builders, candidates)
+    if (selection.replaced || !selection.independent)
+      notes.push({
+        kind: 'note',
+        title: selection.independent
+          ? `${role} agent replaced for independence`
+          : role === 'reviewer'
+            ? 'Review was not independent'
+            : 'Testing was not independent',
+        content: selection.independent
+          ? `Replaced ${describeAgent(agent)} with ${describeAgent(selection.agent)} because the original CLI and model match a builder of this change.`
+          : `Running ${describeAgent(agent)} despite matching a builder of this change. No configured candidate has a different CLI and model. The owner must merge this head.`,
+      })
+    return selection.agent
+  })
+  return { agents, notes }
+}
+
+/** Reuse the recorded selection for this attempt; writers in system steps resolve separately. */
+export async function agentFor(
+  options: Pick<RunnerOptions, 'database' | 'config'>,
+  context: Pick<AttemptContext, 'ticket' | 'workflow'> &
+    Partial<Pick<AttemptContext, 'attempt' | 'step'>>,
+  role: RoleName,
+): Promise<AgentConfig> {
+  if (
+    context.attempt?.agent &&
+    context.step?.kind === 'agent' &&
+    context.step.role === role
+  )
+    return context.attempt.agent
+  return (await agentsFor(options, context, role)).agents[0]!
 }
 
 async function libraryOf(options: RunnerOptions): Promise<Library> {

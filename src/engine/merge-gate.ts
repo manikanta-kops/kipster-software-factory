@@ -77,6 +77,14 @@ export async function refreshMergeGate(
           status: attempt.status,
           outcome: attempt.outcome,
           commit: attempt.headCommit,
+          independent: !detail.artifacts.some(
+            (artifact) =>
+              artifact.attemptId === attempt.id &&
+              [
+                'Review was not independent',
+                'Testing was not independent',
+              ].includes(artifact.title),
+          ),
           ...(attempt.ownerReview ? { ownerReview: attempt.ownerReview } : {}),
         }
       : null

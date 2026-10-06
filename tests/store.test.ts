@@ -104,7 +104,7 @@ test('lights-out migration preserves existing lead tickets as off and keeps old 
       "INSERT INTO artifacts (ticket_id, attempt_id, kind, title, content) VALUES ($1, $2, 'note', 'Old note', 'Still readable')",
       [ticket.rows[0]!.id, attempt.rows[0]!.id],
     )
-    assert.deepEqual(await migrate(db), [14, 15])
+    assert.deepEqual(await migrate(db), [14, 15, 16])
     const detail = await getTicketDetail(db, 1)
     assert.equal(detail!.ticket.summary, null)
     assert.equal(detail!.ticket.lightsOut, false)

@@ -58,6 +58,7 @@ test('edit limits, allowed agents and a workflow override; they persist', async 
     agents: {
       default: { cli: 'codex' },
       roles: {},
+      reviewers: [],
       allowed: [{ cli: 'claude', model: 'claude-opus-5-5', effort: 'high' }],
     },
     workflows: {
@@ -148,4 +149,71 @@ test('invalid values are caught on the page; server issues are shown', async ({
       .getByText('unknown workflow', { exact: true }),
   ).toBeVisible()
   expect(posts).toHaveLength(1)
+})
+
+test('edit global and workflow reviewer lists, warn on family duplicates, and remove entries', async ({
+  page,
+  factory,
+  request,
+}, testInfo) => {
+  await page.goto(`${factory.url}/#/settings`)
+  await page
+    .getByRole('button', { name: 'Add global reviewer', exact: true })
+    .click()
+  await page
+    .getByRole('button', { name: 'Add global reviewer', exact: true })
+    .click()
+  await setAgent(page, 'Global reviewer 1', 'claude', 'review-claude', 'high')
+  await setAgent(page, 'Global reviewer 2', 'codex', 'review-codex', 'medium')
+  await page.getByLabel('Workflow to override').selectOption('lead')
+  await page.getByRole('button', { name: 'Add override' }).click()
+  await page.getByLabel('Use global reviewers for lead').uncheck()
+  await page
+    .getByRole('button', { name: 'Add lead reviewer', exact: true })
+    .click()
+  await page
+    .getByRole('button', { name: 'Add lead reviewer', exact: true })
+    .click()
+  await setAgent(page, 'lead reviewer 1', 'claude', 'first', 'high')
+  await setAgent(page, 'lead reviewer 2', 'claude', 'second', 'medium')
+  await expect(
+    page.getByText('Warning: reviewers share a CLI model family.', {
+      exact: false,
+    }),
+  ).toBeVisible()
+  // A warning does not prohibit any number of reviewers or saving same-family choices.
+  await page.getByRole('button', { name: 'Save settings' }).click()
+  await expect(page.getByText('Settings saved.')).toBeVisible()
+  await page.reload()
+  await expect(page.getByLabel('Global reviewer 2 model')).toHaveValue(
+    'review-codex',
+  )
+  await expect(page.getByLabel('lead reviewer 2 model')).toHaveValue('second')
+  await page.screenshot({
+    path: testInfo.outputPath('reviewer-lists.png'),
+    fullPage: true,
+  })
+  let saved = (await (
+    await request.get(`${factory.url}/api/settings`)
+  ).json()) as SettingsResponse
+  expect(saved.settings.agents.reviewers).toHaveLength(2)
+  expect(saved.settings.workflows['lead']!.reviewers).toHaveLength(2)
+  await page
+    .getByRole('button', { name: 'Remove global reviewer 2', exact: true })
+    .click()
+  await page
+    .getByRole('button', { name: 'Remove lead reviewer 2', exact: true })
+    .click()
+  await page.getByRole('button', { name: 'Save settings' }).click()
+  await expect(page.getByText('Settings saved.')).toBeVisible()
+  await page.reload()
+  await expect(page.getByLabel('Global reviewer 2 model')).toHaveCount(0)
+  await expect(page.getByLabel('lead reviewer 2 model')).toHaveCount(0)
+  await page.getByLabel('Use global reviewers for lead').check()
+  await page.getByRole('button', { name: 'Save settings' }).click()
+  await expect(page.getByText('Settings saved.')).toBeVisible()
+  saved = (await (
+    await request.get(`${factory.url}/api/settings`)
+  ).json()) as SettingsResponse
+  expect(saved.settings.workflows['lead']!.reviewers).toBeUndefined()
 })

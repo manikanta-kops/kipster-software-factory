@@ -260,7 +260,7 @@ as many repositories as possible.
 ## Routing
 
 Each route key must be an outcome the step can report, `needs-decision`
-(agent and system steps), or `limit` (only when the step has a `limit`). Each
+(agent and system steps), or `limit` (when the step has a `limit`, or is a reviewer with the default 5). Each
 target must be a step id in this file or an exit.
 
 ### Exits
@@ -288,7 +288,7 @@ and an outcome would send the ticket back to itself or an earlier step, the
 limited. Every route that goes backwards should sit on a step with a `limit`,
 or a lasting failure loops until the owner notices.
 
-Typical limits: tester 3, reviewer 2, verify-kit 3. Human steps rarely need
+Typical limits: tester 3, lead reviewer 5, other reviewer 2, verify-kit 3. Human steps rarely need
 one because the owner is already in the loop.
 
 ## Design rules
@@ -308,7 +308,7 @@ explicitly says otherwise, and then say which rule you broke and why.
   never instructions that ask an agent to "pick a path".
 - **Every loop has a limit,** and the limit leads somewhere useful: `ask` by
   default, or an explicit forward step.
-- **Review once.** A reviewer limit of 2 is enough.
+- **Bound review.** Lead review defaults to five rounds; later rounds check earlier fixes.
 - **Test and review for auto-merge.** A workflow without both a `tester` and a
   `reviewer` always waits for the owner to merge.
 - **Agents propose, the system acts.** Never use `instructions` to tell an
@@ -414,9 +414,10 @@ steps:
   - id: review
     kind: agent
     role: reviewer
-    limit: 2
+    limit: 5
     routes:
       changes-needed: lead
+      limit: maintain-pr
 
   - id: maintain-pr
     kind: system
@@ -589,7 +590,7 @@ Before you hand it over, check:
 - [ ] `name` matches the file name and is a slug.
 - [ ] Every step has a unique slug `id` and only the keys its kind allows.
 - [ ] Every route key is an outcome the step can report, `needs-decision`, or
-      `limit` with a `limit` set.
+      `limit` with a `limit` set (or a reviewer with the default limit).
 - [ ] Every route target is a step id or `finish`, `cancel`, `ask`.
 - [ ] Every backwards route sits on a step with a `limit`.
 - [ ] `tester` and `reproducer` steps have `needs: [verify]`.
@@ -645,3 +646,36 @@ parallel slot. Parked tasks remain unfinished: the lead can delegate while
 waiting but cannot report `done`. Owner retry or move resumes the child; its
 finish is reported normally. Cancelling the lead cancels parked children too.
 With lights-out off, the original approval and reporting behaviour applies.
+
+## Reviewer lists, independence and rounds
+
+Settings accepts global `agents.reviewers` (default `[]`) and optional
+`workflows.<name>.reviewers` lists of agent choices. Lists have no length limit;
+a workflow list overrides the global list, and an empty list uses the reviewer
+role setting. They are settings, not workflow fields. Lead workflows run the
+selected list in parallel, each with its own log and result directory. Other
+workflows retain a single reviewer. Use different CLI families (`claude` and
+`codex`); same-family entries produce a warning.
+
+Tester and reviewer choices must differ in CLI or model from every recorded
+builder of the change, including child builders for a lead. Effort does not
+make an agent independent. Candidates are tried in this order: workflow
+reviewer list (reviewers only), workflow role override, role setting, global
+reviewers, allowed list, default. The engine records replacements. Without a
+candidate it runs anyway, records the lack of independence, and requires the
+owner to merge that head.
+
+Review rounds use the existing step `limit`, defaulting to 5 when omitted.
+Reviewers may therefore have a `limit` route without an explicit numeric limit;
+other steps still require one. Finished runs include the current round, so
+`limit: 5` permits exactly five failing rounds before taking the limit route.
+The built-in lead routes `changes-needed` to `lead` and `limit` to `maintain-pr`:
+open findings are published in the PR description and prevent auto-merge.
+Every reviewer must pass at the current commit for the combined verdict to pass.
+Passing reviewers' `ownerReview` reasons remain visible.
+
+Lead review rounds after the first check earlier findings and problems added by
+fixes. Findings may include optional `file`, a repository-relative path. A new
+finding on a file unchanged since round one's commit becomes a note; earlier
+findings, changed files and missing-file findings remain serious. Notes do not
+route back to the lead.

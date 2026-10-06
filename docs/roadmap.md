@@ -176,3 +176,13 @@ pages show the compact card; Today shows attention and completions from the last
 and Blocked. Summary rewrites and legacy null reports have PostgreSQL coverage;
 phone/desktop reports have light/dark browser coverage. Real overnight use and
 owner morning checks remain unverified.
+
+### Lead review and independence (implemented)
+
+Reviewer and tester agents are checked against recorded builder CLI/model
+choices, including a lead's tasks. Settings provides global and per-workflow
+reviewer lists. Lead reviews run the list in parallel and combine the verdicts.
+Review `limit` controls rounds (default 5); the built-in lead publishes unresolved
+findings after round five and keeps the PR for the owner. Later lead rounds check
+earlier fixes; new findings on unchanged files become notes. An unavailable
+independent candidate is recorded and always requires owner merging.

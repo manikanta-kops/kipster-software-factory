@@ -626,6 +626,7 @@ test('a task agent runs only the builder; workflow overrides and the allowed lis
       default: { cli: 'codex' },
       roles: { reviewer: globalReviewer },
       allowed: [opusHigh],
+      reviewers: [],
     },
     workflows: {
       'data-task': {
@@ -706,7 +707,7 @@ test('a task agent runs only the builder; workflow overrides and the allowed lis
       ?.config
   assert.deepEqual(agentOf('lead', 'Lead the change'), { cli: 'codex' })
   assert.deepEqual(agentOf('builder', 'Chosen'), opusHigh)
-  assert.deepEqual(agentOf('reviewer', 'Chosen'), opusMedium)
+  assert.deepEqual(agentOf('reviewer', 'Chosen'), globalReviewer)
   assert.deepEqual(agentOf('builder', 'Data'), sol)
   assert.deepEqual(agentOf('reviewer', 'Data'), opusMedium)
   assert.deepEqual(agentOf('builder', 'Plain'), { cli: 'codex' })
@@ -719,7 +720,7 @@ test('a task agent runs only the builder; workflow overrides and the allowed lis
     child.attempts.map((attempt) => [attempt.stepId, attempt.agent]),
     [
       ['build', opusHigh],
-      ['review', opusMedium],
+      ['review', globalReviewer],
     ],
   )
 })

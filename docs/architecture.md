@@ -200,7 +200,9 @@ workspace preparation and both result-file tries within the same attempt.
 Omitted agent settings use Codex. A role entry replaces the default selection;
 its optional `model` is passed to that CLI, and its optional `effort`
 (`minimal`, `low`, `medium`, `high`, `xhigh` or `max`) becomes Claude's
-`--effort` or Codex's `-c model_reasoning_effort`. `agents.allowed` lists the
+`--effort` or Codex's `-c model_reasoning_effort`. `agents.reviewers` defaults to an empty list. It selects the parallel reviewers
+for a lead final review; a workflow `reviewers` list overrides it. `cli` is the
+model family, so Settings warns when entries share a CLI. `agents.allowed` lists the
 exact `{ cli, model, effort }` choices a lead may give a task; it is empty by
 default, so tasks use the role settings. Accepted CLI names are `codex` and
 `claude`; accepted role keys come from the catalog. `allowedOrigins` retains its
@@ -211,9 +213,9 @@ step timeout and Codex for every role.
 #### Settings page
 
 The web app's Settings page (`#/settings`, `GET`/`POST /api/settings`) edits
-`concurrency`, `stepTimeoutMinutes` and `agents` (default, roles and allowed)
-while the factory runs, plus per-workflow overrides of role agents and the step
-timeout. Workflow names retained by stored tickets remain available for overrides
+`concurrency`, `stepTimeoutMinutes` and `agents` (default, roles, allowed and reviewers)
+while the factory runs, plus per-workflow overrides of role agents, reviewer
+lists and the step timeout. Workflow names retained by stored tickets remain available for overrides
 after their files are removed; they do not reappear on New ticket. Until the
 owner saves, the factory uses the `config.json` values (or
 the defaults) and the API reports `source: "config"`. The first save stores the
@@ -919,3 +921,37 @@ An owner retry or move resumes that child; subsequent polling restores its task
 to running and reports its eventual finish. Cancelling the lead also cancels
 parked children. With lights-out off, approval and task reporting are unchanged.
 Kit, CI and migration changes and reviewer `ownerReview` still require the owner.
+
+## Review independence and lead rounds
+
+Before an attempt starts, the engine compares its reviewer or tester agent with
+recorded builder agents on this ticket and, for leads, its child tickets. Equality
+means the same CLI and model; effort is ignored and an absent model is its own
+value. Without recorded builders it resolves the builder from settings. It uses
+the first independent candidate: workflow reviewer list (reviewers only),
+workflow role override, global role setting, global reviewers, allowed agents,
+then default. The scheduler records the selection once; execution and proof
+reuse it. Replacements appear as ticket notes in the timeline. If no candidate
+is independent, execution continues with the original and a note, and the
+commit-bound gate requires owner merging for that verdict.
+
+A lead's final review runs every configured reviewer in parallel against one
+commit, in separate indexed step directories with separate retained logs. Other
+workflows keep one reviewer. The attempt stores one combined verdict: every
+reviewer must pass at the same head. Findings and per-reviewer verdict notes name
+the agent; passing reviewers' owner-review reasons are retained. A serious
+finding routes back to the lead. The built-in review has `limit: 5` and routes
+`limit` to `maintain-pr`. Review steps without an explicit limit default to five
+finished rounds, counting the current run. Explicit limits on other workflows
+remain unchanged. The final unresolved round publishes the open findings in the
+PR description; its nonpassing verdict prevents auto-merge. Publication accepts
+that exhausted verdict only at its reviewed head; a moved base still requires
+fresh verification. PR descriptions compact long lists to respect the existing
+4,000-character contract and point to the full findings on the ticket.
+
+From round two, lead prompts carry earlier findings and first/last reviewed
+commits. Reviewers check the earlier corrections and serious problems added by
+fixes. A new finding with a `file` unchanged between the first reviewed commit
+and the current head becomes a note. Earlier findings, changed-file findings
+and new findings without a file remain serious. Migration 016 adds the optional
+repository-relative artifact `file`; no existing migration changes.
