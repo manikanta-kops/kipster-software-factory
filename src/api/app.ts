@@ -280,6 +280,7 @@ export function createApp({
     }
     const ticket = await createTicket(database, {
       repository: input.repository,
+      ...(input.lightsOut === undefined ? {} : { lightsOut: input.lightsOut }),
       ...(input.dependencies === undefined
         ? {}
         : { dependencies: input.dependencies }),

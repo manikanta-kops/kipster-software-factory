@@ -86,6 +86,14 @@ command, or `kf update`, to update; your
 configuration, secrets and database are kept. `kf status`, `kf logs -f`,
 `kf stop` and `kf start` manage the background factory.
 
+New `lead` and `program-lead` tickets default to Lights-out: the system approves
+lead plans, agents choose and record sensible defaults, and a child needing a
+decision parks while siblings continue. New ticket lets you change the setting;
+children inherit it, and ticket pages show the Decision log. The merge gate
+still applies. Child `task` and `task-pr` tickets without a required verification
+capability skip the tester and carry an **Untested** warning. Their PRs and lead
+PRs containing merged untested tasks require owner merging.
+
 ## Run from source
 
 Requires Node.js 26.10 (see `.nvmrc`) and PostgreSQL 18 (`initdb` and `pg_ctl`
@@ -160,5 +168,9 @@ scheduler, including after a restart. Keep real runs in a separate checkout's
 never real verification evidence); seed with `--home <directory>` when serving a
 different home. The demo includes valid/invalid kits and current/stale lead
 verdicts with recorded commits. Override with `npm run dev -- --home <directory>`.
+It also includes **Overnight report export (synthetic demo)**, a lights-out lead
+with a Decision log, a parked child with a recorded choice and a merged
+untested child. These are
+synthetic choices for UI inspection; no agents or real verification ran.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md). Licensed under [Apache-2.0](LICENSE).

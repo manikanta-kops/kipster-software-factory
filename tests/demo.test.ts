@@ -63,7 +63,50 @@ describe('demo data', () => {
       assert.equal(ticket.status, status, `#${number}`)
       assert.equal(ticket.waiting?.for ?? null, waitingFor, `#${number}`)
     }
-    assert.equal((await listTickets(demo.database)).length, 9)
+    assert.equal((await listTickets(demo.database)).length, 12)
+  })
+
+  test('lights-out demo exposes typed decisions and a linked child without running agents', async () => {
+    const lead = await detail(demo.tickets.lightsOutLead)
+    const child = await detail(demo.tickets.lightsOutChild)
+    assert.equal(lead.ticket.lightsOut, true)
+    assert.equal(lead.ticket.waiting?.for, 'tasks')
+    assert.equal(child.ticket.lightsOut, true)
+    assert.equal(child.parentTask?.parent.number, lead.ticket.number)
+    assert.equal(lead.tasks[0]?.child?.number, child.ticket.number)
+    assert.equal(lead.tasks[0]?.status, 'parked')
+    assert.deepEqual(
+      lead.artifacts.find((artifact) => artifact.kind === 'decision')?.decision,
+      {
+        chose: 'CSV',
+        alternative: 'An Excel workbook',
+        reason:
+          'CSV works with the existing report data and common spreadsheet tools.',
+      },
+    )
+    assert.deepEqual(
+      child.artifacts.find((artifact) => artifact.kind === 'decision')
+        ?.decision,
+      {
+        chose: 'Use the displayed report column order',
+        alternative: 'Sort columns alphabetically',
+        reason: 'Matching the report makes the export familiar to shop owners.',
+      },
+    )
+    assert.equal(child.attempts.at(-1)?.stepId, 'build')
+    assert.equal(child.attempts.at(-1)?.status, 'waiting')
+    assert.equal(child.ticket.waiting?.askReason, 'needs-decision')
+    const untested = await detail(demo.tickets.lightsOutUntestedChild)
+    assert.equal(untested.ticket.lightsOut, true)
+    assert.equal(untested.ticket.status, 'done')
+    assert.deepEqual(untested.ticket.skippedSteps, [
+      { stepId: 'test', missingCapabilities: ['verify'] },
+    ])
+    assert.equal(lead.tasks[1]?.status, 'merged')
+    assert.deepEqual(
+      lead.tasks[1]?.child?.skippedSteps,
+      untested.ticket.skippedSteps,
+    )
   })
 
   test('the plan waiting for approval is a markdown artifact', async () => {

@@ -122,7 +122,12 @@ test('Today folds the child tickets of a lead under it until expanded', async ({
   ).toBeVisible()
   const childRow = moving.getByRole('link', { name: /Add the export endpoint/ })
   await expect(childRow).toHaveCount(0)
-  const toggle = moving.getByRole('button', { name: /\d+ tasks?/ })
+  const toggle = moving
+    .locator('.lead-group')
+    .filter({
+      has: page.getByRole('link', { name: /Build the export feature/ }),
+    })
+    .getByRole('button', { name: /\d+ tasks?/ })
   await expect(toggle).toHaveAttribute('aria-expanded', 'false')
   await toggle.click()
   await expect(toggle).toHaveAttribute('aria-expanded', 'true')

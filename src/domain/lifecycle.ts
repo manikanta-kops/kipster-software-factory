@@ -20,6 +20,7 @@ import { FactoryError } from './errors.ts'
 import {
   ARTIFACT_KINDS,
   type ArtifactKind,
+  type AgentDecision,
   type AttemptStatus,
   type HumanChoice,
   OPEN_STATUSES,
@@ -39,12 +40,15 @@ import {
 export const MAX_ARTIFACT_CONTENT = 1_000_000
 
 export interface ArtifactInput {
+  readonly chose?: string | undefined
+  readonly alternative?: string | undefined
+  readonly reason?: string | undefined
   readonly scenarioResult?:
     'passed' | 'failed' | 'unverified' | 'reproduced' | undefined
   readonly scenario?: string | undefined
   readonly kind: ArtifactKind
   readonly title: string
-  /** Markdown. Give exactly one of content and path. */
+  /** Markdown. Non-decision artifacts give exactly one of content and path. */
   readonly content?: string | undefined
   /** A file inside the factory home, absolute or relative to it. */
   readonly path?: string | undefined
@@ -63,13 +67,19 @@ export interface StepResult {
   readonly ownerReview?: { readonly reason: string } | undefined
 }
 
-export const artifactInputSchema = z
+export const agentDecisionSchema = z.strictObject({
+  chose: z.string().trim().min(1).max(10000),
+  alternative: z.string().trim().min(1).max(10000),
+  reason: z.string().trim().min(1).max(10000),
+}) satisfies z.ZodType<AgentDecision>
+
+const contentArtifactSchema = z
   .strictObject({
     scenarioResult: z
       .enum(['passed', 'failed', 'unverified', 'reproduced'])
       .optional(),
     scenario: z.string().trim().min(1).max(200).optional(),
-    kind: z.enum(ARTIFACT_KINDS),
+    kind: z.enum(ARTIFACT_KINDS.filter((kind) => kind !== 'decision')),
     title: z.string().trim().min(1).max(200),
     content: z.string().max(MAX_ARTIFACT_CONTENT).optional(),
     path: z.string().min(1).optional(),
@@ -79,6 +89,29 @@ export const artifactInputSchema = z
       (artifact.content === undefined) !== (artifact.path === undefined),
     { message: 'give either content or path' },
   )
+
+export const artifactInputSchema = z.discriminatedUnion('kind', [
+  contentArtifactSchema,
+  agentDecisionSchema.extend({
+    kind: z.literal('decision'),
+    title: z.string().trim().min(1).max(200),
+  }),
+])
+
+export function autoApprovePlan(
+  workflow: Workflow,
+  closed: { stepId: string; outcome: string | null },
+  open: Opening | null,
+): boolean {
+  const step = stepOf(workflow, closed.stepId)
+  return (
+    step.kind === 'agent' &&
+    step.role === 'lead' &&
+    closed.outcome === 'plan-ready' &&
+    open?.waitingFor === 'human' &&
+    open.stepId === 'approve-plan'
+  )
+}
 
 export const stepResultSchema = z
   .strictObject({

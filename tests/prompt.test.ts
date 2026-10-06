@@ -40,3 +40,31 @@ test('agents are told to solve setup themselves and where the factory runtimes a
     ),
   )
 })
+
+test('lights-out instructions are present only when enabled, with typed decision instructions', async (t) => {
+  const f = await autoMergeFixture(t)
+  const detail = await f.detail()
+  for (const lightsOut of [false, true]) {
+    const prompt = await buildPrompt({
+      step: {
+        id: 'build',
+        kind: 'agent',
+        role: 'builder',
+        needs: [],
+        routes: {},
+      },
+      detail: { ...detail, ticket: { ...detail.ticket, lightsOut } },
+      trusted: { roleInstructions: '', contextIndex: '' },
+      directory: f.home,
+      diff: '',
+      home: f.home,
+    })
+    assert.equal(prompt.includes('Lights-out is on.'), lightsOut)
+    assert.match(prompt, /"kind":"decision".*"chose".*"alternative".*"reason"/)
+    if (lightsOut) {
+      assert.match(prompt, /Do not stop to ask/)
+      assert.match(prompt, /Only irreversible actions wait/)
+      assert.match(prompt, /merge gate and ownerReview rules still apply/)
+    }
+  }
+})

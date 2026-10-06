@@ -898,3 +898,40 @@ test('additive proof contract: kit status/capabilities, commit and media type in
     image.mediaType,
   )
 })
+
+test('POST tickets defaults lights-out per workflow and preserves explicit choices', async () => {
+  const repository = await readyRepository('lights/api')
+  await markRepositoryReady(database, repository.id, {
+    capabilities: ['verify'],
+  })
+  for (const [workflow, choice, expected] of [
+    ['lead', undefined, true],
+    ['lead', false, false],
+    ['bug', undefined, false],
+    ['bug', true, true],
+  ] as const) {
+    const created = await json<TicketResponse>(
+      await post('/api/tickets', {
+        repository: repository.slug,
+        workflow,
+        title: 'Lights-out default',
+        ...(choice === undefined ? {} : { lightsOut: choice }),
+      }),
+      201,
+    )
+    assert.equal(created.ticket.lightsOut, expected)
+    assert.equal(
+      (await ticket(created.ticket.number)).ticket.lightsOut,
+      expected,
+    )
+  }
+  await json<ErrorResponse>(
+    await post('/api/tickets', {
+      repository: repository.slug,
+      workflow: 'lead',
+      title: 'Invalid',
+      lightsOut: 'true',
+    }),
+    400,
+  )
+})
