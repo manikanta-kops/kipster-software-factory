@@ -28,4 +28,5 @@ performed against a factory-provided instance by an independent tester.
 A generated kit that never ran is a draft.
 
 Report done with evidence and the commit, or needs-decision for a product decision.
-Kit changes always proceed through human approval. Never push, open a PR or merge.
+The owner approves the kit in the workflow's approval step, so never stop to ask
+for it. Never push, open a PR or merge.

@@ -1,8 +1,10 @@
 # The factory verifies itself
 
-Use Node 26.10 from the runner PATH (`.nvmrc`), npm's lockfile and PostgreSQL 18
-tools on PATH. The laptop's ordinary shell can have Node 22; confirm `node --version`
-before running commands.
+Use Node 26.10 (`.nvmrc`), npm's lockfile and PostgreSQL 18 tools (`initdb`,
+`pg_ctl`). The shell PATH can have another Node or no PostgreSQL; confirm
+`node --version` and `initdb --version` first. If either is missing or wrong, switch
+with a version manager or put the factory's own Node and PostgreSQL directories,
+named in your instructions, on PATH.
 
 Ticket code changes only this checkout. The scratch factory executing the ticket
 keeps running its already loaded code. Updating that process requires a deliberate
@@ -47,5 +49,5 @@ Before committing kit edits, format hidden files explicitly with
 `npx --no-install prettier --write .kipster`, then execute the complete kit check.
 Keep runtime output, screenshots, logs and result.json out of Git. Evidence for
 agent attempts belongs under the supplied factory home/evidence directory.
-Kit and CI edits require human approval; only system actions publish branches,
-create/update PRs or merge.
+Kit and CI edits are allowed when the ticket needs them; the owner reviews them on
+the pull request. Only system actions publish branches, create/update PRs or merge.

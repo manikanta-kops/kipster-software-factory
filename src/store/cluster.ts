@@ -19,6 +19,13 @@ const BUNDLED_POSTGRES = fileURLToPath(
   new URL('../../../postgres/bin/', import.meta.url),
 )
 
+/** The installed bundle's PostgreSQL programs, if this factory ships them. */
+export function bundledPostgresBin(): string | undefined {
+  return existsSync(join(BUNDLED_POSTGRES, 'pg_ctl'))
+    ? BUNDLED_POSTGRES
+    : undefined
+}
+
 export interface Cluster {
   readonly data: string
   readonly socketDirectory: string
@@ -33,9 +40,7 @@ export function managedCluster(home: string): Cluster {
   return {
     data: join(home, 'postgres'),
     socketDirectory: join('/tmp', `kf-${key.slice(0, 12)}`),
-    bin: existsSync(join(BUNDLED_POSTGRES, 'pg_ctl'))
-      ? BUNDLED_POSTGRES
-      : undefined,
+    bin: bundledPostgresBin(),
   }
 }
 

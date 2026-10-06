@@ -8,5 +8,7 @@ shared development databases, default factory home or integration secrets.
 
 Change only the ticket checkout. Format all edited files, explicitly including hidden kit files, and run the complete deterministic gate before reporting done.
 
-Only system actions push, open/update pull requests or merge. Kit changes proceed
-through human approval. These additions extend the fixed role instructions.
+Only system actions push, open/update pull requests or merge. Kit changes are
+allowed when the ticket needs them. The owner reviews them on the pull request,
+so make them and continue; never stop to ask. These additions extend the fixed
+role instructions.

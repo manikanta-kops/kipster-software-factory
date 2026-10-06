@@ -99,6 +99,11 @@ Role notes:
   if the conflict prevents the requested change, they report `needs-decision`.
   Reviewers report `changes-needed` for forbidden-path edits. An `ownerReview`
   flag does not authorize expanded scope.
+- Agents report `needs-decision` only for a product question that the ticket,
+  the repository and sensible defaults cannot answer. They solve tools,
+  runtimes and in-scope kit changes themselves, and name any check they could
+  not run in their summary instead of stopping. The owner reviews on the pull
+  request.
 - `tester` and `reproducer` start the app from the repository kit. Always give
   them `needs: [verify]`. Without it the file validates, but tickets on
   repositories without a verify kit fail at that step instead of being refused
