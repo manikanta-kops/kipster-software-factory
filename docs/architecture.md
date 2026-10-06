@@ -150,7 +150,11 @@ command has its own POSIX process group. A timeout, cancellation or shutdown
 kills the entire group. IPC disconnect also kills it if the factory crashes
 (including SIGKILL); descendants are terminated when the leader exits. If a group kill reports `EPERM`, the supervisor checks the OS process table:
 only a group with no live members counts as already stopped. A permission
-failure with live members still fails the attempt. The supervisor is not a sandbox. Agents use the owner's CLI logins, environment,
+failure with live members still fails the attempt. Git commands skip the
+supervisor because they are short and frequent, and a Node start per call
+dominated run time. They still get their own group, killed on timeout,
+cancellation or shutdown, but a git command in flight when the factory crashes
+runs to completion. The supervisor is not a sandbox. Agents use the owner's CLI logins, environment,
 configuration and unrestricted tools on the Mac. Role instructions reserve
 pushes and GitHub mutations for system steps.
 
