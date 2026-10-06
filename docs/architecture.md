@@ -238,8 +238,9 @@ against the release `SHA256SUMS` and unpacks it to `<home>/versions/<version>`. 
 `kf` into `~/.local/bin` and runs `kf setup --start`. `kf start` writes a
 launchd user agent that runs `kf serve` at login with the `PATH` captured at
 that moment, so agents find `gh`, `codex` and `claude`. Updates stop the
-service before replacing the version. A `v*` tag on `master` that matches
-`package.json` publishes a release (`.github/workflows/release.yml`). Pull
+service before replacing the version. A push to `master` publishes
+`v<package.json version>` as a release unless it already exists
+(`.github/workflows/release.yml`). Pull
 requests touching installation build and smoke-test both bundles without
 publishing.
 
