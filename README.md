@@ -98,6 +98,14 @@ default, then publishes unresolved findings for the owner. The engine replaces
 reviewers and testers whose CLI/model matches a builder when an independent
 candidate exists; otherwise it records the exception and requires owner merging.
 
+The factory suggests one-line lessons from repeated review findings, recorded
+failures and owner corrections when a ticket finishes or needs you. Accept or
+reject them in Today's Lessons group; accepted repository and engine lessons
+are available to every fresh agent step through a file outside the repository.
+Lessons never hold up tickets. Repositories lists accepted lessons with a
+Retire control and reason. A repository can have 30 accepted lessons; retire
+one before accepting another.
+
 ## Run from source
 
 Requires Node.js 26.10 (see `.nvmrc`) and PostgreSQL 18 (`initdb` and `pg_ctl`

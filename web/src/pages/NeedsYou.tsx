@@ -1,3 +1,4 @@
+import { Lessons } from '../components/Lessons.tsx'
 import { SummaryStatus } from '../components/TicketSummary.tsx'
 import {
   useEffect,
@@ -147,6 +148,7 @@ export function NeedsYou({
           onChange={onFilter}
         />
       </header>
+      <Lessons status="proposed" repositories={filter.repositories} />
       {summarized.length > 0 && (
         <section className="today-summaries" aria-label="Ticket summaries">
           <h2 className="section-title">Ticket summaries</h2>

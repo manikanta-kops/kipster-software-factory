@@ -3237,3 +3237,32 @@ main > section.settings-page {
     padding: 16px;
   }
 }
+
+.lesson-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  padding: 16px 0;
+}
+.lesson-row .row-main {
+  flex: 1 1 220px;
+  overflow-wrap: anywhere;
+}
+.lesson-row p {
+  margin: 4px 0 0;
+}
+.lesson-actions {
+  display: flex;
+  gap: 8px;
+}
+.lesson-retire {
+  flex-basis: 100%;
+}
+.lesson-retire .input-row {
+  flex-wrap: wrap;
+}
+
+.lessons-list {
+  margin: 0;
+}

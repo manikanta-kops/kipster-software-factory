@@ -186,3 +186,15 @@ Review `limit` controls rounds (default 5); the built-in lead publishes unresolv
 findings after round five and keeps the PR for the owner. Later lead rounds check
 earlier fixes; new findings on unchanged files become notes. An unavailable
 independent candidate is recorded and always requires owner merging.
+
+### Lessons (implemented)
+
+Ticket completion, cancellation and owner waits now propose one-line lessons
+from repeated reviewer finding titles, recorded failure groups and owner
+corrections. Today lets the owner accept or reject them; Repositories shows
+accepted repository and engine lessons and retires them with a reason. A scope
+can retain decisions without suggesting them again. Repository acceptance is
+capped at 30. Every fresh agent path writes its own accepted lessons file outside
+the repository and receives only a path pointer. Lessons do not change ticket
+routing. Real PostgreSQL and browser tests cover this slice; live use with real
+agents and cross-ticket review aggregation remain unverified/unimplemented.

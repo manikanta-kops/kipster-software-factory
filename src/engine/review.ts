@@ -74,6 +74,7 @@ export async function runReviewAttempt(
         )
         await mkdir(directory, { recursive: true })
         const prompt = await buildPrompt({
+          database: options.database,
           dependencies: session.dependencies,
           step,
           detail,

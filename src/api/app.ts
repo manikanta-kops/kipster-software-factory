@@ -1,3 +1,10 @@
+import { LESSON_STATUSES } from '../domain/lessons.ts'
+import {
+  listLessons,
+  acceptLesson,
+  rejectLesson,
+  retireLesson,
+} from '../store/lessons.ts'
 import { evaluateMergeGate } from '../domain/merge-gate.ts'
 import { scenarioIndex } from '../domain/evidence.ts'
 import { getMergeGate } from '../store/merge-gates.ts'
@@ -50,6 +57,8 @@ import {
 } from '../store/tickets.ts'
 import { openArtifactFile, inspectArtifactFile } from './artifact-files.ts'
 import type {
+  LessonResponse,
+  LessonsResponse,
   ErrorResponse,
   DecisionsResponse,
   HealthResponse,
@@ -141,6 +150,50 @@ export function createApp({
       maxAge: 600,
     }),
   )
+
+  app.get('/api/lessons', async (c) => {
+    const repository = c.req.query('repository')
+    const status = c.req.query('status')
+    return c.json<LessonsResponse>({
+      lessons: await listLessons(database, {
+        ...(repository !== undefined
+          ? {
+              repositoryId:
+                repository === 'engine'
+                  ? null
+                  : parse(z.coerce.number().int().positive(), repository),
+            }
+          : {}),
+        ...(status !== undefined
+          ? { status: parse(z.enum(LESSON_STATUSES), status) }
+          : {}),
+      }),
+    })
+  })
+  for (const action of ['accept', 'reject', 'retire'] as const) {
+    app.post(`/api/lessons/:id/${action}`, async (c) => {
+      const id = parse(z.coerce.number().int().positive(), c.req.param('id'))
+      const lesson =
+        action === 'retire'
+          ? await retireLesson(
+              database,
+              id,
+              (
+                await body(
+                  c,
+                  z.strictObject({
+                    reason: z.string().trim().min(1).max(10000),
+                  }),
+                )
+              ).reason,
+            )
+          : await (action === 'accept' ? acceptLesson : rejectLesson)(
+              database,
+              id,
+            )
+      return c.json<LessonResponse>({ lesson })
+    })
+  }
 
   app.get('/api/health', async (c) => {
     await database.query('SELECT 1')

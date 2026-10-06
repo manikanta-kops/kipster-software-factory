@@ -1,3 +1,4 @@
+import { Lessons } from '../components/Lessons.tsx'
 import { useState, type CSSProperties } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import type {
@@ -194,6 +195,7 @@ export function Repositories() {
           </li>
         ))}
       </ul>
+      <Lessons status="accepted" />
       {query.data?.repositories.length === 0 && (
         <p className="quiet-card">No repositories yet. Add one above.</p>
       )}

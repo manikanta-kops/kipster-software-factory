@@ -679,3 +679,32 @@ fixes. Findings may include optional `file`, a repository-relative path. A new
 finding on a file unchanged since round one's commit becomes a note; earlier
 findings, changed files and missing-file findings remain serious. Notes do not
 route back to the lead.
+
+## Ticket summaries and lessons
+
+The factory records a fact-based summary when a ticket finishes, is cancelled,
+or needs the owner. This is lifecycle bookkeeping, not a workflow step.
+It does not need an action or extra step fields. The same transaction proposes
+one-line lessons from reviewer finding titles repeated across at least two
+`changes-needed` rounds, repeated recorded attempt errors (including children) and system-recorded task
+startup/integration errors,
+and human `changes-needed` or `rejected` comments. Agent summaries and task
+result prose are never lesson sources. CLI crashes and result.json validation
+failures belong to the engine; other lessons belong to the ticket repository.
+Review findings are aggregated within a ticket, not across tickets.
+
+Lessons never change ticket status, waiting state or routes. The owner accepts
+or rejects proposals in Today and retires accepted lessons in Repositories with
+a reason, such as "replaced by check X". Rejected and retired keys stay suppressed.
+A repository may accept at most 30 lessons; accepting another requires retirement
+first. Engine lessons have no cap. Lesson text is at most 200 characters on one
+line. Dedup keys use normalised source facts bounded to 240 characters.
+
+Before every agent invocation, including parallel reviewers, proof and PR
+writers, the factory writes `lessons.md` in that invocation's directory outside
+the repository. It lists accepted repository lessons first, then engine lessons.
+The prompt adds exactly `Past mistakes in this repository: <absolute path>. Read
+it when planning or when stuck.` Lesson text is not inserted into the prompt.
+With no accepted lessons there is no file or pointer. Owner decisions affect the
+next invocation; existing prompts keep their snapshot. Retire lessons once a
+check prevents the mistake.
