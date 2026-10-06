@@ -428,6 +428,7 @@ export function createApp({
         }
       : null
     return {
+      summary: detail.ticket.summary,
       dependencies: detail.dependencies,
       links: detail.links,
       tasks: detail.tasks,

@@ -164,3 +164,11 @@ unverified.
 Demo seeding includes synthetic lead and child decisions so the Decision log
 and child links, a parked question and a merged untested task can be inspected
 with the scheduler disabled.
+
+End-of-ticket summaries now persist on completion, cancellation and owner waits,
+with fact-based status, actions, activity, issues and unverified work. Ticket
+pages show the compact card; Today shows attention and completions from the last
+24 hours with links to details. Synthetic demo tickets cover Ready, Needs you
+and Blocked. Summary rewrites and legacy null reports have PostgreSQL coverage;
+phone/desktop reports have light/dark browser coverage. Real overnight use and
+owner morning checks remain unverified.

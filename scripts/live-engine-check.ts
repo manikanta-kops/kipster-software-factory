@@ -27,6 +27,8 @@ const detail: TicketDetail = {
   tasks: [],
   parentTask: null,
   ticket: {
+    summary: null,
+    summaryAt: null,
     lightsOut: false,
     id: 0,
     number: 0,

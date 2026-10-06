@@ -77,3 +77,13 @@ ticket. Enabled tickets show a Lights-out badge. Their Decision log shows
 typed choices, alternatives and reasons, with links to child decision logs.
 A child awaiting a decision stays unfinished as a parked task while siblings
 continue. Lights-out leaves the merge gate and untested warnings in effect.
+
+Ticket pages show a compact fact-based summary for parked and finished tickets:
+Ready, Needs you with an action count, or Blocked; linked actions, activity and
+only present issues/unverified facts. View details scrolls and moves keyboard
+focus to the rest of the ticket. Today shows one compact row per summarized
+ticket needing attention or finished within 24 hours, respecting filters and
+factory auto-merge. Older tickets with no stored summary retain their existing
+view. Resumed tickets hide their last parked report. Summary events refresh both
+views. The appearance suite covers these reports at 390px and 1280px in both
+themes, including the details control.

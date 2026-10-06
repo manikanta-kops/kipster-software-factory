@@ -1,3 +1,4 @@
+import { TicketSummaryCard } from '../components/TicketSummary.tsx'
 import { MergeGatePanel } from '../components/MergeGate.tsx'
 import { EvidenceIndex } from '../components/EvidenceIndex.tsx'
 import { DecisionReview, DecisionDetails } from '../components/Decision.tsx'
@@ -104,7 +105,11 @@ export function TicketPage({
           ))}
         </div>
       </header>
-      <div className="ticket-primary">
+      {ticket.summary &&
+        ['done', 'cancelled', 'needs-you'].includes(ticket.status) && (
+          <TicketSummaryCard summary={ticket.summary} />
+        )}
+      <div className="ticket-primary" id="ticket-details" tabIndex={-1}>
         {awaitingAction ? (
           <ActionPanel key={ticket.waiting!.attemptId} detail={query.data} />
         ) : (

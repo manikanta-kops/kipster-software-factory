@@ -117,6 +117,23 @@ it, with its artifacts and events, in one transaction.
 Every write appends events. `GET /api/events` streams them with Server-Sent
 Events, and a client that reconnects with Last-Event-ID misses nothing.
 
+### End-of-ticket summary
+
+Migration 015 stores the latest fact-based ticket summary and its timestamp.
+`store/tickets.ts` writes it inside the status transaction for `done`,
+`cancelled` and `needs-you`, including repeated parks and initial human waits.
+Merge gate changes refresh a parked report under the same ticket lock.
+`ticket.summary` events invalidate the live list and detail. Existing tickets
+keep a null summary until their next park or completion.
+
+The pure `domain/summary.ts` function uses status/ask reasons, attempt times,
+retry counts, task states, tester/reviewer outcomes, typed decision counts,
+skipped steps, scenario evidence and merge gate facts. Agent summaries,
+descriptions, findings and decision explanations never enter the report.
+The API adds the summary to listed tickets and ticket detail. Ticket pages
+show it above the details; Today shows compact rows for attention and tickets
+finished in the last 24 hours. Reports hide while a ticket resumes running.
+
 ## Repositories on disk
 
 A repository is cloned once into the factory home and kept: setup, caches and

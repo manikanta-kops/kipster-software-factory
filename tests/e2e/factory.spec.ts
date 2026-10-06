@@ -7,17 +7,29 @@ test('home separates attention, progress and finished tickets', async ({
 }) => {
   await page.goto(factory.url)
   await expect(
-    page.getByRole('heading', { name: 'Needs you', exact: true }),
+    page.getByRole('heading', { name: 'Ticket summaries', exact: true }),
   ).toBeVisible()
   await expect(page.locator('output.status')).toHaveText('Live')
-  await expect(page.getByText('A loop reached its limit.')).toBeVisible()
-  await expect(page.locator('a[href$="/pull/42"]')).toHaveAttribute(
-    'href',
-    /pull\/42$/,
-  )
-  await expect(page.getByText('Add a dark mode toggle')).toBeHidden()
+  await expect(
+    page
+      .locator('.today-summary')
+      .filter({ hasText: 'Validate email addresses on sign-up' }),
+  ).toContainText('Blocked')
+  await expect(
+    page
+      .locator('.today-summary')
+      .filter({ hasText: 'Show order totals in the header' })
+      .getByRole('link', { name: /View details/ }),
+  ).toBeVisible()
+  await expect(
+    page
+      .locator('.today-summary')
+      .filter({ hasText: 'Add a dark mode toggle' }),
+  ).toContainText('Ready')
   await page.getByText('Show finished (3)').click()
-  await expect(page.getByText('Add a dark mode toggle')).toBeVisible()
+  await expect(
+    page.locator('.finished-list').getByText('Add a dark mode toggle'),
+  ).toBeVisible()
 })
 
 test('home filters by repository and kind of work', async ({
@@ -34,12 +46,12 @@ test('home filters by repository and kind of work', async ({
     },
   })
   await page.reload()
-  const needs = page.getByRole('region', { name: 'Needs you' })
+  const needs = page.getByRole('region', { name: 'Ticket summaries' })
   await expect(
-    needs.getByRole('heading', { name: 'Validate email addresses on sign-up' }),
-  ).toBeVisible()
-  await expect(
-    needs.locator('.repo-tag', { hasText: 'demo-shop' }).first(),
+    needs.getByRole('link', {
+      name: 'Validate email addresses on sign-up',
+      exact: true,
+    }),
   ).toBeVisible()
   const pick = page.getByRole('button', { name: 'everything' })
   await pick.click()
@@ -49,21 +61,30 @@ test('home filters by repository and kind of work', async ({
   await expect(panel).toBeHidden()
   await expect(page.getByRole('button', { name: 'lead work' })).toBeFocused()
   await expect(
-    needs.getByRole('heading', { name: 'Validate email addresses on sign-up' }),
+    needs.getByRole('link', {
+      name: 'Validate email addresses on sign-up',
+      exact: true,
+    }),
   ).toBeVisible()
   await page.getByRole('button', { name: 'lead work' }).click()
   await panel.getByLabel('Lead').uncheck()
   await panel.getByLabel('Bug').check()
   await panel.getByRole('button', { name: 'Done' }).click()
   await expect(
-    needs.getByRole('heading', { name: 'Validate email addresses on sign-up' }),
+    needs.getByRole('link', {
+      name: 'Validate email addresses on sign-up',
+      exact: true,
+    }),
   ).toBeHidden()
   await page.getByRole('button', { name: 'bug work' }).click()
   await panel.getByLabel('Bug').uncheck()
   await panel.getByLabel('Lead').check()
   await panel.getByRole('button', { name: 'Done' }).click()
   await expect(
-    needs.getByRole('heading', { name: 'Cart quantity changes are proven' }),
+    needs.getByRole('link', {
+      name: 'Cart quantity changes are proven',
+      exact: true,
+    }),
   ).toBeVisible()
   await page.getByRole('button', { name: 'lead work' }).click()
   await panel.getByLabel('legacy-api').check()
@@ -75,7 +96,10 @@ test('home filters by repository and kind of work', async ({
   await page.getByRole('link', { name: 'Today', exact: true }).click()
   await page.getByRole('button', { name: 'Show everything' }).click()
   await expect(
-    needs.getByRole('heading', { name: 'Validate email addresses on sign-up' }),
+    needs.getByRole('link', {
+      name: 'Validate email addresses on sign-up',
+      exact: true,
+    }),
   ).toBeVisible()
 })
 
@@ -89,6 +113,9 @@ test('approve a plan', async ({ page, factory, request }) => {
   ).toBeVisible()
   await panel.getByRole('button', { name: 'Approve', exact: true }).click()
   await expect(page.locator('.ticket-meta .badge')).toHaveText('queued')
+  await expect(
+    page.getByRole('region', { name: 'Ticket summary', exact: true }),
+  ).toHaveCount(0)
   const detail = (await (
     await request.get(
       `${factory.url}/api/tickets/${factory.tickets.approvePlan}`,

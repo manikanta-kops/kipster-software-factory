@@ -1,3 +1,5 @@
+import { summarizeTicket, type TicketSummary } from '../domain/summary.ts'
+import { getMergeGate } from './gate-records.ts'
 import {
   withPreparedArtifacts,
   type PreparedArtifact,
@@ -350,6 +352,7 @@ export async function createTicketInTransaction(
     },
   ]
   await insertOpening(connection, ticketId, opening, events)
+  await refreshTicketSummary(connection, number, events)
   await recordEvents(connection, events)
   return (await getTicket(connection, number)) as Ticket
 }
@@ -1001,7 +1004,13 @@ export async function cancelTicket(
     }
     const moved = await apply(connection, locked, transition, {}, events)
     await cancelTasks(connection, locked)
-    return moved
+    const summaryEvents: NewEvent[] = []
+    await refreshTicketSummary(connection, locked.number, summaryEvents)
+    await recordEvents(connection, summaryEvents)
+    return {
+      ...moved,
+      ticket: (await getTicket(connection, locked.number)) as Ticket,
+    }
   })
 }
 
@@ -1396,6 +1405,44 @@ export async function setTicketStatus(
       data: { from: locked.status, to: status },
     })
   }
+  await refreshTicketSummary(connection, locked.number, events)
+}
+
+/** Called only inside the lifecycle/gate transaction while holding the ticket lock. */
+export async function refreshTicketSummary(
+  connection: Connection,
+  number: number,
+  events: NewEvent[],
+): Promise<void> {
+  const ticket = await getTicket(connection, number)
+  if (!ticket || !['done', 'cancelled', 'needs-you'].includes(ticket.status))
+    return
+  const workflow = await loadWorkflow(
+    connection,
+    ticket.workflow.name,
+    ticket.workflow.version,
+  )
+  const attempts = await listAttempts(connection, ticket.id)
+  const artifacts = await listArtifacts(connection, ticket.id)
+  const tasks = await listTasks(connection, ticket.id)
+  const gate = await getMergeGate(connection, ticket.id)
+  const summary = summarizeTicket({
+    ticket,
+    workflow,
+    attempts,
+    artifacts,
+    tasks,
+    mergeGate: gate?.latest ?? null,
+  })
+  await connection.query(
+    'UPDATE tickets SET summary = $2, summary_at = now() WHERE id = $1',
+    [ticket.id, JSON.stringify(summary)],
+  )
+  events.push({
+    ticketId: ticket.id,
+    kind: 'ticket.summary',
+    data: { status: summary.status },
+  })
 }
 
 export async function insertArtifacts(
@@ -1506,6 +1553,8 @@ const TICKET_SELECT = `
   LEFT JOIN attempts w ON w.ticket_id = t.id AND w.status = 'waiting'`
 
 interface TicketRow {
+  summary: TicketSummary | null
+  summary_at: Date | null
   skipped_steps: SkippedStep[]
   lights_out: boolean
   id: number
@@ -1532,6 +1581,8 @@ interface TicketRow {
 
 function toTicket(row: TicketRow): Ticket {
   return {
+    summary: row.summary,
+    summaryAt: iso(row.summary_at),
     skippedSteps: row.skipped_steps,
     lightsOut: row.lights_out,
     id: row.id,

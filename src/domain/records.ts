@@ -1,5 +1,6 @@
 // The factory's records as the store returns them and the API sends them.
 // Timestamps are ISO 8601 strings so the same shapes work on both sides of the wire.
+import type { TicketSummary } from './summary.ts'
 import type { AgentChoice } from './catalog.ts'
 import type { Next } from './routing.ts'
 import type { SkippedStep } from './task-testing.ts'
@@ -82,6 +83,7 @@ export const EVENT_KINDS = [
   'ticket.linked',
   'task.updated',
   'ticket.status',
+  'ticket.summary',
   'ticket.pull-request',
   'attempt.queued',
   'attempt.claimed',
@@ -138,6 +140,8 @@ export function defaultLightsOut(workflow: string): boolean {
 }
 
 export interface Ticket {
+  readonly summary: TicketSummary | null
+  readonly summaryAt: string | null
   readonly skippedSteps?: readonly SkippedStep[]
   readonly lightsOut: boolean
   readonly id: number

@@ -365,6 +365,12 @@ router.post('/__test/fixtures', async (c) => {
     )
     taskTickets = { lead: lead.number, child: child!.number }
   }
+  // Upgraded tickets without a stored report still render the full ticket page.
+  if (legacyTicket !== null)
+    await fixture.database.query(
+      'UPDATE tickets SET summary = NULL, summary_at = NULL WHERE number = $1',
+      [legacyTicket],
+    )
   const fixtureEvents = listenForEvents(fixture.database)
   await fixtureEvents.ready
   const fixtureApp = createApp({

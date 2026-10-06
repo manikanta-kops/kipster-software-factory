@@ -1,3 +1,5 @@
+import type { TicketSummary } from '../domain/summary.ts'
+export type { TicketSummary } from '../domain/summary.ts'
 import type { GateSnapshot } from '../domain/merge-gate.ts'
 import type { ScenarioEvidence } from '../domain/evidence.ts'
 import type { DecisionRecord, DecisionStepCounts } from '../domain/decisions.ts'
@@ -158,6 +160,7 @@ export interface TicketWorkflowSummary {
 
 // GET /api/tickets/:number, and the answer to every ticket action
 export interface TicketResponse {
+  readonly summary: TicketSummary | null
   readonly dependencies?: readonly Repository[]
   readonly links?: readonly TicketLink[]
   /** A lead ticket's tasks, oldest first. */

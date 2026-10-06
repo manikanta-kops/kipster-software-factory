@@ -1,3 +1,4 @@
+import { SummaryStatus } from '../components/TicketSummary.tsx'
 import {
   useEffect,
   useId,
@@ -107,6 +108,14 @@ export function NeedsYou({
   const finished = visible.filter((ticket) =>
     ['done', 'cancelled'].includes(ticket.status),
   )
+  const summarized = visible.filter(
+    (ticket) =>
+      ticket.summary &&
+      (needsYou.some((item) => item.id === ticket.id) ||
+        (['done', 'cancelled'].includes(ticket.status) &&
+          now - Date.parse(ticket.updatedAt) < 24 * 60 * 60 * 1000)),
+  )
+  const summaryIds = new Set(summarized.map((ticket) => ticket.id))
   const scope = isFiltered(filter) ? ` in ${describeFilter(filter)}` : ''
   const repositoryRefs = [
     ...new Map(
@@ -138,6 +147,31 @@ export function NeedsYou({
           onChange={onFilter}
         />
       </header>
+      {summarized.length > 0 && (
+        <section className="today-summaries" aria-label="Ticket summaries">
+          <h2 className="section-title">Ticket summaries</h2>
+          <ul>
+            {summarized.map((ticket) => (
+              <li className="today-summary" key={ticket.id}>
+                <SummaryStatus summary={ticket.summary!} />
+                <a
+                  className="summary-title"
+                  href={`#/tickets/${ticket.number}`}
+                >
+                  {ticket.title}
+                </a>
+                <span className="summary-happened">
+                  {ticket.summary!.happened}
+                </span>
+                <a className="text-link" href={`#/tickets/${ticket.number}`}>
+                  View details
+                  <span className="sr-only"> for {ticket.title}</span>
+                </a>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
       {needsYou.length === 0 && moving.length === 0 && !scope ? (
         <EmptyFactory
           hasRepositories={repositories.data?.repositories.length !== 0}
@@ -145,30 +179,32 @@ export function NeedsYou({
       ) : (
         <>
           <section className="needs" aria-label="Needs you">
-            {needsYou.length ? (
+            {needsYou.filter((ticket) => !summaryIds.has(ticket.id)).length ? (
               <>
                 <h2 className="section-title attention">
                   <i aria-hidden="true" />
                   Needs you
                 </h2>
-                {needsYou.map((ticket, index) => (
-                  <DecisionCard
-                    key={ticket.id}
-                    ticket={ticket}
-                    detail={detailByNumber.get(ticket.number)}
-                    now={now}
-                    index={index}
-                  />
-                ))}
+                {needsYou
+                  .filter((ticket) => !summaryIds.has(ticket.id))
+                  .map((ticket, index) => (
+                    <DecisionCard
+                      key={ticket.id}
+                      ticket={ticket}
+                      detail={detailByNumber.get(ticket.number)}
+                      now={now}
+                      index={index}
+                    />
+                  ))}
               </>
-            ) : (
+            ) : needsYou.length === 0 ? (
               <h2 className="all-clear">
                 <span className="all-clear-mark" aria-hidden="true">
                   <Icon name="check" size={11} stroke={2.6} />
                 </span>
                 Nothing{scope} needs you.
               </h2>
-            )}
+            ) : null}
           </section>
           {moving.length > 0 && (
             <section className="moving" aria-labelledby="moving-heading">
