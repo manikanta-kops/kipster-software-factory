@@ -114,6 +114,10 @@ Role notes:
   publishes.
 - Use `onboarder` only in a workflow that writes the kit, followed by
   `verify-kit`.
+- Kit setup and check run in disposable exact-commit checkouts with fetched
+  remote-tracking base refs (for example `origin/next`) and no configured remote.
+  Repository gates can compare changesets, migrations and protocol shapes with
+  these base snapshots without fetching or using shared development state.
 - `needs-other-repo` is handled by the factory: it opens a linked ticket in
   the other repository and resumes the builder after that pull request merges.
   Do not route it.

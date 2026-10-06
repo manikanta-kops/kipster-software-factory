@@ -4,6 +4,7 @@ import { getTicketDetail } from '../src/store/tickets.ts'
 import { setArtifactHome } from '../src/store/database.ts'
 import { defaultHome } from '../src/config.ts'
 import { writeDemoEvidence } from './demo-evidence.ts'
+import { resolve } from 'node:path'
 // Fills a database with repositories and quick-change tickets in every state, using the
 // same store functions the engine and API use. The web app can be built against it
 // before the engine exists.
@@ -49,11 +50,12 @@ export async function seedDemo(
   library: Library,
   home: string = defaultHome(),
 ): Promise<DemoTickets> {
-  setArtifactHome(database, home)
+  const directory = resolve(home)
+  setArtifactHome(database, directory)
   await migrate(database)
   const lock = await acquireSchedulerLock(database, () => {}, 'demo')
   try {
-    return await seedLocked(database, library, home)
+    return await seedLocked(database, library, directory)
   } finally {
     await lock.close()
   }
