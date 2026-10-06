@@ -25,6 +25,7 @@ import {
   createRepository,
   getRepository,
   markRepositoryReady,
+  retryRepository,
 } from '../src/store/repositories.ts'
 import {
   cancelTicket,
@@ -689,7 +690,7 @@ test('workspace ownership and dirty files survive terminal cleanup', async (t) =
   assert.equal(await exists(cwd), true)
 })
 
-test('clone failure marks a registered repository failed', async (t) => {
+test('clone failure marks a registered repository failed, and a retry after the fix makes it ready', async (t) => {
   const f = await setup(t)
   const failed = await createRepository(f.store.database, {
     slug: 'fixture/missing',
@@ -701,6 +702,17 @@ test('clone failure marks a registered repository failed', async (t) => {
     (r) => r?.status === 'failed',
   )
   assert.match(repo!.lastError!, /git exited/)
+  // After the owner fixes the cause, a retry clones again and the repository becomes ready.
+  await run('git', ['clone', '--bare', f.bare, join(f.root, 'does-not-exist')])
+  await retryRepository(f.store.database, failed.id)
+  await until(
+    () => getRepository(f.store.database, failed.slug),
+    (r) => r?.status === 'ready' && r.lastError === null,
+  )
+  await assert.rejects(
+    retryRepository(f.store.database, failed.id),
+    /Only a failed repository can be retried/,
+  )
 })
 
 test('cleanup removes ignored dependencies and build output, preserves unknown state and skips cleaned tickets', async (t) => {

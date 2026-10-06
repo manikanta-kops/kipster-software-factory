@@ -150,7 +150,11 @@ command has its own POSIX process group. A timeout, cancellation or shutdown
 kills the entire group. IPC disconnect also kills it if the factory crashes
 (including SIGKILL); descendants are terminated when the leader exits. If a group kill reports `EPERM`, the supervisor checks the OS process table:
 only a group with no live members counts as already stopped. A permission
-failure with live members still fails the attempt. The supervisor is not a sandbox. Agents use the owner's CLI logins, environment,
+failure with live members still fails the attempt. Git commands skip the
+supervisor because they are short and frequent, and a Node start per call
+dominated run time. They still get their own group, killed on timeout,
+cancellation or shutdown, but a git command in flight when the factory crashes
+runs to completion. The supervisor is not a sandbox. Agents use the owner's CLI logins, environment,
 configuration and unrestricted tools on the Mac. Role instructions reserve
 pushes and GitHub mutations for system steps.
 
@@ -227,7 +231,10 @@ by default so its database and workspace IDs stay together across checkouts.
 ### Workspaces and evidence
 
 `workspace/` serializes Git operations per repository. Registered pending
-repositories are cloned and marked ready or failed through the store. The cache's
+repositories are cloned and marked ready or failed through the store. A failed
+repository keeps its error until the owner retries it (`POST
+/api/repositories/:id/retry`, Retry on the Repositories page), which returns it
+to pending. The cache's
 `origin/HEAD` supplies the default branch; attempts also repair old registrations
 that assumed `main`. The cache
 is kept at `repositories/<repository-id>/repo`; ticket worktrees live at

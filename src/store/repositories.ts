@@ -212,3 +212,37 @@ export async function setAutoMerge(
     return toRepository(row)
   })
 }
+
+/** Sends a failed repository back to the scheduler, for example after the owner fixes access. */
+export async function retryRepository(
+  database: Database,
+  id: number,
+): Promise<Repository> {
+  return transaction(database, async (connection) => {
+    const { rows } = await connection.query<RepositoryRow>(
+      `UPDATE repositories SET status = 'pending', last_error = NULL, updated_at = now()
+       WHERE id = $1 AND status = 'failed'
+       RETURNING *`,
+      [id],
+    )
+    if (!rows[0]) {
+      const existing = await connection.query<RepositoryRow>(
+        'SELECT * FROM repositories WHERE id = $1',
+        [id],
+      )
+      found(existing.rows[0], id)
+      throw new FactoryError(
+        'conflict',
+        'Only a failed repository can be retried',
+      )
+    }
+    await recordEvents(connection, [
+      {
+        ticketId: null,
+        kind: 'repository.retried',
+        data: { repositoryId: id, slug: rows[0].slug },
+      },
+    ])
+    return toRepository(rows[0])
+  })
+}

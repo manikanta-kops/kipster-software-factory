@@ -69,6 +69,8 @@ async function post<T>(path: string, body: unknown): Promise<T> {
 }
 
 export const api = {
+  retryRepository: (id: number) =>
+    post<RepositoryResponse>(`/repositories/${id}/retry`, {}),
   setAutoMerge: (id: number, body: AutoMergeRequest) =>
     post<RepositoryResponse>(`/repositories/${id}/auto-merge`, body),
   decisions: (signal: AbortSignal) =>
