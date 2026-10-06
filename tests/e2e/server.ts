@@ -249,6 +249,16 @@ router.post('/__test/fixtures', async (c) => {
           instructions: 'Describe the export in the README.',
           land: 'pr',
         },
+        {
+          key: 'schema',
+          title: 'Add the export schema',
+          instructions: 'Describe the CSV columns.',
+        },
+        {
+          key: 'fixtures',
+          title: 'Seed export fixtures',
+          instructions: 'Add sample rows for the export.',
+        },
       ],
     })
     const run = (await claimAttempts(fixture.database, 100)).find(
@@ -256,7 +266,19 @@ router.post('/__test/fixtures', async (c) => {
     )!
     await markRunning(fixture.database, run.attempt.id, 'system')
     await parkForTasks(fixture.database, run.attempt.id)
-    const [api, docs] = await listTasks(fixture.database, lead.id)
+    const [api, docs, schema, seed] = await listTasks(fixture.database, lead.id)
+    await updateTask(
+      fixture.database,
+      schema!.id,
+      'merged',
+      'Merged into the lead branch at 61ccc186062039d6c465d4e2f965cc5cf61d6814.',
+    )
+    await updateTask(
+      fixture.database,
+      seed!.id,
+      'failed',
+      'Build failed: invalid or missing result.json after two runs. No work was produced.',
+    )
     const child = await startTask(
       fixture.database,
       api!.id,
