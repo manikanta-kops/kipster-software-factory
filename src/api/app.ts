@@ -369,6 +369,8 @@ export function createApp({
     return {
       dependencies: detail.dependencies,
       links: detail.links,
+      tasks: detail.tasks,
+      parentTask: detail.parentTask,
       mergeGate,
       evidenceIndex: scenarioIndex(
         detail.artifacts,

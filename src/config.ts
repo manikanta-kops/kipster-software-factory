@@ -3,6 +3,7 @@ import { readFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { z } from 'zod'
+import { agentChoiceSchema } from './domain/catalog.ts'
 
 export const DEFAULT_PORT = 4600
 
@@ -26,10 +27,7 @@ export function defaultHome(): string {
   return join(homedir(), '.kipster-factory')
 }
 
-export const agentConfig = z.strictObject({
-  cli: z.enum(['codex', 'claude']),
-  model: z.string().min(1).optional(),
-})
+export const agentConfig = agentChoiceSchema
 export const engineConfig = z.object({
   evidenceRetentionDays: z.int().positive().default(30),
   concurrency: z.int().positive().default(2),
@@ -47,12 +45,15 @@ export const engineConfig = z.object({
             'tester',
             'reproducer',
             'onboarder',
+            'lead',
           ]),
           agentConfig,
         )
         .default({}),
+      /** The agents a lead may choose for a task. Empty: tasks use the role settings. */
+      allowed: z.array(agentConfig).default([]),
     })
-    .default({ default: { cli: 'codex' }, roles: {} }),
+    .default({ default: { cli: 'codex' }, roles: {}, allowed: [] }),
 })
 export type EngineConfig = z.infer<typeof engineConfig>
 export type AgentConfig = z.infer<typeof agentConfig>

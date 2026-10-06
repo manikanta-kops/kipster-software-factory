@@ -12,9 +12,10 @@
 | **Capability** | Something a repository's kit provides, such as `setup` or `verify`. Steps declare what they need.                                             |
 | **Kit**        | The `.kipster/` folder in a repository: how to set up, run, verify and merge it.                                                              |
 | **Decision**   | A fast typed judgement (a choice with probabilities and a confidence) used where input is unstructured.                                       |
+| **Task**       | Work a lead hands out. It runs as a child ticket and lands on the lead's branch or as its own pull request.                                   |
 
-Roles: planner, builder, tester, reproducer, reviewer, writer, onboarder.
-Actions: decide, verify-kit, maintain-pr, merge.
+Roles: planner, builder, tester, reproducer, reviewer, writer, onboarder, lead.
+Actions: decide, verify-kit, maintain-pr, merge, run-tasks.
 The catalog in `src/domain/catalog.ts` is the single list of each.
 
 ## Principles the design enforces
@@ -102,6 +103,8 @@ it, with its artifacts and events, in one transaction.
 - An outcome routed to `ask`, a failed attempt, or a second interruption in a
   row opens a `waiting` ask at that step. You retry it, move to any step, or
   cancel, optionally with a note.
+- `run-tasks` parks as `tasks` while a lead's tasks run, without an executor
+  slot. A task change finishes it with `reported`.
 - Builders park as `other-repo` while their linked ticket runs. A confirmed
   merged PR queues a fresh attempt of the same builder; cancellation asks the owner.
 - CI and merge steps park while waiting for GitHub; neither holds an executor
@@ -174,7 +177,11 @@ pushes and GitHub mutations for system steps.
 `concurrency` is a positive integer; `stepTimeoutMinutes` is positive and covers
 workspace preparation and both result-file tries within the same attempt.
 Omitted agent settings use Codex. A role entry replaces the default selection;
-its optional `model` is passed to that CLI. Accepted CLI names are `codex` and
+its optional `model` is passed to that CLI, and its optional `effort`
+(`minimal`, `low`, `medium`, `high`, `xhigh` or `max`) becomes Claude's
+`--effort` or Codex's `-c model_reasoning_effort`. `agents.allowed` lists the
+exact `{ cli, model, effort }` choices a lead may give a task; it is empty by
+default, so tasks use the role settings. Accepted CLI names are `codex` and
 `claude`; accepted role keys come from the catalog. `allowedOrigins` retains its
 existing meaning. The existing `--database-url` shortcut runs with defaults
 instead of reading `config.json`.
@@ -757,5 +764,46 @@ There is no removal or rename yet, and the API has no authentication beyond
 binding to localhost and the CORS allow-list.
 `skills/kipster-workflows/SKILL.md` teaches a model to write a valid file.
 
-Child tickets are deferred until a real ticket needs them; the unused child
-workflows and actions are absent from the catalog and library.
+## Lead tickets and tasks
+
+A `lead` agent owns a ticket without writing code. It reports `delegate` with
+typed `tasks` (key, title, instructions, `land: branch | pr`, optional
+workflow and agent) and `pullRequests` decisions (`merge` or `leave-open`),
+`plan-ready` with a plan for owner approval, or `done`. `domain/tasks.ts`
+checks a result against the ticket's tasks: unique keys, the `maxTasks` cap,
+an existing workflow of the right shape for its land, an agent from
+`agents.allowed`, decisions only on undecided ready pull requests, something
+left to wait for on `delegate`, and no unfinished task on `done`. A failed
+check is a result validation error and gets the usual one fresh retry. The
+workflow validator requires every lead's `delegate` to reach a `run-tasks`
+step and every `run-tasks` step to be such a target.
+
+Migration 011 adds `tasks`, one row per task, unique by ticket and key. The
+lead's tasks and decisions are written in the transaction that completes its
+attempt. `run-tasks` parks as `tasks` with no executor slot. On every
+scheduler tick, `engine/tasks.ts` advances each parked lead:
+
+- A finished branch task's child branch is merged into the lead's worktree
+  (`git merge --no-ff`, serialized per repository). A conflict is aborted and
+  recorded as `conflict` with the files; the child branch keeps the work.
+- A pull request task becomes `pr-ready` when its child parks at `merge`.
+  The child's merge poll merges only after the lead chose `merge`, and then
+  only under the usual auto-merge policy; `leave-open` leaves it for the
+  owner. A merged child makes the task `merged`.
+- A cancelled child makes the task `failed`, with its last summary.
+- Pending tasks start in order while fewer than `maxParallel` run. A branch
+  task's child branch starts from the lead's current head, recorded as
+  `baseCommit`, and its prompts compare against it. A pull request task starts
+  from the default branch. Children inherit the lead's dependencies and run
+  every agent with the task's agent choice when given.
+- When any task reaches `pr-ready`, `merged`, `conflict` or `failed` since the
+  lead last heard, or nothing is left to wait for, the step finishes with
+  `reported`, a "Task report" note, and routes back to the lead.
+
+Each lead run is a fresh session. Its prompt adds the current task table,
+limits, workflows, allowed agents and the repository's auto-merge setting;
+the ticket's notes, comments and step summaries carry the history.
+Cancelling a lead cancels its unfinished tasks and their child tickets in the
+same transaction. A child ticket shows its lead and task; a lead ticket shows
+each task with its child, status, result and pull request. The API adds
+`tasks` and `parentTask` to ticket responses.

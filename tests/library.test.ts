@@ -34,8 +34,11 @@ describe('loadLibrary', () => {
     assert.deepEqual([...result.library.keys()].sort(), [
       'bug',
       'feature',
+      'lead',
       'onboard-repo',
       'quick-change',
+      'task',
+      'task-pr',
     ])
   })
 

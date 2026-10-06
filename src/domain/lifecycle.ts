@@ -6,6 +6,10 @@ import {
   LIMIT,
   otherRepositoryRequestSchema,
   type OtherRepositoryRequest,
+  pullRequestDecisionSchema,
+  type PullRequestDecision,
+  taskRequestSchema,
+  type TaskRequest,
 } from './catalog.ts'
 import { FactoryError } from './errors.ts'
 import {
@@ -44,6 +48,10 @@ export interface ArtifactInput {
 /** What an agent or system step reports when it finishes (an agent's result.json). */
 export interface StepResult {
   readonly otherRepository?: OtherRepositoryRequest | undefined
+  /** A lead's new tasks; only with `delegate`. */
+  readonly tasks?: readonly TaskRequest[] | undefined
+  /** A lead's calls on ready task pull requests; with `delegate`, or `leave-open` with `done`. */
+  readonly pullRequests?: readonly PullRequestDecision[] | undefined
   readonly outcome: string
   readonly summary: string
   readonly artifacts: readonly ArtifactInput[]
@@ -76,6 +84,8 @@ export const stepResultSchema = z
       .strictObject({ reason: z.string().trim().min(1).max(1000) })
       .optional(),
     otherRepository: otherRepositoryRequestSchema.optional(),
+    tasks: z.array(taskRequestSchema).max(50).optional(),
+    pullRequests: z.array(pullRequestDecisionSchema).max(50).optional(),
   })
   .refine((result) => !result.ownerReview || result.outcome === 'passed', {
     message: 'ownerReview requires a passing reviewer verdict',
@@ -89,6 +99,18 @@ export const stepResultSchema = z
       path: ['otherRepository'],
       message:
         'needs-other-repo requires otherRepository; other outcomes must omit it',
+    },
+  )
+  .refine((result) => !result.tasks || result.outcome === 'delegate', {
+    path: ['tasks'],
+    message: 'only delegate can ask for tasks',
+  })
+  .refine(
+    (result) =>
+      !result.pullRequests || ['delegate', 'done'].includes(result.outcome),
+    {
+      path: ['pullRequests'],
+      message: 'only delegate or done can decide pull requests',
     },
   )
 
@@ -141,7 +163,8 @@ export function ticketStatus(
   // Waiting for CI is the factory's job, not the owner's.
   if (
     latest.waitingFor === 'pull-request-checks' ||
-    latest.waitingFor === 'other-repo'
+    latest.waitingFor === 'other-repo' ||
+    latest.waitingFor === 'tasks'
   )
     return 'running'
   return 'needs-you'
@@ -462,6 +485,25 @@ export function waitForOtherRepository(
   return 'running'
 }
 
+/** A run-tasks step parks while its tasks run, holding no executor slot. */
+export function waitForTasks(
+  workflow: Workflow,
+  history: readonly AttemptState[],
+): TicketStatus {
+  const attempt = openAttempt(history)
+  const step = stepOf(workflow, attempt.stepId)
+  if (
+    attempt.status !== 'running' ||
+    step.kind !== 'system' ||
+    step.action !== 'run-tasks'
+  )
+    throw new FactoryError(
+      'conflict',
+      'Only a running run-tasks step can wait for tasks',
+    )
+  return 'running'
+}
+
 export function afterLinkedTicket(
   history: readonly AttemptState[],
   merged: boolean,
@@ -637,6 +679,7 @@ function isRunning(attempt: AttemptState): boolean {
     attempt.status === 'running' ||
     (attempt.status === 'waiting' &&
       (attempt.waitingFor === 'pull-request-merge' ||
-        attempt.waitingFor === 'pull-request-checks'))
+        attempt.waitingFor === 'pull-request-checks' ||
+        attempt.waitingFor === 'tasks'))
   )
 }

@@ -79,6 +79,13 @@ export const roles = {
     success: 'done',
     outcomes: ['done'],
   },
+  lead: {
+    summary:
+      'Splits the ticket into tasks for other agents, reads their reports and decides what happens next.',
+    changes: 'nothing',
+    success: 'done',
+    outcomes: ['done', 'delegate', 'plan-ready'],
+  },
 } as const satisfies Record<string, Role>
 
 export type RoleName = keyof typeof roles
@@ -109,6 +116,49 @@ export const otherRepositoryRequestSchema = z.strictObject({
 export type OtherRepositoryRequest = z.infer<
   typeof otherRepositoryRequestSchema
 >
+
+export const AGENT_CLIS = ['codex', 'claude'] as const
+export const EFFORTS = [
+  'minimal',
+  'low',
+  'medium',
+  'high',
+  'xhigh',
+  'max',
+] as const
+
+/** Which CLI, model and effort run an agent session. */
+export const agentChoiceSchema = z.strictObject({
+  cli: z.enum(AGENT_CLIS),
+  model: z.string().min(1).optional(),
+  effort: z.enum(EFFORTS).optional(),
+})
+export type AgentChoice = z.infer<typeof agentChoiceSchema>
+
+/** A lead's request for one task: a child ticket that lands on the lead's branch or as its own pull request. */
+export const taskRequestSchema = z.strictObject({
+  key: slug,
+  title: z.string().trim().min(1).max(200),
+  instructions: z.string().trim().min(1).max(100_000),
+  land: z.enum(['branch', 'pr']).default('branch'),
+  workflow: slug.optional(),
+  agent: agentChoiceSchema.optional(),
+})
+export type TaskRequest = z.infer<typeof taskRequestSchema>
+
+export const pullRequestDecisionSchema = z.strictObject({
+  task: slug,
+  decision: z.enum(['merge', 'leave-open']),
+})
+export type PullRequestDecision = z.infer<typeof pullRequestDecisionSchema>
+
+export const runTasksParams = z.strictObject({
+  workflow: slug.default('task'),
+  prWorkflow: slug.default('task-pr'),
+  maxParallel: z.int().positive().default(3),
+  maxTasks: z.int().positive().default(12),
+})
+export type RunTasksParams = z.infer<typeof runTasksParams>
 
 const confidence = z.number().min(0).max(1)
 
@@ -165,6 +215,12 @@ export const actions = {
       'Merges when the repository policy allows it, otherwise waits for a human.',
     params: noParams,
     contract: fixed('merged', ['merged', 'changes-needed', 'rejected']),
+  },
+  'run-tasks': {
+    summary:
+      "Runs a lead's tasks as child tickets and reports back each time one finishes.",
+    params: runTasksParams,
+    contract: fixed('reported', ['reported']),
   },
 } as const satisfies Record<string, Action>
 

@@ -8,6 +8,8 @@ import type {
   Attempt,
   FactoryEvent,
   HumanChoice,
+  LeadTask,
+  ParentTask,
   Repository,
   Ticket,
   TicketLink,
@@ -22,6 +24,8 @@ export type {
   EventKind,
   FactoryEvent,
   HumanChoice,
+  LeadTask,
+  ParentTask,
   Repository,
   RepositoryStatus,
   RepositoryKit,
@@ -29,6 +33,7 @@ export type {
   TicketAskReason,
   TicketStatus,
   TicketLink,
+  TaskStatus,
   Waiting,
   WaitingFor,
 } from '../domain/records.ts'
@@ -142,6 +147,10 @@ export interface TicketWorkflowSummary {
 export interface TicketResponse {
   readonly dependencies?: readonly Repository[]
   readonly links?: readonly TicketLink[]
+  /** A lead ticket's tasks, oldest first. */
+  readonly tasks?: readonly LeadTask[]
+  /** On a child ticket, the lead ticket and task it runs. */
+  readonly parentTask?: ParentTask | null
   readonly mergeGate?: GateSnapshot | null
   readonly evidenceIndex?: readonly ScenarioEvidence[]
   readonly decisions?: readonly DecisionRecord[]

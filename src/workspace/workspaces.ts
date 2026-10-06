@@ -85,10 +85,12 @@ export class Workspaces {
       return branch
     })
   }
+  /** `startPoint` is where a new ticket branch begins; the default branch when absent. */
   async prepare(
     ticket: Ticket,
     repository: Repository,
     signal: AbortSignal,
+    startPoint?: string,
   ): Promise<string> {
     await this.prepareRepository(repository, signal)
     return this.serial(repository.id, async () => {
@@ -117,7 +119,9 @@ export class Workspaces {
             'add',
             ...(branches ? [] : ['-b', ticket.branch]),
             path,
-            branches ? ticket.branch : `origin/${repository.defaultBranch}`,
+            branches
+              ? ticket.branch
+              : (startPoint ?? `origin/${repository.defaultBranch}`),
           ],
           { cwd: this.cache(repository), signal },
         )
@@ -129,6 +133,59 @@ export class Workspaces {
       if (branch !== ticket.branch)
         throw new Error(`Ticket worktree branch changed: ${path}`)
       return path
+    })
+  }
+  async head(ticket: Ticket, signal: AbortSignal): Promise<string> {
+    return run('git', ['rev-parse', 'HEAD'], { cwd: this.path(ticket), signal })
+  }
+  /** Merges a branch into a clean ticket worktree; a conflicted merge is aborted. */
+  async mergeInto(
+    ticket: Ticket,
+    repository: Repository,
+    branch: string,
+    message: string,
+    signal: AbortSignal,
+  ): Promise<{ head: string; conflicts?: never } | { conflicts: string[] }> {
+    return this.serial(repository.id, async () => {
+      const cwd = this.path(ticket)
+      const git = (args: string[]) => run('git', args, { cwd, signal })
+      if ((await git(['branch', '--show-current'])) !== ticket.branch)
+        throw new Error(`Ticket worktree branch changed: ${cwd}`)
+      if (await git(['status', '--porcelain']))
+        throw new Error(`Cannot merge into a dirty ticket worktree: ${cwd}`)
+      try {
+        await git([
+          '-c',
+          'user.name=Kipster Factory',
+          '-c',
+          'user.email=kipster@localhost',
+          'merge',
+          '--no-ff',
+          '-m',
+          message,
+          branch,
+        ])
+      } catch (error) {
+        // Abort even after cancellation; a conflicted index must never survive.
+        const settle = { cwd, signal: AbortSignal.timeout(5000) }
+        const files = await run(
+          'git',
+          ['diff', '--name-only', '--diff-filter=U'],
+          settle,
+        )
+        if (
+          await run(
+            'git',
+            ['rev-parse', '--verify', 'MERGE_HEAD'],
+            settle,
+          ).catch(() => null)
+        )
+          await run('git', ['merge', '--abort'], settle)
+        signal.throwIfAborted()
+        if (!files) throw error
+        return { conflicts: files.split('\n') }
+      }
+      return { head: await git(['rev-parse', 'HEAD']) }
     })
   }
   async pinDependency(

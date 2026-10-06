@@ -78,6 +78,19 @@ Failures create one bug ticket per merge commit and link it from the original
 timeline; other tickets continue running. Kit infrastructure failures retry
 three times, then report an unavailable check with the reason.
 
+## Work through a lead
+
+- **The lead decides, tasks do.** A lead never writes code. Each task is a
+  child ticket with its own build and check loop, so one failure does not
+  stop the rest.
+- **Hear every finish.** The lead wakes on each finished, failed or
+  conflicting task and on each ready pull request, not only when all are done.
+- **Write tasks for a stranger.** Task agents see only the task's title and
+  instructions. Name the goal, the files, the checks and what is out of scope.
+- **Parallel only when separate.** Tasks given out together should touch
+  different files. Delegate dependent work after its prerequisite merges.
+- **Bound the loop.** Give `run-tasks` a limit: each report is a lead session.
+
 ## Learning
 
 - **Lessons become checks.** A repeated mistake becomes a test, lint or script,

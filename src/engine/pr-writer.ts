@@ -4,6 +4,7 @@ import { scenarioIndex } from '../domain/evidence.ts'
 import { mkdir, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { RunnerOptions } from './runner.ts'
+import { agentFor } from './tasks.ts'
 import { buildPrompt, readResult } from './prompt.ts'
 import { run } from '../executors/process.ts'
 import { loadTrustedInstructions } from '../kit/kit.ts'
@@ -24,7 +25,7 @@ export async function writePullRequest(
   head: string,
   signal: AbortSignal,
 ): Promise<string> {
-  const { database, home, config } = options
+  const { database, home } = options
   const { ticket, attempt, repository, step } = context
   const detail = (await getTicketDetail(database, ticket.number))!
   const evidence = detail.artifacts.filter(
@@ -100,7 +101,7 @@ Only evidence at this exact commit counts. If the workflow has no tester, state 
       { kind: 'log', title: `writer run ${retry}`, path: log },
     ])
     await session.execute({
-      config: config.agents.roles.writer ?? config.agents.default,
+      config: await agentFor(options, ticket, 'writer'),
       cwd,
       directory,
       prompt,

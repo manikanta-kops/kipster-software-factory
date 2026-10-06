@@ -2,6 +2,7 @@ import { mergePolicy } from '../domain/auto-merge.ts'
 import { refreshMergeGate } from './merge-gate.ts'
 import { markMergeRequested, markMergeResult } from '../store/auto-merge.ts'
 import { getRepositoryById } from '../store/repositories.ts'
+import { getTaskOfChild } from '../store/tasks.ts'
 import type { AttemptContext } from '../store/tickets.ts'
 import type { RunnerOptions } from './runner.ts'
 
@@ -10,6 +11,9 @@ export async function pollAutoMerge(
   context: AttemptContext,
   signal: AbortSignal,
 ) {
+  // A lead's pull request task merges only after the lead says so.
+  const owned = await getTaskOfChild(options.database, context.ticket.id)
+  if (owned?.task.land === 'pr' && owned.task.decision !== 'merge') return
   const { gate } = await refreshMergeGate(options, context, signal)
   const repository = await getRepositoryById(
     options.database,

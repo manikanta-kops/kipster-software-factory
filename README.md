@@ -77,8 +77,8 @@ Node.js and PostgreSQL. It links `kf` into `~/.local/bin` and runs `kf setup --s
   accepts only local socket connections;
 - starts the factory in the background, now and at login, and opens it.
 
-The built-in workflows (`feature`, `bug`, `quick-change` and `onboard-repo`)
-are ready immediately. Re-run the command, or `kf update`, to update; your
+The built-in workflows (`feature`, `bug`, `quick-change`, `onboard-repo`, and
+`lead` with its `task` and `task-pr` task workflows) are ready immediately. Re-run the command, or `kf update`, to update; your
 configuration, secrets and database are kept. `kf status`, `kf logs -f`,
 `kf stop` and `kf start` manage the background factory.
 

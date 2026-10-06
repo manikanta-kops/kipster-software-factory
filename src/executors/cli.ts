@@ -14,6 +14,9 @@ export function cliCommand(config: AgentConfig): {
         '--ephemeral',
         '--json',
         ...(config.model ? ['--model', config.model] : []),
+        ...(config.effort
+          ? ['-c', `model_reasoning_effort="${config.effort}"`]
+          : []),
         '-',
       ],
     }
@@ -27,6 +30,7 @@ export function cliCommand(config: AgentConfig): {
       'stream-json',
       '--verbose',
       ...(config.model ? ['--model', config.model] : []),
+      ...(config.effort ? ['--effort', config.effort] : []),
     ],
   }
 }

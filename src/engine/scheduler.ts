@@ -1,4 +1,6 @@
 import { pollLinkedTickets } from './ticket-links.ts'
+import { agentFor, pollTasks } from './tasks.ts'
+import { listTaskWaits } from '../store/tasks.ts'
 import type { Library } from '../library/library.ts'
 import { invalidateMergeGate } from '../store/merge-gates.ts'
 import { pruneEvidence, adoptEvidence } from '../store/evidence.ts'
@@ -87,6 +89,7 @@ export async function startScheduler(
   >()
   const postMergeJobs = new Map<string, Promise<void>>()
   const mergeJobs = new Map<number, Promise<void>>()
+  const taskJobs = new Map<number, Promise<void>>()
   let stopped = false
   let ticking: Promise<void> | undefined
   let requested = false
@@ -127,7 +130,7 @@ export async function startScheduler(
         database,
         attempt.id,
         step.kind === 'agent'
-          ? (config.agents.roles[step.role] ?? config.agents.default).cli
+          ? (await agentFor({ database, config }, ticket, step.role)).cli
           : 'system',
       )
       await runAttempt(
@@ -190,6 +193,23 @@ export async function startScheduler(
         const done = run(context, controller).catch(report)
         active.set(context.attempt.id, { context, controller, done })
       }
+    }
+    // Every tick, so a finished child reaches its lead without waiting for the merge poll.
+    for (const wait of await listTaskWaits(database)) {
+      if (stopped) return
+      if (taskJobs.has(wait.attemptId)) continue
+      const job = pollTasks(
+        runnerOptions,
+        wait,
+        AbortSignal.any([lifetime.signal, AbortSignal.timeout(300_000)]),
+      )
+        .catch((error) => {
+          if (!stopped) report(error)
+        })
+        .finally(() => {
+          taskJobs.delete(wait.attemptId)
+        })
+      taskJobs.set(wait.attemptId, job)
     }
     if (Date.now() >= nextMergePoll) {
       nextMergePoll = Date.now() + (options.mergePollMs ?? 60_000)
@@ -347,7 +367,11 @@ export async function startScheduler(
         await ticking
         await checking
         await pruning
-        await Promise.all([...mergeJobs.values(), ...postMergeJobs.values()])
+        await Promise.all([
+          ...mergeJobs.values(),
+          ...postMergeJobs.values(),
+          ...taskJobs.values(),
+        ])
         await Promise.all([...active.values()].map((item) => item.done))
         try {
           if (held) await interruptRunning(database)

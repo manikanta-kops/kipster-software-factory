@@ -16,6 +16,7 @@ export async function buildPrompt(input: {
   dependencies?: readonly DependencyCheckout[]
   trusted: TrustedInstructions
   proof?: { context: unknown }
+  lead?: unknown
   resultValidationError?: string | undefined
 }): Promise<string> {
   const { step, detail, directory, diff, home, trusted } = input
@@ -66,6 +67,16 @@ export async function buildPrompt(input: {
     ...(input.dependencies?.length
       ? [
           `Read-only dependency repositories (fresh default-branch commits; never edit, commit, change permissions or push these checkouts):\n${JSON.stringify(input.dependencies, null, 2)}`,
+        ]
+      : []),
+    ...(input.lead
+      ? [
+          `Your tasks and choices (factory state, current as of this session):\n${JSON.stringify(input.lead, null, 2)}`,
+        ]
+      : []),
+    ...(detail.parentTask
+      ? [
+          `This ticket is task "${detail.parentTask.key}" of lead ticket #${detail.parentTask.parent.number} (${detail.parentTask.parent.title}). Do only this task; the lead plans the rest.`,
         ]
       : []),
     ...(detail.links.length
@@ -137,6 +148,8 @@ export async function readResult(
     throw new Error('Only a reviewer can request ownerReview')
   if (result.otherRepository && role !== 'builder')
     throw new Error('Only builders request another repository')
+  if ((result.tasks || result.pullRequests) && role !== 'lead')
+    throw new Error('Only a lead asks for tasks or decides their pull requests')
   if (
     !([...roles[role].outcomes, 'needs-decision'] as string[]).includes(
       result.outcome,
@@ -149,6 +162,12 @@ export async function readResult(
     !result.artifacts.some((a) => a.kind === 'plan')
   )
     throw new Error('Planner must provide a plan artifact')
+  if (
+    role === 'lead' &&
+    result.outcome === 'plan-ready' &&
+    !result.artifacts.some((a) => a.kind === 'plan')
+  )
+    throw new Error('plan-ready must include a plan artifact')
   for (const artifact of result.artifacts)
     if (artifact.path) await artifactPath(home, artifact.path)
   return result

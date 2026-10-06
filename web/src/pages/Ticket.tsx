@@ -23,7 +23,7 @@ import { repositoriesQuery, ticketQuery } from '../queries.ts'
 import { ArtifactView } from '../components/ArtifactView.tsx'
 import { RepositoryTag } from '../components/Filters.tsx'
 import { Icon } from '../components/Icon.tsx'
-import { doing, humanize, stepName } from '../words.ts'
+import { agentLabel, doing, humanize, stepName } from '../words.ts'
 import { Commit, Verdict } from '../components/Verdict.tsx'
 
 export function TicketPage({
@@ -95,10 +95,11 @@ export function TicketPage({
         )}
       </header>
       {ticket.waiting &&
-        !['pull-request-checks', 'other-repo'].includes(ticket.waiting.for) && (
-          <ActionPanel key={ticket.waiting.attemptId} detail={query.data} />
-        )}
+        !['pull-request-checks', 'other-repo', 'tasks'].includes(
+          ticket.waiting.for,
+        ) && <ActionPanel key={ticket.waiting.attemptId} detail={query.data} />}
       <RepositoryContext detail={query.data} />
+      <Tasks detail={query.data} />
       <MergeGatePanel detail={query.data} />
       <Verdict
         detail={query.data}
@@ -193,6 +194,73 @@ function RepositoryContext({ detail }: { detail: TicketResponse }) {
           {ticket.waiting?.for === 'other-repo' && (
             <CancelLinkedWait number={ticket.number} />
           )}
+        </>
+      )}
+    </section>
+  )
+}
+
+function Tasks({ detail }: { detail: TicketResponse }) {
+  const { tasks = [], parentTask } = detail
+  if (!tasks.length && !parentTask) return null
+  return (
+    <section className="steps-card" aria-label="Tasks">
+      {parentTask && (
+        <>
+          <h2 className="section-title">Lead ticket</h2>
+          <p>
+            Task <span className="task-key">{parentTask.key}</span> of{' '}
+            <a
+              className="text-link"
+              href={`#/tickets/${parentTask.parent.number}`}
+            >
+              #{parentTask.parent.number} {parentTask.parent.title}
+            </a>{' '}
+            <Status value={parentTask.parent.status} />
+          </p>
+          <p className="muted">
+            {parentTask.land === 'branch'
+              ? 'When this ticket finishes, the system merges it into the lead’s branch.'
+              : 'This task opens its own pull request. The lead decides whether the system merges it.'}
+          </p>
+        </>
+      )}
+      {tasks.length > 0 && (
+        <>
+          <h2 className="section-title">Tasks</h2>
+          <ul className="task-list">
+            {tasks.map((task) => (
+              <li key={task.id}>
+                <div className="task-line">
+                  <span className="task-key">{task.key}</span>
+                  <span>{task.title}</span>
+                  <span className={`badge ${task.status}`}>
+                    {task.status === 'pr-ready'
+                      ? 'PR ready'
+                      : task.status.replace('-', ' ')}
+                  </span>
+                  {task.child && (
+                    <a
+                      className="text-link"
+                      href={`#/tickets/${task.child.number}`}
+                    >
+                      #{task.child.number}
+                    </a>
+                  )}
+                  <PullRequest url={task.child?.pullRequestUrl ?? null} />
+                </div>
+                <p className="muted">
+                  {task.land === 'pr' ? 'Own pull request' : 'Lead branch'}
+                  {task.agent ? ` · ${agentLabel(task.agent)}` : ''}
+                  {task.decision ? ` · lead chose ${task.decision}` : ''}
+                </p>
+                {task.result && <p>{task.result}</p>}
+              </li>
+            ))}
+          </ul>
+          <p className="muted">
+            Cancelling this ticket cancels its unfinished tasks.
+          </p>
         </>
       )}
     </section>

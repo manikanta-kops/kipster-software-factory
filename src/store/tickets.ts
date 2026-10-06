@@ -3,6 +3,9 @@ import {
   type PreparedArtifact,
 } from './artifact-preparation.ts'
 import { listTicketLinks, listDependencies } from './ticket-links.ts'
+import { getTaskOfChild, listTasks, taskEvent } from './task-records.ts'
+import { runTasksParams } from '../domain/catalog.ts'
+import { delegateTarget, taskWorkflowName } from '../domain/tasks.ts'
 import type { DecisionInput } from '../domain/decisions.ts'
 import { insertDecision, finishDecision } from './decisions.ts'
 // Tickets and their attempts and artifacts. Every write locks the ticket row, asks the
@@ -13,6 +16,7 @@ import {
   waitForOtherRepository,
   afterCancel,
   afterDecision,
+  type StepResult,
   afterTypedDecision,
   waitForDecision,
   afterFailure,
@@ -40,6 +44,8 @@ import type {
   AttemptStatus,
   FactoryEvent,
   HumanChoice,
+  LeadTask,
+  ParentTask,
   Repository,
   Ticket,
   TicketLink,
@@ -74,6 +80,10 @@ export interface TicketDetail {
   readonly ticket: Ticket
   readonly dependencies: readonly Repository[]
   readonly links: readonly TicketLink[]
+  /** A lead ticket's tasks, oldest first. */
+  readonly tasks: readonly LeadTask[]
+  /** On a child ticket, the lead ticket and task it runs. */
+  readonly parentTask: ParentTask | null
   /** The workflow version the ticket runs, which may be older than the library's. */
   readonly workflow: Workflow
   readonly attempts: readonly Attempt[]
@@ -144,16 +154,36 @@ export async function getTicketDetail(
 ): Promise<TicketDetail | null> {
   const ticket = await getTicket(database, number)
   if (!ticket) return null
-  const [workflow, attempts, artifacts, events, dependencies, links] =
-    await Promise.all([
-      loadWorkflow(database, ticket.workflow.name, ticket.workflow.version),
-      listAttempts(database, ticket.id),
-      listArtifacts(database, ticket.id),
-      listEvents(database, { ticketId: ticket.id, limit: 10_000 }),
-      listDependencies(database, ticket.id),
-      listTicketLinks(database, ticket.id),
-    ])
-  return { ticket, workflow, attempts, artifacts, events, dependencies, links }
+  const [
+    workflow,
+    attempts,
+    artifacts,
+    events,
+    dependencies,
+    links,
+    tasks,
+    parent,
+  ] = await Promise.all([
+    loadWorkflow(database, ticket.workflow.name, ticket.workflow.version),
+    listAttempts(database, ticket.id),
+    listArtifacts(database, ticket.id),
+    listEvents(database, { ticketId: ticket.id, limit: 10_000 }),
+    listDependencies(database, ticket.id),
+    listTicketLinks(database, ticket.id),
+    listTasks(database, ticket.id),
+    getTaskOfChild(database, ticket.id),
+  ])
+  return {
+    ticket,
+    workflow,
+    attempts,
+    artifacts,
+    events,
+    dependencies,
+    links,
+    tasks,
+    parentTask: parent?.parent ?? null,
+  }
 }
 
 export async function listAttempts(
@@ -412,9 +442,17 @@ export async function completeAttempt(
     (artifacts) =>
       transaction(database, async (connection) => {
         const locked = await lockByAttempt(connection, attemptId)
-        openAttemptOf(locked, attemptId)
+        const attempt = openAttemptOf(locked, attemptId)
         const transition = afterResult(locked.workflow, locked.attempts, parsed)
         const events: NewEvent[] = []
+        await insertTasks(
+          connection,
+          locked,
+          attemptId,
+          attempt.stepId,
+          parsed,
+          events,
+        )
         await insertArtifacts(
           connection,
           locked.id,
@@ -948,7 +986,9 @@ export async function cancelTicket(
         events,
       )
     }
-    return apply(connection, locked, transition, {}, events)
+    const moved = await apply(connection, locked, transition, {}, events)
+    await cancelTasks(connection, locked)
+    return moved
   })
 }
 
@@ -1007,9 +1047,103 @@ export async function addAttemptArtifacts(
   )
 }
 
+/** Records a lead's new tasks and pull request decisions with its completed attempt. */
+async function insertTasks(
+  connection: Connection,
+  locked: Locked,
+  attemptId: number,
+  stepId: string,
+  result: Pick<StepResult, 'tasks' | 'pullRequests'>,
+  events: NewEvent[],
+): Promise<void> {
+  const tasks = result.tasks ?? []
+  const decisions = result.pullRequests ?? []
+  if (tasks.length === 0 && decisions.length === 0) return
+  const target = delegateTarget(locked.workflow, stepId)
+  const params = runTasksParams.parse(target?.with ?? {})
+  for (const task of tasks) {
+    await connection.query(
+      `INSERT INTO tasks (ticket_id, attempt_id, key, title, instructions, land, workflow, agent)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+      [
+        locked.id,
+        attemptId,
+        task.key,
+        task.title,
+        task.instructions,
+        task.land,
+        taskWorkflowName(task, params),
+        task.agent ? JSON.stringify(task.agent) : null,
+      ],
+    )
+    events.push(taskEvent(locked.id, task.key, 'pending'))
+  }
+  for (const { task, decision } of decisions) {
+    const leftOpen = decision === 'leave-open'
+    const { rowCount } = await connection.query(
+      `UPDATE tasks SET decision = $3, updated_at = now(),
+         status = CASE WHEN $4 THEN 'left-open' ELSE status END,
+         reported_status = CASE WHEN $4 THEN 'left-open' ELSE reported_status END,
+         result = CASE WHEN $4 THEN 'The lead left the pull request open for the owner.' ELSE result END
+       WHERE ticket_id = $1 AND key = $2 AND land = 'pr' AND status = 'pr-ready' AND decision IS NULL`,
+      [locked.id, task, decision, leftOpen],
+    )
+    if (rowCount !== 1)
+      throw new FactoryError(
+        'invalid',
+        `Task "${task}" has no undecided ready pull request`,
+      )
+    events.push(taskEvent(locked.id, task, leftOpen ? 'left-open' : 'pr-ready'))
+  }
+}
+
+/** Inside cancelTicket: the lead's unfinished tasks stop, and so do their child tickets. */
+async function cancelTasks(
+  connection: Connection,
+  lead: Pick<Locked, 'id' | 'number'>,
+): Promise<void> {
+  const { rows } = await connection.query<{
+    id: number
+    key: string
+    child_ticket_id: number | null
+  }>(
+    `SELECT id, key, child_ticket_id FROM tasks
+     WHERE ticket_id = $1 AND status IN ('pending', 'running', 'pr-ready')
+     ORDER BY id FOR UPDATE`,
+    [lead.id],
+  )
+  for (const task of rows) {
+    if (task.child_ticket_id !== null) {
+      const child = await lockTicket(connection, { id: task.child_ticket_id })
+      if (!['done', 'cancelled'].includes(child.status)) {
+        const events: NewEvent[] = []
+        await insertArtifacts(
+          connection,
+          child.id,
+          (child.attempts.at(-1) as { id: number }).id,
+          [
+            {
+              kind: 'note',
+              title: 'Why it was cancelled',
+              content: `Lead ticket #${lead.number} was cancelled.`,
+            },
+          ],
+          events,
+        )
+        await apply(connection, child, afterCancel(child.attempts), {}, events)
+      }
+    }
+    await connection.query(
+      `UPDATE tasks SET status = 'cancelled', result = 'The lead ticket was cancelled.', updated_at = now() WHERE id = $1`,
+      [task.id],
+    )
+    await recordEvents(connection, [taskEvent(lead.id, task.key, 'cancelled')])
+  }
+}
+
 // Lifecycle plumbing
 
-interface Locked {
+export interface Locked {
   readonly id: number
   readonly number: number
   readonly status: TicketStatus
@@ -1019,7 +1153,7 @@ interface Locked {
 
 // NO KEY UPDATE, not UPDATE: inserting events and artifacts takes KEY SHARE locks on
 // the ticket through their foreign keys, and must not wait on (or deadlock with) us.
-async function lockTicket(
+export async function lockTicket(
   connection: Connection,
   by: { readonly id: number } | { readonly number: number },
 ): Promise<Locked> {
@@ -1054,7 +1188,7 @@ async function lockTicket(
   }
 }
 
-async function lockByAttempt(
+export async function lockByAttempt(
   connection: Connection,
   attemptId: number,
 ): Promise<Locked> {
@@ -1070,7 +1204,7 @@ async function lockByAttempt(
 }
 
 /** The ticket's open attempt, which must be the one the caller expects. */
-function openAttemptOf(locked: Locked, attemptId: number): Attempt {
+export function openAttemptOf(locked: Locked, attemptId: number): Attempt {
   const latest = locked.attempts.at(-1)
   const attempt = locked.attempts.find(
     (candidate) => candidate.id === attemptId,
@@ -1090,7 +1224,7 @@ function openAttemptOf(locked: Locked, attemptId: number): Attempt {
   return attempt
 }
 
-async function apply(
+export async function apply(
   connection: Connection,
   locked: Locked,
   transition: Transition,
@@ -1202,7 +1336,7 @@ async function insertOpening(
   return attempt
 }
 
-async function setTicketStatus(
+export async function setTicketStatus(
   connection: Connection,
   locked: Locked,
   status: TicketStatus,
@@ -1223,7 +1357,7 @@ async function setTicketStatus(
   }
 }
 
-async function insertArtifacts(
+export async function insertArtifacts(
   connection: Connection,
   ticketId: number,
   attemptId: number,

@@ -1,6 +1,8 @@
 import { DependencyChangedError } from '../workspace/dependencies.ts'
 import { dependencySession } from './dependencies.ts'
 import { requestOtherRepository } from './ticket-links.ts'
+import { agentFor, leadContext, leadResultProblem } from './tasks.ts'
+import { getTaskOfChild, parkForTasks } from '../store/tasks.ts'
 import { setArtifactHome } from '../store/database.ts'
 import {
   newEvidenceFile,
@@ -68,7 +70,7 @@ async function executeAttempt(
   context: AttemptContext,
   signal: AbortSignal,
 ): Promise<void> {
-  const { database, home, config, workspaces } = options
+  const { database, home, workspaces } = options
   const { ticket, step, attempt } = context
   let { repository } = context
   const detail = await getTicketDetail(database, ticket.number)
@@ -85,10 +87,20 @@ async function executeAttempt(
     repository = await markRepositoryReady(database, repository.id, {
       defaultBranch,
     })
-  const cwd = await workspaces.prepare(ticket, repository, signal)
+  const owned = await getTaskOfChild(database, ticket.id)
+  // A branch task starts from, and is compared with, the lead's branch.
+  const leadBase =
+    owned?.task.land === 'branch'
+      ? (owned.task.baseCommit ?? undefined)
+      : undefined
+  const cwd = await workspaces.prepare(ticket, repository, signal, leadBase)
   const git = (args: string[]) => run('git', args, { cwd, signal })
   const base = `origin/${repository.defaultBranch}`
-  const diff = await git(['diff', '--stat', `${base}...HEAD`])
+  const diff = await git(['diff', '--stat', `${leadBase ?? base}...HEAD`])
+  if (step.kind === 'system' && step.action === 'run-tasks') {
+    await parkForTasks(database, attempt.id)
+    return
+  }
   if (step.kind === 'system' && step.action === 'decide') {
     await runDecision(options, { ...context, repository }, detail, cwd, signal)
     return
@@ -177,7 +189,11 @@ async function executeAttempt(
     return
   }
   if (step.kind === 'agent') {
-    const selected = config.agents.roles[step.role] ?? config.agents.default
+    const selected = await agentFor(options, ticket, step.role)
+    const lead =
+      step.role === 'lead'
+        ? await leadContext(options, { ...context, repository }, detail)
+        : undefined
     const before = await git(['rev-parse', 'HEAD'])
     const trusted = await loadTrustedInstructions(cwd, base, step.role, signal)
     let resultValidationError: string | undefined
@@ -201,6 +217,7 @@ async function executeAttempt(
         home,
         trusted,
         resultValidationError,
+        ...(lead ? { lead } : {}),
       })
       await writeFile(join(directory, 'prompt.md'), prompt)
       const log = await newEvidenceFile(home, ticket.id)
@@ -226,6 +243,11 @@ async function executeAttempt(
       let result
       try {
         result = await readResult(directory, step.role, home)
+        const problem =
+          step.role === 'lead'
+            ? await leadResultProblem(options, context, result)
+            : null
+        if (problem) throw new Error(problem)
       } catch (error) {
         resultValidationError = String(error)
         await writeFile(
@@ -240,9 +262,14 @@ async function executeAttempt(
       }
       if (executionError) throw executionError
       if (
-        ['planner', 'reviewer', 'writer', 'tester', 'reproducer'].includes(
-          step.role,
-        )
+        [
+          'planner',
+          'reviewer',
+          'writer',
+          'tester',
+          'reproducer',
+          'lead',
+        ].includes(step.role)
       ) {
         if (
           (await git(['rev-parse', 'HEAD'])) !== before ||
