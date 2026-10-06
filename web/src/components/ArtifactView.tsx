@@ -1,13 +1,10 @@
-/* eslint-disable jsx-a11y/media-has-caption -- Evidence recordings have no caption track in the artifact contract; retain native playback and audio controls. */
 /* eslint-disable jsx-a11y/no-noninteractive-tabindex -- Scrollable logs need keyboard focus so arrow keys can scroll their content. */
-import { useEffect, useRef, useState } from 'react'
+import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import type { Artifact } from '../../../src/api/contract.ts'
 import { api } from '../api.ts'
 import { ErrorMessage, MarkdownBody } from './Shared.tsx'
-
-const images = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/webp'])
-const videos = new Set(['video/webm', 'video/mp4'])
+import { IMAGE_TYPES, MediaGallery, VIDEO_TYPES } from './Media.tsx'
 
 export function ArtifactView({
   artifact,
@@ -21,9 +18,10 @@ export function ArtifactView({
   ticketNumber?: number
 }) {
   const [open, setOpen] = useState(defaultOpen)
-  const [viewing, setViewing] = useState(false)
-  const isImage = artifact.content === null && images.has(artifact.mediaType)
-  const isVideo = artifact.content === null && videos.has(artifact.mediaType)
+  const isImage =
+    artifact.content === null && IMAGE_TYPES.has(artifact.mediaType)
+  const isVideo =
+    artifact.content === null && VIDEO_TYPES.has(artifact.mediaType)
   const isText =
     artifact.content !== null ||
     artifact.mediaType.startsWith('text/') ||
@@ -53,50 +51,7 @@ export function ArtifactView({
       </p>
     )
   if (isImage || isVideo)
-    return (
-      <figure className="media-evidence">
-        <figcaption>
-          {artifact.title} {address}
-        </figcaption>
-        {isImage ? (
-          <>
-            <button
-              className="evidence-thumbnail"
-              aria-label={`Enlarge ${artifact.title}`}
-              onClick={() => setViewing(true)}
-            >
-              <img src={source} alt={artifact.title} loading="lazy" />
-            </button>
-            {viewing && (
-              <ImageViewer
-                artifact={artifact}
-                onClose={() => setViewing(false)}
-              />
-            )}
-          </>
-        ) : (
-          <video
-            controls
-            preload="metadata"
-            playsInline
-            src={source}
-            aria-label={artifact.title}
-          >
-            <a className="text-link" href={source}>
-              Open recording
-            </a>
-          </video>
-        )}
-        <a
-          className="text-link evidence-original"
-          href={source}
-          target="_blank"
-          rel="noreferrer"
-        >
-          Open original
-        </a>
-      </figure>
-    )
+    return <MediaGallery artifacts={[artifact]} ticketNumber={ticketNumber} />
   return (
     <details
       className="artifact"
@@ -138,45 +93,5 @@ export function ArtifactView({
         </>
       )}
     </details>
-  )
-}
-
-function ImageViewer({
-  artifact,
-  onClose,
-}: {
-  artifact: Artifact
-  onClose: () => void
-}) {
-  const dialog = useRef<HTMLDialogElement>(null)
-  useEffect(() => {
-    const element = dialog.current!
-    element.showModal()
-    return () => element.close()
-  }, [])
-  const close = () => {
-    dialog.current?.close()
-    onClose()
-  }
-  return (
-    <dialog
-      ref={dialog}
-      className="evidence-viewer"
-      aria-labelledby={`image-title-${artifact.id}`}
-      onClose={onClose}
-      onCancel={(event) => {
-        // Clear React state before a quick reopen can race the native close event.
-        event.preventDefault()
-        close()
-      }}
-    >
-      <div className="viewer-heading">
-        <h2 id={`image-title-${artifact.id}`}>{artifact.title}</h2>
-        <button autoFocus onClick={close}>
-          Close image
-        </button>
-      </div>
-      <img src={api.artifactUrl(artifact.id)} alt={artifact.title} />
-    </dialog>
   )
 }

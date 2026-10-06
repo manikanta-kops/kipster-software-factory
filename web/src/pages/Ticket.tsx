@@ -27,6 +27,7 @@ import {
 } from '../components/Shared.tsx'
 import { repositoriesQuery, ticketQuery } from '../queries.ts'
 import { ArtifactView } from '../components/ArtifactView.tsx'
+import { isMedia, MediaGallery } from '../components/Media.tsx'
 import { RepositoryTag } from '../components/Filters.tsx'
 import { Icon, stepHue, stepIcon } from '../components/Icon.tsx'
 import { agentLabel, doing, humanize, stepName } from '../words.ts'
@@ -50,10 +51,9 @@ export function TicketPage({
       link.attemptId === ticket.waiting?.attemptId &&
       ticket.waiting.for === 'other-repo',
   )
-  const images = query.data.artifacts.filter(
+  const media = query.data.artifacts.filter(
     (artifact) =>
-      artifact.content === null &&
-      artifact.mediaType.startsWith('image/') &&
+      isMedia(artifact) &&
       !query.data.evidenceIndex?.some(
         (item) => item.artifactId === artifact.id,
       ),
@@ -112,19 +112,16 @@ export function TicketPage({
           detail={query.data}
           {...(evidenceId === undefined ? {} : { selected: evidenceId })}
         />
-        {images.length > 0 && (
+        {media.length > 0 && (
           <section
-            className="attachments"
+            className="attachments evidence-card"
             aria-labelledby="attachments-heading"
           >
             <h2 className="section-title" id="attachments-heading">
-              Attachments
+              Screenshots and recordings
+              <span className="steps-progress">{media.length}</span>
             </h2>
-            <div className="attachment-grid">
-              {images.map((artifact) => (
-                <ArtifactView key={artifact.id} artifact={artifact} />
-              ))}
-            </div>
+            <MediaGallery artifacts={media} ticketNumber={ticket.number} />
           </section>
         )}
       </div>
@@ -903,18 +900,62 @@ function AttemptEntry({
         <ClampedText lines={4}>{attempt.summary}</ClampedText>
       )}
       {attempt.error && <p className="error">{attempt.error}</p>}
-      {artifacts.map((artifact) => (
+      {artifacts.some(isMedia) && (
+        <MediaGallery
+          artifacts={artifacts.filter(isMedia)}
+          ticketNumber={detail.ticket.number}
+          compact
+        />
+      )}
+      <FileList
+        files={artifacts.filter((artifact) => !isMedia(artifact))}
+        attempt={attempt}
+        ticketNumber={detail.ticket.number}
+      />
+    </li>
+  )
+}
+const FILES_SHOWN = 3
+
+function FileList({
+  files,
+  attempt,
+  ticketNumber,
+}: {
+  files: readonly Artifact[]
+  attempt: Attempt
+  ticketNumber: number
+}) {
+  const [all, setAll] = useState(false)
+  if (!files.length) return null
+  const shown = all ? files : files.slice(0, FILES_SHOWN)
+  return (
+    <div className="file-list">
+      {shown.map((artifact) => (
         <ArtifactView
           key={artifact.id}
           artifact={artifact}
-          ticketNumber={detail.ticket.number}
+          ticketNumber={ticketNumber}
           defaultOpen={attempt.executor === 'human' && artifact.kind === 'note'}
           live={attempt.status === 'running' && artifact.kind === 'log'}
         />
       ))}
-    </li>
+      {files.length > FILES_SHOWN && (
+        <button
+          type="button"
+          className="quiet more-toggle"
+          aria-expanded={all}
+          onClick={() => setAll(!all)}
+        >
+          {all
+            ? 'Show fewer files'
+            : `Show ${files.length - FILES_SHOWN} more files`}
+        </button>
+      )}
+    </div>
   )
 }
+
 function EventEntry({ event }: { event: FactoryEvent }) {
   const summary =
     typeof event.data['summary'] === 'string'
