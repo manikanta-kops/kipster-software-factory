@@ -4,6 +4,7 @@ const port = Number(process.env['KSF_E2E_PORT'] ?? 4617)
 
 export default defineConfig({
   testDir: 'tests/e2e',
+  outputDir: process.env['KSF_E2E_OUTPUT_DIR'] ?? 'test-results',
   fullyParallel: true,
   forbidOnly: Boolean(process.env['CI']),
   retries: 0,

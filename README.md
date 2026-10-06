@@ -79,8 +79,10 @@ Node.js and PostgreSQL. It links `kf` into `~/.local/bin` and runs `kf setup --s
   accepts only local socket connections;
 - starts the factory in the background, now and at login, and opens it.
 
-The built-in workflows (`feature`, `bug`, `quick-change`, `onboard-repo`, and
-`lead` with its `task` and `task-pr` task workflows) are ready immediately. Re-run the command, or `kf update`, to update; your
+The built-in workflows (`bug`, `lead` and `onboard-repo`) are ready immediately.
+`lead` covers planned features and small changes; its `task` and `task-pr`
+workflows are reserved for child tasks and hidden from New ticket. Re-run the
+command, or `kf update`, to update; your
 configuration, secrets and database are kept. `kf status`, `kf logs -f`,
 `kf stop` and `kf start` manage the background factory.
 
@@ -156,7 +158,7 @@ scheduler, including after a restart. Keep real runs in a separate checkout's
 `.local/` database. Development workspaces and evidence also live under
 `.local/factory/`. Demo media is generated there (synthetic images/video/logs,
 never real verification evidence); seed with `--home <directory>` when serving a
-different home. The demo includes valid/invalid kits and current/stale feature
+different home. The demo includes valid/invalid kits and current/stale lead
 verdicts with recorded commits. Override with `npm run dev -- --home <directory>`.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md). Licensed under [Apache-2.0](LICENSE).

@@ -47,8 +47,8 @@ for (const colorScheme of ['light', 'dark'] as const) {
         },
         {
           name: 'workflows',
-          route: '/workflows/quick-change',
-          heading: 'quick-change',
+          route: '/workflows/lead',
+          heading: 'lead',
         },
         { name: 'settings', route: '/settings', heading: 'Settings' },
       ]
@@ -93,7 +93,7 @@ for (const colorScheme of ['light', 'dark'] as const) {
         if (screen.name === 'proof') {
           const run = page.locator('.attempt-entry').filter({
             has: page.getByRole('heading', {
-              name: 'test tester',
+              name: 'final-test tester',
               exact: true,
             }),
           })

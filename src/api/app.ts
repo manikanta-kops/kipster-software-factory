@@ -3,10 +3,13 @@ import { scenarioIndex } from '../domain/evidence.ts'
 import { getMergeGate } from '../store/merge-gates.ts'
 import { setArtifactHome } from '../store/database.ts'
 import { listDecisions, decisionCounts } from '../store/decisions.ts'
-import { saveUploadedWorkflow } from '../store/workflows.ts'
+import {
+  saveUploadedWorkflow,
+  ticketWorkflowNames,
+} from '../store/workflows.ts'
 import { listChildTasks } from '../store/task-records.ts'
 import { effectiveSettings, saveSettings } from '../store/settings.ts'
-import { AGENT_CLIS, EFFORTS } from '../domain/catalog.ts'
+import { AGENT_CLIS, EFFORTS, LEAD_ONLY_WORKFLOWS } from '../domain/catalog.ts'
 import {
   DEFAULT_SETTINGS,
   ROLE_NAMES,
@@ -173,11 +176,17 @@ export function createApp({
     )
   })
 
+  async function settingsWorkflows() {
+    return [
+      ...new Set([...library.keys(), ...(await ticketWorkflowNames(database))]),
+    ].sort()
+  }
+
   async function settingsResponse(): Promise<SettingsResponse> {
     return {
       ...(await effectiveSettings(database, fallback)),
       choices: { clis: AGENT_CLIS, efforts: EFFORTS, roles: ROLE_NAMES },
-      workflows: [...library.keys()].sort(),
+      workflows: await settingsWorkflows(),
     }
   }
 
@@ -189,7 +198,7 @@ export function createApp({
     if (!c.req.header('Content-Type')?.startsWith('application/json'))
       throw new FactoryError('invalid', 'Send the settings as JSON')
     const input = await body(c, settingsSchema)
-    const problems = settingsProblems(input, [...library.keys()])
+    const problems = settingsProblems(input, await settingsWorkflows())
     if (problems.length)
       throw new InvalidRequest(problems, 'The settings are not valid')
     await saveSettings(database, input)
@@ -507,6 +516,8 @@ function summarizeWorkflow({
     description: workflow.description,
     steps: workflow.steps.map((step) => summarize(workflow, step)),
     origin: uploaded ? 'upload' : 'file',
+    selectable:
+      Boolean(uploaded) || !LEAD_ONLY_WORKFLOWS.includes(workflow.name),
   }
 }
 

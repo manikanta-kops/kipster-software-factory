@@ -23,8 +23,17 @@ test('home separates attention, progress and finished tickets', async ({
 test('home filters by repository and kind of work', async ({
   page,
   factory,
+  request,
 }) => {
   await page.goto(factory.url)
+  await request.post(`${factory.url}/api/tickets`, {
+    data: {
+      repository: 'kipster/demo-shop',
+      workflow: 'bug',
+      title: 'Filter bug work',
+    },
+  })
+  await page.reload()
   const needs = page.getByRole('region', { name: 'Needs you' })
   await expect(
     needs.getByRole('heading', { name: 'Validate email addresses on sign-up' }),
@@ -35,21 +44,32 @@ test('home filters by repository and kind of work', async ({
   const pick = page.getByRole('button', { name: 'everything' })
   await pick.click()
   const panel = page.getByRole('dialog', { name: 'Filters' })
-  await panel.getByLabel('Feature').check()
+  await panel.getByLabel('Lead').check()
   await page.keyboard.press('Escape')
   await expect(panel).toBeHidden()
-  await expect(page.getByRole('button', { name: 'feature work' })).toBeFocused()
+  await expect(page.getByRole('button', { name: 'lead work' })).toBeFocused()
+  await expect(
+    needs.getByRole('heading', { name: 'Validate email addresses on sign-up' }),
+  ).toBeVisible()
+  await page.getByRole('button', { name: 'lead work' }).click()
+  await panel.getByLabel('Lead').uncheck()
+  await panel.getByLabel('Bug').check()
+  await panel.getByRole('button', { name: 'Done' }).click()
   await expect(
     needs.getByRole('heading', { name: 'Validate email addresses on sign-up' }),
   ).toBeHidden()
+  await page.getByRole('button', { name: 'bug work' }).click()
+  await panel.getByLabel('Bug').uncheck()
+  await panel.getByLabel('Lead').check()
+  await panel.getByRole('button', { name: 'Done' }).click()
   await expect(
     needs.getByRole('heading', { name: 'Cart quantity changes are proven' }),
   ).toBeVisible()
-  await page.getByRole('button', { name: 'feature work' }).click()
+  await page.getByRole('button', { name: 'lead work' }).click()
   await panel.getByLabel('legacy-api').check()
   await panel.getByRole('button', { name: 'Done' }).click()
   await expect(
-    page.getByText('Nothing in feature work in legacy-api needs you.'),
+    page.getByText('Nothing in lead work in legacy-api needs you.'),
   ).toBeVisible()
   await page.getByRole('link', { name: 'Repositories', exact: true }).click()
   await page.getByRole('link', { name: 'Today', exact: true }).click()
@@ -74,7 +94,7 @@ test('approve a plan', async ({ page, factory, request }) => {
       `${factory.url}/api/tickets/${factory.tickets.approvePlan}`,
     )
   ).json()) as TicketResponse
-  expect(detail.ticket.currentStep).toBe('build')
+  expect(detail.ticket.currentStep).toBe('lead')
   expect(
     detail.attempts.some((attempt) => attempt.outcome === 'approved'),
   ).toBeTruthy()
@@ -100,7 +120,7 @@ test('request changes requires and saves a comment', async ({
       `${factory.url}/api/tickets/${factory.tickets.approvePlan}`,
     )
   ).json()) as TicketResponse
-  expect(detail.ticket.currentStep).toBe('plan')
+  expect(detail.ticket.currentStep).toBe('lead')
   expect(
     detail.artifacts.some(
       (item) => item.kind === 'comment' && item.content?.includes('Unicode'),
@@ -125,7 +145,7 @@ for (const action of ['retry', 'move', 'cancel'] as const)
         .fill('Use the existing validation helper.')
     }
     if (action === 'move')
-      await page.getByLabel('Move to step').selectOption('build')
+      await page.getByLabel('Move to step').selectOption('lead')
     await page
       .getByRole('button', {
         name:
@@ -143,7 +163,7 @@ for (const action of ['retry', 'move', 'cancel'] as const)
       await request.get(`${factory.url}/api/tickets/${number}`)
     ).json()) as TicketResponse
     expect(detail.ticket.currentStep).toBe(
-      action === 'move' ? 'build' : 'review',
+      action === 'move' ? 'lead' : 'review',
     )
     const decision = page
       .getByRole('region', { name: 'What happened' })
@@ -154,7 +174,7 @@ for (const action of ['retry', 'move', 'cancel'] as const)
       action === 'retry'
         ? 'Retry requested'
         : action === 'move'
-          ? 'Moved to build'
+          ? 'Moved to lead'
           : 'Cancelled',
     )
     if (action !== 'cancel')
@@ -187,8 +207,16 @@ test('create a ticket and explain unavailable workflows', async ({
   await page
     .getByLabel('Repository', { exact: true })
     .selectOption('kipster/demo-shop')
-  await expect(page.getByRole('radio', { name: /^feature / })).toBeEnabled()
-  await page.getByRole('radio', { name: /^quick-change / }).check()
+  await expect(page.getByRole('radio')).toHaveCount(3)
+  for (const name of ['bug', 'lead', 'onboard-repo'])
+    await expect(
+      page.getByRole('radio', { name: new RegExp(`^${name} `) }),
+    ).toBeEnabled()
+  for (const name of ['feature', 'quick-change', 'task', 'task-pr'])
+    await expect(
+      page.getByRole('radio', { name: new RegExp(`^${name} `) }),
+    ).toHaveCount(0)
+  await page.getByRole('radio', { name: /^lead / }).check()
   await page
     .getByLabel('Title', { exact: true })
     .fill('Export reports with Unicode filenames')
@@ -296,7 +324,7 @@ test('live updates reconcile another client, reconnect, and keep one stream acro
   await request.post(`${factory.url}/api/tickets`, {
     data: {
       repository: 'kipster/demo-shop',
-      workflow: 'quick-change',
+      workflow: 'lead',
       title: 'Arrived while disconnected',
     },
   })
@@ -345,8 +373,8 @@ test('workflows render steps and loops, with direct hash links and back navigati
   page,
   factory,
 }) => {
-  await page.goto(`${factory.url}/#/workflows/feature`)
-  await expect(page.getByRole('heading', { name: 'feature' })).toBeVisible()
+  await page.goto(`${factory.url}/#/workflows/lead`)
+  await expect(page.getByRole('heading', { name: 'lead' })).toBeVisible()
   await expect(page.getByText('after 2 rounds → you')).toBeVisible()
   await page.getByRole('link', { name: /^bug / }).click()
   await expect(page).toHaveURL(/#\/workflows\/bug$/)
@@ -361,7 +389,7 @@ test('workflows render steps and loops, with direct hash links and back navigati
   await diagram.getByText('Show all loops').click()
   await expect(diagram.locator('path.edge.back')).not.toHaveCount(2)
   await page.goBack()
-  await expect(page.getByRole('heading', { name: 'feature' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'lead' })).toBeVisible()
 })
 
 test('empty attention keeps the quiet home message', async ({
@@ -425,7 +453,7 @@ test('runtime API base directs fetch and live events to a separate factory', asy
   await page
     .getByLabel('Repository', { exact: true })
     .selectOption('kipster/demo-shop')
-  await page.getByRole('radio', { name: /^quick-change / }).check()
+  await page.getByRole('radio', { name: /^lead / }).check()
   await page
     .getByLabel('Title', { exact: true })
     .fill('Created through configured API')
@@ -476,7 +504,7 @@ test('timeline groups step runs and human decisions, with internal events behind
   await page.goto(`${factory.url}/#/tickets/${factory.tickets.askAfterLimit}`)
   const timeline = page.getByRole('region', { name: 'What happened' })
   const runs = timeline.locator('.attempt-entry')
-  await expect(runs).toHaveCount(8)
+  await expect(runs).toHaveCount(10)
   await expect(runs.first()).toContainText('review')
   await expect(runs.first().locator('.badge')).toHaveText('changes needed')
   await expect(runs.first()).toContainText('The validation still accepts')
@@ -568,7 +596,7 @@ test('queued tickets keep internal events out of the default timeline', async ({
   ).toBeVisible()
   await timeline.getByRole('button', { name: 'Show all events' }).click()
   await expect(
-    timeline.getByText('attempt · queued · plan', { exact: true }),
+    timeline.getByText('attempt · queued · lead', { exact: true }),
   ).toBeVisible()
 })
 
@@ -591,7 +619,7 @@ test('repositories show valid and invalid kits and gate workflows on capabilitie
   await page
     .getByLabel('Repository', { exact: true })
     .selectOption('kipster/invalid-kit')
-  await expect(page.getByRole('radio', { name: /^feature / })).toBeDisabled()
+  await expect(page.getByRole('radio', { name: /^lead / })).toBeDisabled()
   await expect(page.getByText(/needs a verified kit/).first()).toBeVisible()
 })
 
@@ -636,9 +664,9 @@ test('demo evidence endpoints provide decodable image and video with recorded ve
   ).json()) as TicketResponse
   const image = proof.artifacts.find((a) => a.mediaType === 'image/png')!
   const video = proof.artifacts.find((a) => a.mediaType === 'video/webm')!
-  expect(proof.attempts.find((a) => a.stepId === 'test')!.headCommit).toMatch(
-    /^[a-f0-9]{40}$/,
-  )
+  expect(
+    proof.attempts.find((a) => a.stepId === 'final-test')!.headCommit,
+  ).toMatch(/^[a-f0-9]{40}$/)
   await page.goto(factory.url)
   await page.setContent(
     `<img src="${factory.url}/api/artifacts/${image.id}"><video src="${factory.url}/api/artifacts/${video.id}" preload="auto"></video>`,
@@ -699,4 +727,42 @@ test('demo evidence endpoints provide decodable image and video with recorded ve
         ),
     )
     .toBeCloseTo(duration / 2, 2)
+})
+
+test.describe('retired workflow history', () => {
+  test.use({ withLegacy: true })
+  test('stored quick-change ticket renders its history without a workflow file', async ({
+    page,
+    factory,
+    request,
+  }, testInfo) => {
+    const response = await request.get(`${factory.url}/api/workflows`)
+    expect(
+      (await response.json()).workflows.map(
+        (workflow: { name: string }) => workflow.name,
+      ),
+    ).not.toContain('quick-change')
+    await page.goto(`${factory.url}/#/tickets/${factory.legacyTicket}`)
+    await expect(
+      page.getByRole('heading', { name: 'Historical quick-change ticket' }),
+    ).toBeVisible()
+    await expect(
+      page
+        .locator('.ticket-kicker')
+        .getByRole('link', { name: 'Quick change', exact: true }),
+    ).toBeVisible()
+    await expect(
+      page.getByText('Retain the old workflow history.', { exact: true }),
+    ).toBeVisible()
+    await expect(
+      page.getByText('Historical plan ready.', { exact: true }),
+    ).toBeVisible()
+    await expect(
+      page.getByRole('button', { name: 'Approve', exact: true }),
+    ).toBeVisible()
+    await page.screenshot({
+      path: testInfo.outputPath('stored-quick-change-history.png'),
+      fullPage: true,
+    })
+  })
 })

@@ -113,7 +113,7 @@ export const otherRepositoryRequestSchema = z.strictObject({
     ),
   title: z.string().trim().min(1).max(200),
   body: z.string().trim().min(1).max(100_000),
-  workflow: slug.default('feature'),
+  workflow: slug.default('lead'),
 })
 export type OtherRepositoryRequest = z.infer<
   typeof otherRepositoryRequestSchema
@@ -235,3 +235,6 @@ export function isRole(name: string): name is RoleName {
 export function isAction(name: string): name is ActionName {
   return Object.hasOwn(actions, name)
 }
+
+/** Built-in workflows reserved for tasks delegated by leads. */
+export const LEAD_ONLY_WORKFLOWS: readonly string[] = ['task', 'task-pr']

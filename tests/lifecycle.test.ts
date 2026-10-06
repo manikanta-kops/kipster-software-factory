@@ -31,12 +31,15 @@ function load(source: string): Workflow {
 
 const quick = load(
   readFileSync(
-    new URL('../workflows/quick-change.yml', import.meta.url),
+    new URL('./fixtures/workflows/planned-change.yml', import.meta.url),
     'utf8',
   ),
 )
-const feature = load(
-  readFileSync(new URL('../workflows/feature.yml', import.meta.url), 'utf8'),
+const tested = load(
+  readFileSync(
+    new URL('./fixtures/workflows/tested-change.yml', import.meta.url),
+    'utf8',
+  ),
 )
 
 function attempt(
@@ -683,18 +686,18 @@ describe('step results', () => {
 describe('capabilities', () => {
   const repository = { slug: 'acme/shop', capabilities: [] }
 
-  test('quick-change needs nothing', () => {
+  test('planned-change needs nothing', () => {
     assert.doesNotThrow(() => checkCapabilities(quick, repository))
   })
 
-  test('feature is rejected without verify, naming the steps', () => {
+  test('tested-change is rejected without verify, naming the steps', () => {
     rejects(
-      () => checkCapabilities(feature, repository),
+      () => checkCapabilities(tested, repository),
       'invalid',
-      /Workflow "feature" needs capabilities that acme\/shop does not provide: verify \(needed by test\)/,
+      /Workflow "tested-change" needs capabilities that acme\/shop does not provide: verify \(needed by test\)/,
     )
     assert.doesNotThrow(() =>
-      checkCapabilities(feature, {
+      checkCapabilities(tested, {
         slug: 'acme/shop',
         capabilities: ['verify'],
       }),

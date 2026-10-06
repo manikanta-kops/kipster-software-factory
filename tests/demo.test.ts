@@ -284,9 +284,9 @@ test('demo includes valid/invalid kits and current/stale feature verdicts with p
     [demo.tickets.proofStale, true],
   ] as const) {
     const proof = await detail(number)
-    assert.equal(proof.ticket.workflow.name, 'feature')
+    assert.equal(proof.ticket.workflow.name, 'lead')
     const verdict = proof.attempts.find(
-      (a) => a.stepId === 'test' && a.outcome === 'passed',
+      (a) => a.stepId === 'final-test' && a.outcome === 'passed',
     )!
     const latest = proof.attempts.findLast((a) => a.headCommit !== null)!
     assert.equal(verdict.headCommit !== latest.headCommit, stale)

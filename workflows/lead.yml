@@ -20,8 +20,8 @@ steps:
     action: run-tasks
     with:
       maxParallel: 3
-      maxTasks: 12
-    limit: 25
+      maxTasks: 20
+    limit: 50
     routes:
       reported: lead
 

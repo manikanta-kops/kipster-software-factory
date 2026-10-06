@@ -42,7 +42,7 @@ test('only child task and task-pr testers may skip missing needs', async () => {
       /needs capabilities/,
     )
   }
-  for (const name of ['feature', 'bug']) {
+  for (const name of ['lead', 'bug']) {
     const { workflow } = await builtInWorkflow(name)
     assert.throws(
       () => checkCapabilities(workflow, repository, true),

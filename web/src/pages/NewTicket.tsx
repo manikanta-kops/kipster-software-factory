@@ -31,10 +31,13 @@ export function NewTicket() {
   const [title, setTitle] = useState('')
   const [body, setBody] = useState('')
   const [dependencies, setDependencies] = useState<string[]>([])
+  const selectableWorkflows = workflows.data?.workflows.filter(
+    (item) => item.selectable !== false,
+  )
   const selectedRepository = repositories.data?.repositories.find(
     (item) => item.slug === repository,
   )
-  const selectedWorkflow = workflows.data?.workflows.find(
+  const selectedWorkflow = selectableWorkflows?.find(
     (item) => item.name === workflow,
   )
   const onboardWorkflow = workflows.data?.workflows.find(
@@ -42,9 +45,8 @@ export function NewTicket() {
   )
   const needsKit =
     selectedRepository &&
-    workflows.data?.workflows.some(
+    selectableWorkflows?.some(
       (item) =>
-        ['feature', 'bug'].includes(item.name) &&
         item.steps.some((step) => step.needs.includes('verify')) &&
         !selectedRepository.kit.capabilities.includes('verify'),
     )
@@ -135,7 +137,7 @@ export function NewTicket() {
                     repository,
                     workflow: 'onboard-repo',
                     title: `Verify the kit for ${repository}`,
-                    body: 'Prepare a repository kit and verify it so feature and bug workflows can run.',
+                    body: 'Prepare a repository kit and verify it so lead and bug workflows can run.',
                   })
                 }
               >
@@ -150,7 +152,7 @@ export function NewTicket() {
                 Choose a repository to see which workflows can run.
               </p>
             )}
-            {workflows.data?.workflows.map((item) => {
+            {selectableWorkflows?.map((item) => {
               const reason = unavailable(selectedRepository, item)
               return (
                 <label
