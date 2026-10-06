@@ -12,6 +12,7 @@ export const TASK_COLUMNS = `k.*,
     CASE WHEN c.id IS NULL THEN NULL ELSE jsonb_build_object(
       'id', c.id, 'number', c.number, 'status', c.status, 'branch', c.branch,
       'currentStep', c.current_step, 'pullRequestUrl', c.pull_request_url,
+      'skippedSteps', c.skipped_steps,
       'waiting', CASE WHEN w.id IS NULL THEN NULL ELSE jsonb_build_object(
         'attemptId', w.id, 'stepId', w.step_id, 'for', w.waiting_for,
         'askReason', w.ask_reason, 'summary', w.summary,

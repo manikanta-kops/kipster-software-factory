@@ -65,3 +65,7 @@ plan/log fixture. Fixture endpoints exist only in `tests/e2e/server.ts`.
 `appearance.spec.ts` captures every page plus ask/merge ticket states at 390 px
 and 1280 px in light and dark themes and checks for horizontal page overflow.
 Screenshots are attached to Playwright test results.
+
+A task whose tester was skipped shows **Untested** near its status, including
+the missing capability and skipped step. Lead tickets also show this warning
+for merged untested tasks. These warnings persist independently of verdicts.

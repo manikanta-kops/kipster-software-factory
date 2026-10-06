@@ -2,6 +2,7 @@
 // Timestamps are ISO 8601 strings so the same shapes work on both sides of the wire.
 import type { AgentChoice } from './catalog.ts'
 import type { Next } from './routing.ts'
+import type { SkippedStep } from './task-testing.ts'
 
 export const REPOSITORY_STATUSES = ['pending', 'ready', 'failed'] as const
 export type RepositoryStatus = (typeof REPOSITORY_STATUSES)[number]
@@ -132,6 +133,7 @@ export interface Waiting {
 }
 
 export interface Ticket {
+  readonly skippedSteps?: readonly SkippedStep[]
   readonly id: number
   /** Shown to people as #number. */
   readonly number: number
@@ -267,6 +269,7 @@ export interface LeadTask {
   /** The lead branch commit a branch task started from. */
   readonly baseCommit: string | null
   readonly child: {
+    readonly skippedSteps?: readonly SkippedStep[]
     readonly id: number
     readonly number: number
     readonly status: TicketStatus

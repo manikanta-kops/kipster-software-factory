@@ -1,3 +1,4 @@
+import { untestedReasons } from '../domain/task-testing.ts'
 import type { AgentConfig } from '../config.ts'
 import { type RoleName, runTasksParams } from '../domain/catalog.ts'
 import { FactoryError } from '../domain/errors.ts'
@@ -149,7 +150,7 @@ export async function pollTasks(
           database,
           task.id,
           'merged',
-          `Pull request merged: ${child.pullRequestUrl ?? 'unknown URL'}`,
+          `Pull request merged: ${child.pullRequestUrl ?? 'unknown URL'}${untestedTaskNote(task)}`,
         )
     } else if (child.status === 'cancelled')
       await updateTask(
@@ -245,8 +246,13 @@ async function integrate(
     merged.conflicts ? 'conflict' : 'merged',
     merged.conflicts
       ? `Conflicts with the lead branch; the system aborted the merge. Files: ${merged.conflicts.join(', ')}. Branch ${branch} keeps the work.`
-      : `Merged into the lead branch at ${merged.head}.`,
+      : `Merged into the lead branch at ${merged.head}.${untestedTaskNote(task)}`,
   )
+}
+
+function untestedTaskNote(task: LeadTask): string {
+  const reasons = untestedReasons({ ticket: task.child ?? {} })
+  return reasons.length ? ` Landed untested. ${reasons.join('; ')}.` : ''
 }
 
 async function childEnding(options: RunnerOptions, number: number) {

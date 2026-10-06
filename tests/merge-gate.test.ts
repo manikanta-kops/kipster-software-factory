@@ -224,3 +224,22 @@ test('normal in-progress blockers are waits; real problems stay problems', () =>
   )
   assert.deepEqual(split({ ci: 'failed' }).problems, ['CI failed'])
 })
+
+test('skipped task proof needs owner without an impossible tester blocker; merged untested tasks retain owner merging', () => {
+  const skipped = gate({
+    hasTester: false,
+    tester: null,
+    untestedReasons: ['Untested: no verify capability (skipped test)'],
+  })
+  assert.equal(skipped.ready, true)
+  assert.deepEqual(skipped.needsOwner, [
+    'Untested: no verify capability (skipped test)',
+  ])
+  const lead = gate({
+    untestedReasons: ['Untested task docs: no verify capability'],
+  })
+  assert.equal(lead.ready, true)
+  assert.deepEqual(lead.needsOwner, [
+    'Untested task docs: no verify capability',
+  ])
+})

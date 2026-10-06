@@ -284,7 +284,8 @@ The database records successful removal (or an already absent worktree), so
 subsequent passes and restarts skip it. The cache and step metadata are retained; recorded files are owned by the per-ticket evidence store. `maintain-pr` synchronizes branches
 with the fetched base and watches CI (Slice 3). Kit
 capabilities are refreshed from committed default-branch blobs after each cache
-fetch; workflows needing missing capabilities remain gated by the store.
+fetch; workflows needing missing capabilities remain gated by the store, except
+for the child-task tester rule below.
 
 ### Prompt and result contract
 
@@ -845,3 +846,11 @@ Cancelling a lead cancels its unfinished tasks and their child tickets in the
 same transaction. A child ticket shows its lead and task; a lead ticket shows
 each task with its child, status, result and pull request. The API adds
 `tasks` and `parentTask` to ticket responses.
+
+Child tickets using `task` or `task-pr` skip tester steps whose declared needs
+are missing. Migration 013 stores the skipped steps and missing capabilities on
+the ticket; execution removes them and routes to the next retained step, even
+after restart. Top-level tickets and other roles retain capability rejection.
+The ticket, task report, PR description and merge gate say **untested**; a lead's
+final PR also carries the warning for merged untested tasks. These warnings
+require owner merging even if the lead's final tester passes.

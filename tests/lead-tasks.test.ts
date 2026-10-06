@@ -1,3 +1,10 @@
+import { writeFile } from 'node:fs/promises'
+import { join } from 'node:path'
+import { proofContext } from './fixtures/proof-agent.ts'
+import { untestedReasons } from '../src/domain/task-testing.ts'
+import { getMergeGate } from '../src/store/merge-gates.ts'
+import { writePullRequest } from '../src/engine/pr-writer.ts'
+import { withUntestedNotice } from '../src/engine/pr-writer.ts'
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { pollAutoMerge } from '../src/engine/auto-merge.ts'
@@ -548,4 +555,204 @@ test('a task agent runs only the builder; workflow overrides and the allowed lis
       ['review', opusMedium],
     ],
   )
+})
+
+for (const testing of ['missing', 'verify'] as const) {
+  test(`a built-in branch task ${testing === 'missing' ? 'lands untested without verify, including after restart' : 'runs its tester when verify is present'}`, async (t) => {
+    const f = await leadFixture({}, testing)
+    t.after(() => f.close())
+    if (testing === 'verify')
+      assert.equal(
+        f.repository.kit?.status,
+        'valid',
+        f.repository.kit?.error ?? 'Expected a valid verify kit',
+      )
+    const builderWait = deferred()
+    f.setBehaviour(async (role, invocation) => {
+      if (role === 'lead') {
+        const { tasks } = leadState(invocation.prompt)
+        return result(invocation.directory, {
+          outcome: tasks.length ? 'done' : 'delegate',
+          summary: 'One task',
+          artifacts: [],
+          ...(tasks.length
+            ? {}
+            : {
+                tasks: [
+                  {
+                    key: 'change',
+                    title: 'Change',
+                    instructions: 'Write change.txt',
+                  },
+                ],
+              }),
+        })
+      }
+      if (role === 'builder') {
+        await builderWait.wait(invocation.signal)
+        return build(invocation, 'change.txt', 'changed\n')
+      }
+      assert.equal(role, 'tester')
+      const instance = proofContext(invocation.prompt).instances[0]!
+      const response = await fetch(`${instance.url}/checkout`, {
+        method: 'POST',
+        body: '{}',
+      })
+      assert.equal(response.status, 200)
+      const path = join(instance.evidenceDir, 'checkout.json')
+      await writeFile(path, await response.text())
+      return result(invocation.directory, {
+        outcome: 'passed',
+        summary: 'Checkout passed',
+        artifacts: [
+          {
+            kind: 'evidence',
+            title: 'Checkout',
+            path,
+            scenario: 'Checkout',
+            scenarioResult: 'passed',
+          },
+        ],
+      })
+    })
+    const lead = await f.lead()
+    await f.start()
+    await until(
+      async () => f.invocations.filter((item) => item.role === 'builder'),
+      (items) => items.length === 1,
+    )
+    const running = await f.detail(lead.number)
+    const childNumber = running.tasks[0]!.child!.number
+    const child = await f.detail(childNumber)
+    const expected =
+      testing === 'missing'
+        ? [{ stepId: 'test', missingCapabilities: ['verify'] }]
+        : []
+    assert.deepEqual(child.ticket.skippedSteps, expected)
+    if (testing === 'missing') {
+      await f.stop()
+      await f.start()
+      await until(
+        async () => f.invocations.filter((item) => item.role === 'builder'),
+        (items) => items.length === 2,
+      )
+      assert.deepEqual(
+        (await f.detail(childNumber)).ticket.skippedSteps,
+        expected,
+      )
+    }
+    builderWait.release()
+    const done = await until(
+      () => f.detail(lead.number),
+      (detail) => detail.ticket.currentStep === 'confirm',
+    )
+    assert.equal(done.tasks[0]!.status, 'merged')
+    assert.ok((await f.files(done.ticket.branch)).includes('change.txt'))
+    const finishedChild = await f.detail(childNumber)
+    assert.equal(finishedChild.ticket.status, 'done')
+    assert.deepEqual(finishedChild.ticket.skippedSteps, expected)
+    const testers = f.invocations.filter((item) => item.role === 'tester')
+    assert.equal(testers.length, testing === 'missing' ? 0 : 1)
+    if (testing === 'missing') {
+      assert.match(done.tasks[0]!.result!, /Landed untested/)
+      assert.ok(
+        done.artifacts.some(
+          (artifact) =>
+            artifact.title === 'Task report' &&
+            artifact.content?.includes('untested'),
+        ),
+      )
+      const warnings = untestedReasons(done)
+      assert.deepEqual(warnings, ['Untested task change: no verify capability'])
+      const signal = AbortSignal.timeout(60_000)
+      const head = await f.workspaces.head(done.ticket, signal)
+      const description = await writePullRequest(
+        f,
+        {
+          ticket: done.ticket,
+          attempt: done.attempts.at(-1)!,
+          workflow: done.workflow,
+          step: done.workflow.steps.at(-1)!,
+          repository: f.repository,
+        },
+        f.workspaces.path(done.ticket),
+        head,
+        signal,
+      )
+      assert.match(description, /Untested task change: no verify capability/)
+
+      assert.match(
+        withUntestedNotice('Lead PR', warnings),
+        /Untested task change/,
+      )
+    } else {
+      assert.equal(
+        finishedChild.attempts.find((attempt) => attempt.stepId === 'test')
+          ?.outcome,
+        'passed',
+      )
+      assert.deepEqual(untestedReasons(done), [])
+    }
+    assert.deepEqual(f.errors, [])
+  })
+}
+
+test('a task-pr without verify reaches the owner merge gate and its published description says untested', async (t) => {
+  const f = await leadFixture({}, 'missing')
+  t.after(() => f.close())
+  f.setBehaviour(async (role, invocation) => {
+    if (role === 'lead')
+      return result(invocation.directory, {
+        outcome: 'delegate',
+        summary: 'Wait for PR',
+        artifacts: [],
+        ...(leadState(invocation.prompt).tasks.length
+          ? {}
+          : {
+              tasks: [
+                {
+                  key: 'docs',
+                  title: 'Docs',
+                  instructions: 'Write docs.txt',
+                  land: 'pr',
+                },
+              ],
+            }),
+      })
+    if (role === 'builder') return build(invocation, 'docs.txt', 'docs\n')
+    assert.equal(role, 'reviewer')
+    return result(invocation.directory, {
+      outcome: 'passed',
+      summary: 'Reviewed',
+      artifacts: [],
+    })
+  })
+  const lead = await f.lead()
+  await f.start()
+  const ready = await until(
+    () => f.detail(lead.number),
+    (detail) => detail.tasks[0]?.status === 'pr-ready',
+  )
+  const child = await f.detail(ready.tasks[0]!.child!.number)
+  assert.equal(child.ticket.waiting?.for, 'pull-request-merge')
+  assert.deepEqual(child.ticket.skippedSteps, [
+    { stepId: 'test', missingCapabilities: ['verify'] },
+  ])
+  assert.ok(
+    child.artifacts.some(
+      (artifact) =>
+        artifact.title === 'Pull request description' &&
+        artifact.content?.includes('Untested: no verify capability'),
+    ),
+  )
+  assert.equal(f.invocations.filter((item) => item.role === 'tester').length, 0)
+  const snapshot = await getMergeGate(f.database, child.ticket.id)
+  assert.ok(
+    snapshot?.latest.needsOwner.includes(
+      'Untested: no verify capability (skipped test)',
+    ),
+  )
+  assert.equal(snapshot?.latest.ready, true)
+
+  assert.deepEqual(f.errors, [])
 })

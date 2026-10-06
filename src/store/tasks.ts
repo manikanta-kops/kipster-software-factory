@@ -66,7 +66,12 @@ export async function startTask(
     ])
     const task = rows[0]
     if (!task || task.status !== 'pending') return null
-    const ticket = await createTicketInTransaction(connection, child)
+    const ticket = await createTicketInTransaction(
+      connection,
+      child,
+      true,
+      true,
+    )
     await connection.query(
       `UPDATE tasks SET status = 'running', child_ticket_id = $2, base_commit = $3, updated_at = now() WHERE id = $1`,
       [taskId, ticket.id, baseCommit],

@@ -2,6 +2,10 @@ import {
   withPreparedArtifacts,
   type PreparedArtifact,
 } from './artifact-preparation.ts'
+import {
+  withoutSkippedSteps,
+  type SkippedStep,
+} from '../domain/task-testing.ts'
 import { listTicketLinks, listDependencies } from './ticket-links.ts'
 import { getTaskOfChild, listTasks, taskEvent } from './task-records.ts'
 import { type AgentChoice, runTasksParams } from '../domain/catalog.ts'
@@ -175,7 +179,7 @@ export async function getTicketDetail(
   ])
   return {
     ticket,
-    workflow,
+    workflow: withoutSkippedSteps(workflow, ticket.skippedSteps ?? []),
     attempts,
     artifacts,
     events,
@@ -253,6 +257,7 @@ export async function createTicketInTransaction(
   connection: Connection,
   input: NewTicket,
   requireCapabilities = true,
+  isLeadTask = false,
 ): Promise<Ticket> {
   const { workflow, version, source } = input.workflow
   const title = input.title.trim()
@@ -271,7 +276,9 @@ export async function createTicketInTransaction(
       `${repository.slug} is ${repository.status}${repository.lastError ? ` (${repository.lastError})` : ''}; tickets can start once it is ready`,
     )
   }
-  if (requireCapabilities) checkCapabilities(workflow, repository)
+  const skippedSteps = requireCapabilities
+    ? checkCapabilities(workflow, repository, isLeadTask)
+    : []
   const dependencies: Repository[] = []
   for (const slug of input.dependencies ?? []) {
     const dependency = await getRepository(connection, slug)
@@ -299,12 +306,12 @@ export async function createTicketInTransaction(
     "SELECT nextval('ticket_numbers')::integer AS number",
   )
   const number = (rows[0] as { number: number }).number
-  const opening = startTicket(workflow)
+  const opening = startTicket(withoutSkippedSteps(workflow, skippedSteps))
   const status = ticketStatus({ status: opening.status, next: null })
   const inserted = await connection.query<{ id: number }>(
     `INSERT INTO tickets (number, repository_id, workflow_name, workflow_version,
-                            title, body, branch, current_step, status)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+                            title, body, branch, current_step, status, skipped_steps)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
        RETURNING id`,
     [
       number,
@@ -316,6 +323,7 @@ export async function createTicketInTransaction(
       branchName(number, title),
       opening.stepId,
       status,
+      JSON.stringify(skippedSteps),
     ],
   )
   const ticketId = (inserted.rows[0] as { id: number }).id
@@ -1164,8 +1172,9 @@ export async function lockTicket(
     number: number
     status: TicketStatus
     definition: Workflow
+    skipped_steps: SkippedStep[]
   }>(
-    `SELECT t.id, t.number, t.status, v.definition
+    `SELECT t.id, t.number, t.status, t.skipped_steps, v.definition
      FROM tickets t
      JOIN workflow_versions v
        ON v.name = t.workflow_name AND v.version = t.workflow_version
@@ -1184,7 +1193,7 @@ export async function lockTicket(
     id: row.id,
     number: row.number,
     status: row.status,
-    workflow: row.definition,
+    workflow: withoutSkippedSteps(row.definition, row.skipped_steps),
     attempts: await listAttempts(connection, row.id),
   }
 }
@@ -1427,10 +1436,9 @@ async function loadContext(
     database,
     ticket.repository.id,
   )) as Repository
-  const workflow = await loadWorkflow(
-    database,
-    ticket.workflow.name,
-    ticket.workflow.version,
+  const workflow = withoutSkippedSteps(
+    await loadWorkflow(database, ticket.workflow.name, ticket.workflow.version),
+    ticket.skippedSteps ?? [],
   )
   return {
     attempt,
@@ -1457,6 +1465,7 @@ const TICKET_SELECT = `
   LEFT JOIN attempts w ON w.ticket_id = t.id AND w.status = 'waiting'`
 
 interface TicketRow {
+  skipped_steps: SkippedStep[]
   id: number
   number: number
   repository_id: number
@@ -1481,6 +1490,7 @@ interface TicketRow {
 
 function toTicket(row: TicketRow): Ticket {
   return {
+    skippedSteps: row.skipped_steps,
     id: row.id,
     number: row.number,
     repository: { id: row.repository_id, slug: row.repository_slug },

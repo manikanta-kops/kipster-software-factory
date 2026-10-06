@@ -19,6 +19,7 @@ import type {
   TaskStatus,
   TicketResponse,
 } from '../../../src/api/contract.ts'
+import { untestedReasons } from '../../../src/domain/task-testing.ts'
 import { describeAgent } from '../../../src/domain/settings.ts'
 import { isFinalTask } from '../../../src/domain/tasks.ts'
 import { api } from '../api.ts'
@@ -95,6 +96,11 @@ export function TicketPage({
           ) : (
             <Status value={ticket.status} />
           )}
+          {untestedReasons(query.data).map((reason) => (
+            <span className="badge" key={reason}>
+              {reason}
+            </span>
+          ))}
         </div>
       </header>
       <div className="ticket-primary">
