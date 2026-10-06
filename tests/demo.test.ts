@@ -63,7 +63,60 @@ describe('demo data', () => {
       assert.equal(ticket.status, status, `#${number}`)
       assert.equal(ticket.waiting?.for ?? null, waitingFor, `#${number}`)
     }
-    assert.equal((await listTickets(demo.database)).length, 12)
+    assert.equal((await listTickets(demo.database)).length, 13)
+  })
+
+  test('retired quick-change keeps its stored workflow and completed plan', async () => {
+    const { ticket, workflow, attempts, artifacts } = await detail(
+      demo.tickets.retiredWorkflow,
+    )
+    assert.equal(ticket.title, 'Historical quick-change ticket')
+    assert.equal(ticket.repository.slug, 'kipster/demo-shop')
+    assert.equal(ticket.lightsOut, false)
+    assert.equal(ticket.status, 'needs-you')
+    assert.equal(ticket.currentStep, 'approve-plan')
+    assert.equal(ticket.waiting?.for, 'human')
+    assert.equal(workflow.name, 'quick-change')
+    assert.equal(workflow.steps.length, 6)
+    assert.partialDeepStrictEqual(workflow.steps, [
+      { id: 'plan', kind: 'agent', role: 'planner' },
+      {
+        id: 'approve-plan',
+        kind: 'human',
+        routes: { 'changes-needed': 'plan' },
+      },
+      { id: 'build', kind: 'agent', role: 'builder' },
+      {
+        id: 'review',
+        kind: 'agent',
+        role: 'reviewer',
+        limit: 2,
+        routes: { 'changes-needed': 'build' },
+      },
+      {
+        id: 'maintain-pr',
+        kind: 'system',
+        action: 'maintain-pr',
+        routes: {
+          conflict: 'build',
+          'ci-failed': 'build',
+          'base-moved': 'review',
+        },
+      },
+      { id: 'merge', kind: 'system', action: 'merge' },
+    ])
+    const planAttempt = attempts.find((attempt) => attempt.stepId === 'plan')
+    assert.ok(planAttempt)
+    assert.equal(planAttempt.status, 'finished')
+    assert.equal(planAttempt.outcome, 'done')
+    assert.equal(planAttempt.summary, 'Historical plan ready.')
+    assert.ok(planAttempt.finishedAt)
+    const plan = artifacts.find((artifact) => artifact.kind === 'plan')
+    assert.ok(plan)
+    assert.equal(plan.attemptId, planAttempt.id)
+    assert.equal(plan.title, 'Historical plan')
+    assert.match(plan.content ?? '', /Retain the old workflow history/)
+    assert.equal((await builtInLibrary()).get('quick-change'), undefined)
   })
 
   test('lights-out demo exposes typed decisions and a linked child without running agents', async () => {
@@ -179,6 +232,7 @@ test('seed CLI retains and serves demo evidence with a relative home', async (t)
     { cwd: directory, timeout: 15_000 },
   )
   assert.match(stdout, /Seeded demo tickets:/)
+  assert.match(stdout, /#\d+  retiredWorkflow/)
   const available = createServer()
   available.listen(0, '127.0.0.1')
   await once(available, 'listening')
