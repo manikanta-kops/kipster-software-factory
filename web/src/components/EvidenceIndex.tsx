@@ -13,7 +13,7 @@ export function EvidenceIndex({
       : detail.artifacts.find((a) => a.id === selected)
   if (selected !== undefined)
     return (
-      <section aria-label="Evidence item">
+      <section className="evidence-card" aria-label="Evidence item">
         <a href={`#/tickets/${detail.ticket.number}`}>
           ‹ Back to ticket #{detail.ticket.number}
         </a>
@@ -30,8 +30,8 @@ export function EvidenceIndex({
   const scenarios = detail.evidenceIndex ?? []
   if (!detail.artifacts.some((a) => a.kind === 'evidence')) return null
   return (
-    <section aria-label="Scenario evidence">
-      <h2>Scenario evidence</h2>
+    <section className="evidence-card" aria-label="Scenario evidence">
+      <h2 className="section-title">Scenario evidence</h2>
       {!scenarios.length && (
         <p className="muted">
           No scenario labels recorded. Evidence is in the archive.

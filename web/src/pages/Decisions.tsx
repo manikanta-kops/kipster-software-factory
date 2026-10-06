@@ -19,7 +19,7 @@ export function DecisionsPage() {
     </li>
   )
   return (
-    <article>
+    <article className="decisions-page">
       <header className="page-heading">
         <div>
           <h1>Decisions</h1>
@@ -29,58 +29,67 @@ export function DecisionsPage() {
           </p>
         </div>
       </header>
-      <section>
-        <h2>Needs you</h2>
-        {pending.length ? (
-          <ol className="timeline">{pending.map(row)}</ol>
-        ) : (
-          <p className="muted">
-            No pending decisions in the latest 100 outcomes.
-          </p>
-        )}
-      </section>
-      <section>
-        <h2>Overrides by workflow step</h2>
-        {steps.length ? (
-          <div className="decision-table">
-            <table>
-              <thead>
-                <tr>
-                  <th>Workflow / step</th>
-                  <th>Decisions</th>
-                  <th>Owner decisions</th>
-                  <th>Overrides</th>
-                </tr>
-              </thead>
-              <tbody>
-                {steps.map((s) => (
-                  <tr key={`${s.workflowVersion}/${s.stepId}`}>
-                    <td>
-                      {s.workflow} / {s.stepId}
-                      <small className="muted">
-                        {' '}
-                        · {s.workflowVersion.slice(0, 8)}
-                      </small>
-                    </td>
-                    <td>{s.total}</td>
-                    <td>{s.ownerDecisions}</td>
-                    <td>{s.overrides}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        ) : (
-          <p className="muted">No decisions yet.</p>
-        )}
-      </section>
-      <section>
-        <h2>Recent decisions</h2>
-        <p className="muted">
-          Latest 100 outcomes; counts above include the full history.
+      {decisions.length === 0 && steps.length === 0 ? (
+        <p className="quiet-card">
+          No decisions yet. They appear here when a step decides how a ticket
+          moves on.
         </p>
-        <ol className="timeline">{finished.map(row)}</ol>
-      </section>
+      ) : (
+        <>
+          <section>
+            <h2>Needs you</h2>
+            {pending.length ? (
+              <ol className="timeline">{pending.map(row)}</ol>
+            ) : (
+              <p className="muted">
+                No pending decisions in the latest 100 outcomes.
+              </p>
+            )}
+          </section>
+          <section>
+            <h2>Overrides by workflow step</h2>
+            {steps.length ? (
+              <div className="decision-table">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Workflow / step</th>
+                      <th>Decisions</th>
+                      <th>Owner decisions</th>
+                      <th>Overrides</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {steps.map((s) => (
+                      <tr key={`${s.workflowVersion}/${s.stepId}`}>
+                        <td>
+                          {s.workflow} / {s.stepId}
+                          <small className="muted">
+                            {' '}
+                            · {s.workflowVersion.slice(0, 8)}
+                          </small>
+                        </td>
+                        <td>{s.total}</td>
+                        <td>{s.ownerDecisions}</td>
+                        <td>{s.overrides}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              <p className="muted">No decisions yet.</p>
+            )}
+          </section>
+          <section>
+            <h2>Recent decisions</h2>
+            <p className="muted">
+              Latest 100 outcomes; counts above include the full history.
+            </p>
+            <ol className="timeline">{finished.map(row)}</ol>
+          </section>
+        </>
+      )}
     </article>
   )
 }
