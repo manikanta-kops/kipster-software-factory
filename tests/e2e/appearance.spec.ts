@@ -23,7 +23,7 @@ for (const colorScheme of ['light', 'dark'] as const) {
           route: `/tickets/${factory.tickets.proofStale}`,
           heading: 'Cart proof needs another run',
         },
-        { name: 'needs-you', route: '/', heading: 'Needs you' },
+        { name: 'needs-you', route: '/', heading: 'Ticket summaries' },
         { name: 'new-ticket', route: '/tickets/new', heading: 'New ticket' },
         {
           name: 'ticket',
@@ -206,3 +206,108 @@ for (const colorScheme of ['light', 'dark'] as const) {
     })
   }
 }
+
+for (const colorScheme of ['light', 'dark'] as const)
+  for (const width of [390, 1280])
+    test(`ticket summaries at ${width}px in ${colorScheme}`, async ({
+      page,
+      factory,
+    }, testInfo) => {
+      await page.setViewportSize({ width, height: 900 })
+      await page.emulateMedia({ colorScheme, reducedMotion: 'reduce' })
+      await page.goto(`${factory.url}/#/`)
+      const rows = page.getByRole('region', { name: 'Ticket summaries' })
+      await expect(rows).toBeVisible()
+      for (const [number, status] of [
+        [factory.tickets.done, 'Ready'],
+        [factory.tickets.approvePlan, 'Needs you · 1'],
+        [factory.tickets.askAfterLimit, 'Blocked'],
+      ] as const) {
+        const row = rows.locator('.today-summary').filter({
+          has: page.locator(`a.summary-title[href="#/tickets/${number}"]`),
+        })
+        await expect(row.locator('.summary-status')).toHaveText(status)
+        await expect(row.locator('.summary-happened')).toBeVisible()
+        await expect(
+          row.getByRole('link', { name: /View details/ }),
+        ).toHaveAttribute('href', `#/tickets/${number}`)
+      }
+      expect(
+        await page.evaluate(
+          'document.documentElement.scrollWidth <= window.innerWidth',
+        ),
+      ).toBeTruthy()
+      const todayPath = testInfo.outputPath(
+        `today-summary-${width}-${colorScheme}.png`,
+      )
+      await page.evaluate('window.scrollTo(0, 0)')
+      await page.screenshot({ path: todayPath, fullPage: true })
+      await testInfo.attach('Today summary lines', {
+        path: todayPath,
+        contentType: 'image/png',
+      })
+      const number = factory.tickets.approvePlan
+      await rows
+        .locator('.today-summary')
+        .filter({
+          has: page.locator(`a.summary-title[href="#/tickets/${number}"]`),
+        })
+        .getByRole('link', { name: /View details/ })
+        .click()
+      await expect(page).toHaveURL(`${factory.url}/#/tickets/${number}`)
+      for (const [ticketNumber, status] of [
+        [number, 'Needs you · 1'],
+        [factory.tickets.done, 'Ready'],
+        [factory.tickets.askAfterLimit, 'Blocked'],
+      ] as const) {
+        await page.goto(`${factory.url}/#/tickets/${ticketNumber}`)
+        const card = page.getByRole('region', {
+          name: 'Ticket summary',
+          exact: true,
+        })
+        await expect(card).toBeVisible()
+        await expect(card.locator('.summary-status')).toHaveText(status)
+        await expect(card.locator('.summary-happened')).toBeVisible()
+        expect(
+          await card.evaluate(
+            (element) => element.scrollWidth <= element.clientWidth,
+          ),
+        ).toBeTruthy()
+        expect(
+          await page.evaluate(
+            'document.documentElement.scrollWidth <= window.innerWidth',
+          ),
+        ).toBeTruthy()
+        const screenshot = testInfo.outputPath(
+          `ticket-summary-${status.split(' ')[0]}-${width}-${colorScheme}.png`,
+        )
+        await page.evaluate('window.scrollTo(0, 0)')
+        await card.screenshot({ path: screenshot })
+        await testInfo.attach(`Ticket summary ${status}`, {
+          path: screenshot,
+          contentType: 'image/png',
+        })
+        await card.getByRole('button', { name: 'View details' }).click()
+        await expect(page.locator('#ticket-details')).toBeFocused()
+        await expect(page.locator('#ticket-details')).toBeInViewport()
+      }
+    })
+
+test.describe('legacy summary compatibility', () => {
+  test.use({ withLegacy: true })
+  test('a ticket without a stored report still renders', async ({
+    page,
+    factory,
+  }) => {
+    await page.goto(`${factory.url}/#/tickets/${factory.legacyTicket}`)
+    await expect(
+      page.getByRole('heading', { name: 'Historical quick-change ticket' }),
+    ).toBeVisible()
+    await expect(
+      page.getByRole('region', { name: 'Ticket summary', exact: true }),
+    ).toHaveCount(0)
+    await expect(
+      page.getByRole('region', { name: 'Review and approve the plan' }),
+    ).toBeVisible()
+  })
+})

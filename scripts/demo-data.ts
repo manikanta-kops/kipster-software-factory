@@ -201,6 +201,7 @@ async function seedLocked(
   }
 
   // Done: every step ran and the pull request merged.
+  // Lifecycle writes seed Ready, Needs you and Blocked reports from synthetic facts.
   const done = await create(
     'Add a dark mode toggle',
     'Add a toggle in **Settings** that switches the shop to a dark theme and remembers the choice.',
