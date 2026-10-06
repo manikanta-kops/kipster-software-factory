@@ -869,8 +869,14 @@ When enabled, a lead's `plan-ready` routed to a human `approve-plan` is
 approved by the system in the same lifecycle transaction. Its plan stays
 recorded, `decision.made` records the automatic approval, and the next prompt
 has `planApproved: true`. Other human steps still wait. Every agent prompt adds
-a short instruction to choose sensible defaults, record choices, and continue;
-irreversible actions wait, and publishing remains system work.
+a short instruction to choose sensible defaults, record choices, and continue.
+Base role prompts render paired default/lights-out blocks without markers or
+added blank lines; disabled tickets retain their original role text. Product
+questions choose and record defaults. A necessary forbidden-path change goes in
+its own commit with the reason recorded, and an otherwise passing reviewer flags
+the path and reason in `ownerReview`. Reproducers try alternative entry points,
+inputs and conditions before returning `not-reproduced`; that outcome still
+cannot start a fix. Irreversible actions wait, and publishing remains system work.
 
 Agents emit `{ "kind": "decision", "title": "…", "chose": "…",
 "alternative": "…", "reason": "…" }`, with three nonempty choice fields
