@@ -9,6 +9,7 @@ export interface StepContract {
 export interface Role extends StepContract {
   readonly summary: string
   readonly changes: 'nothing' | 'code' | 'pull-request' | 'kit'
+  readonly skipMissingNeedsInTaskWorkflows?: readonly string[]
 }
 
 export interface Action {
@@ -45,6 +46,7 @@ export const roles = {
     outcomes: ['done', 'needs-other-repo'],
   },
   tester: {
+    skipMissingNeedsInTaskWorkflows: ['task', 'task-pr'],
     summary:
       'Runs the real app against the acceptance scenarios and returns a verdict with evidence.',
     changes: 'nothing',

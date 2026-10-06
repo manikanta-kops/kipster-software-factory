@@ -108,6 +108,15 @@ Role notes:
   them `needs: [verify]`. Without it the file validates, but tickets on
   repositories without a verify kit fail at that step instead of being refused
   at creation.
+- Exception: a child ticket running `task` or `task-pr` skips a `tester`
+  whose declared needs are missing from the kit. The catalog defines this
+  rule; there is no step field. The ticket stores the skipped step and says
+  **untested**. Routing continues at the next retained step in file order,
+  including routes that targeted the skipped tester. Top-level tickets,
+  other workflows and reproducers still reject missing declared needs.
+  Task reports and PR descriptions say untested; a lead's final PR includes
+  merged untested tasks. The merge gate requires the owner for these PRs
+  even if the lead's final tester passes.
 - When a workflow contains any `reproducer` step, every `tester` in it is a
   bug tester. It fails unless a reproduction succeeded first, and the merge
   gate requires that reproduction. So never mix bug and feature paths in one

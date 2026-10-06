@@ -139,6 +139,12 @@ branch tasks two at a time, a report after each and a final `done`. Pull
 request tasks, testers inside tasks and Codex leads have not run live, nor on
 factory-floor.
 
+Tasks on the `task` and `task-pr` child workflows now skip a tester when its
+declared kit capabilities are missing, recording a durable **untested** marker.
+Task reports, ticket pages, task PRs and the lead's final PR make this explicit;
+the merge gate retains owner merging for merged untested tasks. Top-level
+workflows and reproducer steps still reject missing capabilities.
+
 ## Slice 6: The factory builds itself
 
 Factory work runs through the factory, then Kipster's does.

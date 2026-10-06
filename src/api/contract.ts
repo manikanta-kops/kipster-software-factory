@@ -246,3 +246,5 @@ export interface SettingsResponse {
 
 // POST /api/settings takes the whole document; a 400 names each invalid field in `issues`.
 export type SettingsRequest = Settings
+
+export type { SkippedStep } from '../domain/task-testing.ts'

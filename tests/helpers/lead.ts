@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { copyFile, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { engineConfig } from '../../src/config.ts'
@@ -6,6 +6,8 @@ import { startScheduler } from '../../src/engine/scheduler.ts'
 import type { AgentExecutor, AgentInvocation } from '../../src/executors/cli.ts'
 import { run } from '../../src/executors/process.ts'
 import type { GitHub, PullRequest } from '../../src/github/github.ts'
+import { loadKit } from '../../src/kit/kit.ts'
+import { builtInWorkflow } from './store.ts'
 import { loadLibrary } from '../../src/library/library.ts'
 import { listenForEvents } from '../../src/store/events.ts'
 import {
@@ -32,7 +34,7 @@ export async function until<T>(
   }
 }
 
-export type Role = 'lead' | 'builder' | 'reviewer' | 'writer'
+export type Role = 'lead' | 'builder' | 'reviewer' | 'writer' | 'tester'
 
 /** The context packet JSON, which ends at the first closing brace in column one. */
 export function packet(prompt: string): {
@@ -49,6 +51,7 @@ export function roleOf(prompt: string): Role {
   if (prompt.startsWith('You are the lead')) return 'lead'
   if (prompt.startsWith('You are the builder')) return 'builder'
   if (prompt.startsWith('You are an independent reviewer')) return 'reviewer'
+  if (prompt.startsWith('You are an independent tester')) return 'tester'
   if (prompt.startsWith('You are the writer')) return 'writer'
   throw new Error(`Unexpected role prompt: ${prompt.slice(0, 60)}`)
 }
@@ -139,7 +142,10 @@ steps:
 `,
 }
 
-export async function leadFixture(config: object = {}) {
+export async function leadFixture(
+  config: object = {},
+  testing?: 'missing' | 'verify',
+) {
   const root = await mkdtemp(join(tmpdir(), 'factory-lead-'))
   const home = join(root, 'home')
   await mkdir(home)
@@ -152,7 +158,35 @@ export async function leadFixture(config: object = {}) {
   await mkdir(source)
   await run('git', ['init', '-b', 'main'], { cwd: source })
   await writeFile(join(source, 'README.md'), 'app\n')
-  await commit(source, 'Initial')
+  if (testing === 'verify') {
+    await mkdir(join(source, '.kipster/verify/features'), { recursive: true })
+    await writeFile(
+      join(source, '.kipster/verify/README.md'),
+      'Drive POST /checkout; expect HTTP 200.',
+    )
+    await writeFile(
+      join(source, '.kipster/verify/features/checkout.md'),
+      '## Sub-features\nCheckout\n## How to get to it (user point of view)\nCall POST /checkout.\n## Driving it\n| User action | Exact command | Observable result |\n| --- | --- | --- |\n| Checkout | curl -X POST -d "{}" "$APP_URL/checkout" | HTTP 200 |\n## Gotchas\nHealth is readiness only.\n',
+    )
+    await copyFile(
+      new URL('../fixtures/verification-app.ts', import.meta.url),
+      join(source, 'app.ts'),
+    )
+    await writeFile(join(source, 'behaviour.txt'), 'fixed')
+    await writeFile(
+      join(source, '.kipster/kit.yml'),
+      `version: 1
+check: echo checked
+verify:
+  start: ${process.execPath} app.ts {port}
+  ready: http://127.0.0.1:{port}/health
+  ports: 1
+  database: none
+  timeoutSeconds: 5
+`,
+    )
+  }
+  const initial = await commit(source, 'Initial')
   await run('git', ['clone', '--bare', source, remote])
   const pending = await createRepository(store.database, {
     slug: 'fixture/app',
@@ -164,6 +198,7 @@ export async function leadFixture(config: object = {}) {
   )
   const repository = await markRepositoryReady(store.database, pending.id, {
     defaultBranch,
+    kit: (await loadKit(source, initial)).state,
   })
   const directory = join(root, 'workflows')
   await mkdir(directory)
@@ -172,6 +207,9 @@ export async function leadFixture(config: object = {}) {
   const loaded = await loadLibrary(directory)
   if (!loaded.ok) throw new Error(loaded.errors.join())
   const library = loaded.library
+  if (testing)
+    for (const name of ['task', 'task-pr'])
+      library.set(name, await builtInWorkflow(name))
 
   const invocations: (AgentInvocation & { role: Role; title: string })[] = []
   const errors: unknown[] = []
@@ -192,12 +230,25 @@ export async function leadFixture(config: object = {}) {
     },
     async maintain({ branch }) {
       const url = `https://github.com/fixture/app/pull/${pullRequests.size + 1}`
-      const pr: PullRequest = { url, state: 'OPEN' }
+      const pr: PullRequest = {
+        url,
+        state: 'OPEN',
+        ...(testing
+          ? {
+              headRefOid: await run('git', ['rev-parse', branch], {
+                cwd: workspaces.cache(repository),
+              }),
+              baseRefName: 'main',
+              isDraft: false,
+              mergeable: 'MERGEABLE' as const,
+            }
+          : {}),
+      }
       pullRequests.set(branch, pr)
       return pr
     },
     async checks() {
-      return { state: 'none', failures: [] }
+      return { state: testing ? 'passed' : 'none', failures: [] }
     },
     async feedback() {
       return []

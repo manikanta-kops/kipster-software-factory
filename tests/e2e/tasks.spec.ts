@@ -51,6 +51,13 @@ test('a lead ticket lists its tasks and each child links back to its lead', asyn
   await expect(fixtures).toContainText('Lead branch')
 
   await api.getByRole('link', { name: `#${child}` }).click()
+  await expect(page.locator('.ticket-meta')).toContainText(
+    'Untested: no verify capability (skipped test)',
+  )
+  await page.reload()
+  await expect(page.locator('.ticket-meta')).toContainText(
+    'Untested: no verify capability (skipped test)',
+  )
   const parent = page.getByRole('region', { name: 'Tasks' })
   await expect(
     parent.getByRole('heading', { name: 'Lead ticket' }),

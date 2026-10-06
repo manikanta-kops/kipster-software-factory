@@ -1,3 +1,4 @@
+import { untestedReasons } from '../domain/task-testing.ts'
 import { dependencySession } from './dependencies.ts'
 import { newEvidenceFile } from '../artifacts/storage.ts'
 import { scenarioIndex } from '../domain/evidence.ts'
@@ -45,11 +46,20 @@ export async function writePullRequest(
     ),
     head,
   )
+  const reasons = untestedReasons(detail)
+  const annotate = (body: string) => withUntestedNotice(body, reasons)
   const cached = await getPullRequestDescription(database, ticket.id, head)
-  if (cached && validDescription(cached, head, ticket.number, scenarios))
-    return cached
+  if (cached) {
+    const body = annotate(cached)
+    if (validDescription(body, head, ticket.number, scenarios)) {
+      if (body !== cached)
+        await savePullRequestDescription(database, ticket.id, head, body)
+      return body
+    }
+  }
   const instructions = `Head commit: ${head}
 Ticket number: ${ticket.number}
+Untested warnings: ${JSON.stringify(reasons)}
 Independent proof scenarios: ${JSON.stringify(scenarios)}
 Workflow has tester: ${detail.workflow.steps.some((s) => s.kind === 'agent' && s.role === 'tester')}
 Current evidence: ${JSON.stringify(evidence.map((a) => ({ title: a.title, scenario: a.scenario, result: a.scenarioResult, content: a.content })))}
@@ -124,12 +134,14 @@ Only evidence at this exact commit counts. If the workflow has no tester, state 
       )
       if (notes.length !== 1)
         throw new Error('Writer must provide one inline description note')
-      const body = notes[0]!.content!.trim()
+      const body = annotate(notes[0]!.content!.trim())
       if (!validDescription(body, head, ticket.number, scenarios))
         throw new Error(
           'Writer description requires <= 4,000 characters, a factory ticket reference without local links, Verified at current SHA and Merge danger with door classification',
         )
-      await addAttemptArtifacts(database, attempt.id, notes)
+      await addAttemptArtifacts(database, attempt.id, [
+        { ...notes[0]!, content: body },
+      ])
       await savePullRequestDescription(database, ticket.id, head, body)
       return body
     } catch (error) {
@@ -139,6 +151,14 @@ Only evidence at this exact commit counts. If the workflow has no tester, state 
     }
   }
   throw new Error('Writer did not produce a description')
+}
+
+export function withUntestedNotice(
+  body: string,
+  reasons: readonly string[],
+): string {
+  const missing = reasons.filter((reason) => !body.includes(reason))
+  return missing.length ? `${body}\n\n${missing.join('\n\n')}` : body
 }
 
 export function validDescription(

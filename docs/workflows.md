@@ -98,6 +98,14 @@ does not cancel linked tickets.
 
 ## Lead tasks
 
+Only child tickets running `task` or `task-pr` may skip a tester whose declared
+capabilities are missing. The catalog defines this exception; no step field
+enables it. The ticket durably records the skip as **untested**, and routes
+continue at the next step in file order. Routes targeting the skipped tester
+also continue there. Top-level tickets, other workflows and reproducers still
+require every declared capability. Untested task PRs and lead PRs containing
+merged untested tasks require owner merging.
+
 A `lead` step's `delegate` must route to a `run-tasks` step, which runs the
 tasks as child tickets and reports `reported` each time one finishes, fails,
 conflicts or has a pull request ready. `run-tasks` takes optional `with`
