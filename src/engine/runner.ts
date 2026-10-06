@@ -19,7 +19,7 @@ import {
 } from '../verification/harness.ts'
 import { mkdir, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import type { EngineConfig } from '../config.ts'
+import type { AttemptConfig } from '../config.ts'
 import { markRepositoryReady } from '../store/repositories.ts'
 import type { Database } from '../store/database.ts'
 import {
@@ -39,7 +39,7 @@ import { buildPrompt, readResult } from './prompt.ts'
 export interface RunnerOptions {
   database: Database
   home: string
-  config: EngineConfig
+  config: AttemptConfig
   workspaces: Workspaces
   github: GitHub
   decisions?: DecisionDependencies
@@ -189,7 +189,7 @@ async function executeAttempt(
     return
   }
   if (step.kind === 'agent') {
-    const selected = await agentFor(options, ticket, step.role)
+    const selected = await agentFor(options, context, step.role)
     const lead =
       step.role === 'lead'
         ? await leadContext(options, { ...context, repository }, detail)

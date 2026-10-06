@@ -10,6 +10,8 @@ import type {
   RepositoriesResponse,
   RepositoryResponse,
   ResolveRequest,
+  SettingsRequest,
+  SettingsResponse,
   TicketResponse,
   TicketsResponse,
   UploadWorkflowRequest,
@@ -81,6 +83,9 @@ export const api = {
     get<WorkflowsResponse>('/workflows', signal),
   uploadWorkflow: (body: UploadWorkflowRequest) =>
     post<WorkflowResponse>('/workflows', body),
+  settings: (signal: AbortSignal) => get<SettingsResponse>('/settings', signal),
+  saveSettings: (body: SettingsRequest) =>
+    post<SettingsResponse>('/settings', body),
   repositories: (signal: AbortSignal) =>
     get<RepositoriesResponse>('/repositories', signal),
   tickets: (signal: AbortSignal) => get<TicketsResponse>('/tickets', signal),

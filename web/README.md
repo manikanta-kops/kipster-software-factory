@@ -51,6 +51,12 @@ the repository clone URL to identify GitHub, rather than assuming every slug is
 hosted there. Repository kits show status, capabilities and validation errors;
 gated workflows offer one-click onboarding when the repository is ready.
 
+`#/settings` edits the engine settings through `GET`/`POST /api/settings`. The
+form validates with the same schema as the server (`src/domain/settings.ts`)
+before sending, shows each problem next to its field, and shows the server's
+issues when it rejects a save. Attempts show the agent CLI, model and effort
+they ran with.
+
 ## Browser verification
 
 `npm run test:e2e` builds the static app and runs against a throwaway PostgreSQL

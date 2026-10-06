@@ -15,6 +15,8 @@ import type {
   TicketLink,
 } from '../domain/records.ts'
 import type { Next } from '../domain/routing.ts'
+import type { AgentChoice, RoleName } from '../domain/catalog.ts'
+import type { Settings } from '../domain/settings.ts'
 
 export type {
   Artifact,
@@ -38,6 +40,8 @@ export type {
   WaitingFor,
 } from '../domain/records.ts'
 export type { Next } from '../domain/routing.ts'
+export type { AgentChoice } from '../domain/catalog.ts'
+export type { Settings, WorkflowOverride } from '../domain/settings.ts'
 
 export interface HealthResponse {
   readonly status: 'ok'
@@ -218,3 +222,22 @@ export interface OptionRequest {
 export interface AutoMergeRequest {
   readonly enabled: boolean
 }
+
+// GET /api/settings, and the answer to POST /api/settings
+export interface SettingsResponse {
+  /** What steps that start now run with. */
+  readonly settings: Settings
+  /** `config`: config.json's values or defaults, nothing saved yet; `saved`: edited here, config.json's values are ignored. */
+  readonly source: 'config' | 'saved'
+  readonly updatedAt: string | null
+  readonly choices: {
+    readonly clis: readonly AgentChoice['cli'][]
+    readonly efforts: readonly NonNullable<AgentChoice['effort']>[]
+    readonly roles: readonly RoleName[]
+  }
+  /** Workflow names an override may use. */
+  readonly workflows: readonly string[]
+}
+
+// POST /api/settings takes the whole document; a 400 names each invalid field in `issues`.
+export type SettingsRequest = Settings

@@ -4,6 +4,15 @@ import { getMergeGate } from '../store/merge-gates.ts'
 import { setArtifactHome } from '../store/database.ts'
 import { listDecisions, decisionCounts } from '../store/decisions.ts'
 import { saveUploadedWorkflow } from '../store/workflows.ts'
+import { effectiveSettings, saveSettings } from '../store/settings.ts'
+import { AGENT_CLIS, EFFORTS } from '../domain/catalog.ts'
+import {
+  DEFAULT_SETTINGS,
+  ROLE_NAMES,
+  type Settings,
+  settingsProblems,
+  settingsSchema,
+} from '../domain/settings.ts'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { serveStatic } from '@hono/node-server/serve-static'
@@ -42,6 +51,7 @@ import type {
   HealthResponse,
   RepositoriesResponse,
   RepositoryResponse,
+  SettingsResponse,
   StepSummary,
   TicketResponse,
   TicketsResponse,
@@ -73,6 +83,8 @@ export interface AppOptions {
   readonly allowedOrigins?: readonly string[]
   /** Built web app to serve; omitted in development, where Vite serves it. */
   readonly webRoot?: string
+  /** Engine settings from config.json, used until the owner saves settings. */
+  readonly settings?: Settings
 }
 
 class InvalidRequest extends FactoryError {
@@ -97,6 +109,7 @@ export function createApp({
   home,
   allowedOrigins = DEFAULT_ALLOWED_ORIGINS,
   webRoot,
+  settings: fallback = DEFAULT_SETTINGS,
 }: AppOptions) {
   setArtifactHome(database, home)
   const app = new Hono()
@@ -157,6 +170,29 @@ export function createApp({
       { workflow: summarizeWorkflow(entry) },
       existing ? 200 : 201,
     )
+  })
+
+  async function settingsResponse(): Promise<SettingsResponse> {
+    return {
+      ...(await effectiveSettings(database, fallback)),
+      choices: { clis: AGENT_CLIS, efforts: EFFORTS, roles: ROLE_NAMES },
+      workflows: [...library.keys()].sort(),
+    }
+  }
+
+  app.get('/api/settings', async (c) =>
+    c.json<SettingsResponse>(await settingsResponse()),
+  )
+
+  app.post('/api/settings', async (c) => {
+    if (!c.req.header('Content-Type')?.startsWith('application/json'))
+      throw new FactoryError('invalid', 'Send the settings as JSON')
+    const input = await body(c, settingsSchema)
+    const problems = settingsProblems(input, [...library.keys()])
+    if (problems.length)
+      throw new InvalidRequest(problems, 'The settings are not valid')
+    await saveSettings(database, input)
+    return c.json<SettingsResponse>(await settingsResponse())
   })
 
   app.get('/api/repositories', async (c) =>
