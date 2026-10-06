@@ -1,4 +1,17 @@
 import type { TicketResponse } from '../../../src/api/contract.ts'
+import { classifyBlockers } from '../../../src/domain/merge-gate.ts'
+
+function listed(items: readonly string[]) {
+  return items.length < 2
+    ? items.join('')
+    : `${items.slice(0, -1).join(', ')} and ${items.at(-1)}`
+}
+function ownerReason(reason: string) {
+  if (reason === 'Untested workflow') return 'the workflow has no tester'
+  if (reason === 'Unreviewed workflow') return 'the workflow has no reviewer'
+  if (reason.startsWith('Touches ')) return `it touches ${reason.slice(8)}`
+  return reason.charAt(0).toLowerCase() + reason.slice(1)
+}
 export function MergeGatePanel({ detail }: { detail: TicketResponse }) {
   const snapshot = detail.mergeGate
   if (!snapshot)
@@ -9,26 +22,44 @@ export function MergeGatePanel({ detail }: { detail: TicketResponse }) {
     ) : null
   const gate = snapshot.latest
   const { facts } = gate
+  const { problems, waits } = classifyBlockers(gate)
+  const tone = gate.ready
+    ? 'passed'
+    : problems.length
+      ? 'changes-needed'
+      : 'waiting'
+  const atMerge =
+    detail.workflow.steps.find((s) => s.id === detail.ticket.currentStep)
+      ?.does === 'merge'
   return (
-    <section
-      className={`verdict ${gate.ready ? 'passed' : 'changes-needed'}`}
-      aria-label="Merge gate"
-    >
+    <section className={`verdict ${tone}`} aria-label="Merge gate">
       <h2>
-        {gate.ready ? 'Ready to merge' : `Blocked: ${gate.blockers.join('; ')}`}
+        {tone === 'passed'
+          ? 'Ready to merge'
+          : tone === 'waiting'
+            ? `Waiting for ${listed(waits)}`
+            : `Blocked: ${problems.join('; ')}`}
       </h2>
-      {gate.paths.length > 0 && (
-        <p>
-          <strong>
-            Needs you: touches {gate.paths.map((p) => p.path).join(', ')}
-          </strong>
+      {!atMerge && gate.needsOwner.length > 0 ? (
+        <p className="muted">
+          You will merge this one: {gate.needsOwner.map(ownerReason).join('; ')}
         </p>
+      ) : (
+        <>
+          {gate.paths.length > 0 && (
+            <p>
+              <strong>
+                Needs you: touches {gate.paths.map((p) => p.path).join(', ')}
+              </strong>
+            </p>
+          )}
+          {gate.needsOwner
+            .filter((s) => !s.startsWith('Touches '))
+            .map((s) => (
+              <p key={s}>Needs you: {s}</p>
+            ))}
+        </>
       )}
-      {gate.needsOwner
-        .filter((s) => !s.startsWith('Touches '))
-        .map((s) => (
-          <p key={s}>Needs you: {s}</p>
-        ))}
       {snapshot.lastGreen &&
         (snapshot.lastGreen.facts.head !== facts.localHead || !gate.ready) && (
           <p>

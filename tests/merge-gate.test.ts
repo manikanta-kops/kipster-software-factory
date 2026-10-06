@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import {
+  classifyBlockers,
   evaluateMergeGate,
   matchesPath,
   matchOwnerPaths,
@@ -185,4 +186,41 @@ test('fact-fetch failures and a different base block cached readiness', () => {
     gate({ baseBranchMatches: false }).blockers.join(),
     /different base/,
   )
+})
+
+test('normal in-progress blockers are waits; real problems stay problems', () => {
+  const split = (patch: Partial<MergeFacts>) => classifyBlockers(gate(patch))
+  assert.deepEqual(split({ ci: 'pending', hasTester: false, tester: null }), {
+    problems: [],
+    waits: ['CI'],
+  })
+  assert.deepEqual(
+    split({ buildWork: true, localHead: 'c'.repeat(40), tester: null }),
+    { problems: [], waits: ['the tester', 'build work'] },
+  )
+  assert.deepEqual(
+    split({
+      reviewer: { status: 'running', outcome: null, commit: head },
+      ci: 'pending',
+    }),
+    { problems: [], waits: ['the reviewer', 'CI'] },
+  )
+  assert.deepEqual(split({ ci: 'pending', mergeable: 'CONFLICTING' }), {
+    problems: ['PR has conflicts'],
+    waits: ['CI'],
+  })
+  assert.deepEqual(
+    split({
+      tester: { status: 'finished', outcome: 'changes-needed', commit: head },
+      localHead: 'c'.repeat(40),
+    }),
+    {
+      problems: [
+        'Tester verdict is not passing at the current head',
+        'Ticket branch differs from the PR head',
+      ],
+      waits: [],
+    },
+  )
+  assert.deepEqual(split({ ci: 'failed' }).problems, ['CI failed'])
 })

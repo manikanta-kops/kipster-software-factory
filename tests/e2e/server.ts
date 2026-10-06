@@ -58,7 +58,7 @@ const fixtures = new Map<
     close: () => Promise<void>
     disconnect: () => void
     updateLog: (finish: boolean) => Promise<void>
-    gate: (state: string) => Promise<void>
+    gate: (state: string, number?: number) => Promise<void>
     autoMerge: () => Promise<void>
     prune: () => Promise<void>
   }
@@ -366,22 +366,24 @@ router.post('/__test/fixtures', async (c) => {
         await builtInWorkflow('bug'),
       )
     },
-    gate: async (state) => {
+    gate: async (state, number = fixture.tickets.proofPassed) => {
       const { saveMergeGate } = await import('../../src/store/merge-gates.ts')
       const { evaluateMergeGate } =
         await import('../../src/domain/merge-gate.ts')
-      const detail = (await getTicketDetail(
+      const detail = (await getTicketDetail(fixture.database, number))!
+      const proven = (await getTicketDetail(
         fixture.database,
         fixture.tickets.proofPassed,
       ))!
-      const facts = (await getMergeGate(fixture.database, detail.ticket.id))!
+      const facts = (await getMergeGate(fixture.database, proven.ticket.id))!
         .latest.facts
       const ci =
         state === 'failed'
           ? 'failed'
-          : state === 'pending'
+          : state.startsWith('pending')
             ? 'pending'
             : 'passed'
+      const untested = state === 'pending-untested'
       await saveMergeGate(
         fixture.database,
         detail.ticket.id,
@@ -406,6 +408,14 @@ router.post('/__test/fixtures', async (c) => {
                   ]
                 : [],
             behind: state === 'behind' ? 2 : 0,
+            localHead: facts.head,
+            buildWork: false,
+            hasTester: !untested,
+            tester: untested
+              ? null
+              : { status: 'finished', outcome: 'passed', commit: facts.head },
+            mergeable:
+              state === 'pending-conflict' ? 'CONFLICTING' : 'MERGEABLE',
             hasReviewer: state !== 'unreviewed',
             reviewer: {
               status: 'finished',
@@ -476,8 +486,12 @@ router.post('/__test/auto-merge', async (c) => {
   return c.json({ ok: true })
 })
 router.post('/__test/gate', async (c) => {
-  const { url, state } = await c.req.json<{ url: string; state: string }>()
-  await fixtures.get(url)?.gate(state)
+  const { url, state, number } = await c.req.json<{
+    url: string
+    state: string
+    number?: number
+  }>()
+  await fixtures.get(url)?.gate(state, number)
   return c.json({ ok: true })
 })
 router.post('/__test/prune', async (c) => {
