@@ -30,6 +30,10 @@ checkout root. Setup installs dependencies in every fresh checkout. Check is the
 repository's deterministic gate. Neither command may launch persistent services.
 They run before instance ports and a database are provisioned; a check that needs
 its own test database must manage that independently of the instance database.
+Disposable checkouts retain the cache's fetched remote-tracking branch refs,
+such as `origin/next`, for changeset, migration and protocol comparison gates.
+They have no configured remote; these refs are a snapshot from preparation,
+not a live connection or the cache's potentially stale local branch.
 
 Verify requires every illustrated key. `ports` is an integer from 1 to 16;
 `database` is `postgres` or `none`; timeout is positive, at most 3600 seconds.
