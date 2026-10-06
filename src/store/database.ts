@@ -26,6 +26,9 @@ export function openDatabase(connectionString: string): Database {
     max: 10,
     connectionTimeoutMillis: 10_000,
   })
+  // An idle connection the server closes (shutdown, restart) is already removed
+  // from the pool; without a listener Node crashes on the unhandled event.
+  pool.on('error', () => {})
   urls.set(pool, connectionString)
   return pool
 }
