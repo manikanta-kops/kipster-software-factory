@@ -10,7 +10,7 @@ import type { DecisionInput } from '../domain/decisions.ts'
 import { insertDecision, finishDecision } from './decisions.ts'
 // Tickets and their attempts and artifacts. Every write locks the ticket row, asks the
 // pure lifecycle what happens, applies the answer and records events in one transaction.
-import { FactoryError } from '../domain/errors.ts'
+import { FactoryError, AttemptMovedOn } from '../domain/errors.ts'
 import {
   afterLinkedTicket,
   waitForOtherRepository,
@@ -1216,8 +1216,7 @@ export function openAttemptOf(locked: Locked, attemptId: number): Attempt {
     )
   }
   if (attempt !== latest || !isOpen(attempt.status)) {
-    throw new FactoryError(
-      'conflict',
+    throw new AttemptMovedOn(
       `Attempt ${attemptId} of ticket #${locked.number} is ${attempt.status} and no longer open; the ticket has moved on`,
     )
   }

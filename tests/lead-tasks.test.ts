@@ -106,14 +106,21 @@ test('a lead runs branch tasks in parallel, hears each finish while others run, 
     (item) => item.role === 'builder' && item.title === 'Gamma',
   )!
   assert.match(builder.prompt, /This ticket is task "gamma" of lead ticket/)
+  // Tasks that finish within one poll share a report, so count reported merges, not notes.
   assert.ok(
     done.artifacts.filter((artifact) => artifact.title === 'Task report')
-      .length >= 3,
+      .length >= 2,
   )
   const reports = done.attempts.filter(
     (attempt) => attempt.stepId === 'run' && attempt.outcome === 'reported',
   )
-  assert.ok(reports.some((attempt) => /alpha merged/.test(attempt.summary!)))
+  for (const key of ['alpha', 'beta', 'gamma'])
+    assert.ok(
+      reports.some((attempt) =>
+        new RegExp(`\\b${key} merged\\b`).test(attempt.summary!),
+      ),
+      `${key} merge was reported`,
+    )
   assert.ok(
     f.invocations
       .filter((item) => item.role === 'lead')

@@ -13,7 +13,8 @@ export function killProcessGroup(pid: number): void {
       })
       const live = groups.split('\n').some((line) => {
         const [group, status] = line.trim().split(/\s+/)
-        return Number(group) === pid && !status?.startsWith('Z')
+        // A leading Z is a zombie and an E flag means exiting on macOS; neither can still run work.
+        return Number(group) === pid && !/^Z|E/.test(status ?? '')
       })
       if (!live) return
     }

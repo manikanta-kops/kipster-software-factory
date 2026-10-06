@@ -281,9 +281,11 @@ test('quick-change: approval, two builds, review loop, PR, merge wait and termin
   )
   await run('git', ['push', f.bare, 'main'], { cwd: source })
   f.setState('MERGED')
+  // The base push can race the merge and trigger one more re-sync before the merge is seen.
   await until(
     () => f.detail(ticket.number),
     (d) => d.ticket.status === 'done',
+    60_000,
   )
   await until(
     () => exists(new Workspaces(f.home).path(ticket)),
