@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, type CSSProperties } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import type {
   CreateRepositoryRequest,
@@ -82,7 +82,7 @@ export function Repositories() {
     },
   })
   return (
-    <section>
+    <section className="repositories-page">
       <header className="page-heading">
         <div>
           <h1>Repositories</h1>
@@ -121,45 +121,57 @@ export function Repositories() {
       <ErrorMessage error={query.error ?? policy.error} />
       {query.isPending && <p className="muted">Loading repositories…</p>}
       <ul className="repository-list">
-        {query.data?.repositories.map((repository) => (
-          <li key={repository.id}>
-            <div>
+        {query.data?.repositories.map((repository, index) => (
+          <li
+            key={repository.id}
+            className="repository-card"
+            style={{ '--i': index } as CSSProperties}
+          >
+            <div className="repository-head">
               <h2>
                 <RepositoryDot id={repository.id} />
                 {repository.slug}
               </h2>
-              <p className={`kit-status ${repository.kit.status}`}>
-                {KIT_WORDS[repository.kit.status]}
-                <span className="muted"> · {repository.defaultBranch}</span>
-              </p>
-              {repository.kit.capabilities.length > 0 && (
-                <div className="chips" aria-label="Kit capabilities">
-                  {repository.kit.capabilities.map((capability) => (
-                    <span className="chip" key={capability}>
-                      {capability}
-                    </span>
-                  ))}
-                </div>
-              )}
-              {repository.kit.error && (
-                <p className="error">{repository.kit.error}</p>
-              )}
-              {repository.lastError && (
-                <p className="error">{repository.lastError}</p>
-              )}
-              {repository.status === 'failed' && (
-                <button
-                  type="button"
-                  className="button"
-                  disabled={retry.isPending}
-                  onClick={() => retry.mutate(repository.id)}
-                >
-                  Retry
-                </button>
-              )}
+              <Status value={repository.status} />
             </div>
-            <div>
-              <label>
+            <p className={`kit-status ${repository.kit.status}`}>
+              {KIT_WORDS[repository.kit.status]}
+              <span className="muted"> · {repository.defaultBranch}</span>
+            </p>
+            {repository.kit.capabilities.length > 0 && (
+              <div className="chips" aria-label="Kit capabilities">
+                {repository.kit.capabilities.map((capability) => (
+                  <span className="chip" key={capability}>
+                    {capability}
+                  </span>
+                ))}
+              </div>
+            )}
+            {repository.kit.error && (
+              <p className="error">{repository.kit.error}</p>
+            )}
+            {repository.lastError && (
+              <p className="error">{repository.lastError}</p>
+            )}
+            {repository.status === 'failed' && (
+              <button
+                type="button"
+                className="button retry"
+                disabled={retry.isPending}
+                onClick={() => retry.mutate(repository.id)}
+              >
+                Retry
+              </button>
+            )}
+            <label className="setting">
+              <span className="setting-text">
+                <span className="setting-name">Auto-merge safe changes</span>
+                <span className="setting-hint">
+                  Needs independent proof and a confident decision. Migrations,
+                  kit and CI changes still need your review.
+                </span>
+              </span>
+              <span className="toggle">
                 <input
                   type="checkbox"
                   aria-label={`Auto-merge for ${repository.slug}`}
@@ -176,19 +188,14 @@ export function Repositories() {
                     })
                   }
                 />
-                Auto-merge safe changes
-              </label>
-              <p className="muted">
-                Independent proof and a confident decision required. Migrations,
-                kit and CI changes need your review.
-              </p>
-              <Status value={repository.status} />
-            </div>
+                <span aria-hidden="true" />
+              </span>
+            </label>
           </li>
         ))}
       </ul>
       {query.data?.repositories.length === 0 && (
-        <p className="muted">No repositories yet. Add one above.</p>
+        <p className="quiet-card">No repositories yet. Add one above.</p>
       )}
     </section>
   )

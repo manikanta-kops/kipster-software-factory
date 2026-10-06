@@ -383,6 +383,32 @@ test('empty attention keeps the quiet home message', async ({
   await expect(page.getByRole('heading', { name: 'Moving' })).toBeVisible()
 })
 
+test('an idle factory shows one invitation to start a ticket', async ({
+  page,
+  factory,
+  request,
+}) => {
+  const { tickets } = (await (
+    await request.get(`${factory.url}/api/tickets`)
+  ).json()) as TicketsResponse
+  for (const ticket of tickets.filter(
+    (item) => !['done', 'cancelled'].includes(item.status),
+  ))
+    await request.post(`${factory.url}/api/tickets/${ticket.number}/cancel`, {
+      data: {},
+    })
+  await page.goto(factory.url)
+  await expect(
+    page.getByRole('heading', { name: 'Ready to build' }),
+  ).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Moving' })).toHaveCount(0)
+  await expect(
+    page.getByRole('heading', { name: 'Nothing needs you.' }),
+  ).toHaveCount(0)
+  await page.getByRole('link', { name: 'Start a ticket' }).click()
+  await expect(page.getByRole('heading', { name: 'New ticket' })).toBeVisible()
+})
+
 test('runtime API base directs fetch and live events to a separate factory', async ({
   page,
   factory,

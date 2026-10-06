@@ -143,8 +143,13 @@ export function NewTicket() {
               </button>
             </aside>
           )}
-          <fieldset className="workflow-choices">
+          <fieldset className="workflow-choices workflow-grid">
             <legend>Workflow</legend>
+            {!selectedRepository && (
+              <p className="muted choose-first">
+                Choose a repository to see which workflows can run.
+              </p>
+            )}
             {workflows.data?.workflows.map((item) => {
               const reason = unavailable(selectedRepository, item)
               return (
@@ -163,7 +168,7 @@ export function NewTicket() {
                   <span>
                     <strong>{item.name}</strong>
                     <span>{item.description}</span>
-                    {reason && <small>{reason}</small>}
+                    {reason && selectedRepository && <small>{reason}</small>}
                   </span>
                 </label>
               )
