@@ -7,6 +7,7 @@ import type { AgentStep } from '../domain/workflow.ts'
 import { parseStepResult, type StepResult } from '../domain/lifecycle.ts'
 import { CONTEXT_INDEX_PATH, type TrustedInstructions } from '../kit/kit.ts'
 import { bundledPostgresBin } from '../store/cluster.ts'
+import { renderRole } from '../domain/role.ts'
 
 export async function buildPrompt(input: {
   step: AgentStep
@@ -21,9 +22,12 @@ export async function buildPrompt(input: {
   resultValidationError?: string | undefined
 }): Promise<string> {
   const { step, detail, directory, diff, home, trusted } = input
-  const base = await readFile(
-    new URL(`../roles/${step.role}.md`, import.meta.url),
-    'utf8',
+  const base = renderRole(
+    await readFile(
+      new URL(`../roles/${step.role}.md`, import.meta.url),
+      'utf8',
+    ),
+    { lightsOut: detail.ticket.lightsOut },
   )
   const approval = detail.attempts.findLast(
     (attempt) =>
@@ -86,7 +90,7 @@ export async function buildPrompt(input: {
         ]
       : []),
     `All agents have full tool access. Follow these role rules: only system actions push branches, open/update pull requests or merge. Never do those actions yourself. Use a fresh session; do not resume an earlier conversation.`,
-    `Decide and keep going. needs-decision stops the ticket until the owner answers, so use it only for a product question that the ticket, the repository and sensible defaults cannot answer. Tools, runtimes, failed installs and changes to in-scope files, including the repository's .kipster kit, are yours to solve; explain what you chose in the summary. The owner reviews everything on the pull request. If a check still cannot run, name it and the reason in the summary and report your normal outcome; never claim it passed.`,
+    `Decide and keep going. ${detail.ticket.lightsOut ? 'Choose the sensible default for product questions, record it as a decision artifact, and continue. Use needs-decision only for the irreversible actions listed in the lights-out instructions.' : 'needs-decision stops the ticket until the owner answers, so use it only for a product question that the ticket, the repository and sensible defaults cannot answer.'} Tools, runtimes, failed installs and changes to in-scope files, including the repository's .kipster kit, are yours to solve; explain what you chose in the summary. The owner reviews everything on the pull request. If a check still cannot run, name it and the reason in the summary and report your normal outcome; never claim it passed.`,
     ...(detail.ticket.lightsOut
       ? [
           'Lights-out is on. Do not stop to ask; choose the sensible default, record each choice as a decision artifact (chose, alternative, reason), and continue. Only irreversible actions wait: merging to the default branch outside the merge policy, deleting data, or force-pushing. Only system actions publish or merge; the merge gate and ownerReview rules still apply.',

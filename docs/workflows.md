@@ -182,4 +182,9 @@ other tickets. Every agent is instructed to choose defaults and emit decision
 artifacts with `kind: decision`, `title`, `chose`, `alternative` and `reason`
 (no content/path). A child `needs-decision` parks that task and reports to the
 lead while siblings continue. Parked tasks remain unfinished until resolved.
-Other human steps, limits and merge policy remain in effect.
+Role prompts keep their original wording when disabled. When enabled, product
+questions choose and record defaults; necessary forbidden-path changes require
+a separate explained commit and a passing review with `ownerReview` naming the
+path and reason. Reproducers record alternative attempts before `not-reproduced`,
+which still cannot start a fix. Only irreversible actions ask; other human steps,
+limits and merge policy remain in effect.

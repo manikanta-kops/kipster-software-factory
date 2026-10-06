@@ -154,9 +154,13 @@ and is inherited by tasks. It system-approves a lead's plan, adds instructions
 to choose and record defaults, and shows typed agent choices on the ticket.
 A child that needs a decision parks locally, reports to the lead, and frees a
 parallel slot while siblings continue. The existing merge gate still leaves
-kit, CI, migrations and reviewer owner-review flags for the owner. Role-file
-rewrites and repeated-failure detection are separate
-follow-up slices. Live overnight use with real agents remains unverified.
+kit, CI, migrations and reviewer owner-review flags for the owner. Mode-specific
+role prompts now replace product questions with recorded defaults,
+require separate explained commits and owner review for necessary forbidden-path
+changes, and ask reproducers to record alternative attempts before giving up.
+Disabled tickets retain their original role wording. Repeated-failure detection
+is a separate follow-up slice. Live overnight use with real agents remains
+unverified.
 Demo seeding includes synthetic lead and child decisions so the Decision log
 and child links, a parked question and a merged untested task can be inspected
 with the scheduler disabled.

@@ -94,13 +94,14 @@ Any other key is an error. Step ids `finish`, `cancel` and `ask` are reserved.
 
 Role notes:
 
-- Ticket and approved-plan scope also govern linked documentation. Builders
-  leave explicitly forbidden paths untouched and note inaccurate documents;
+- With lights-out off, ticket and approved-plan scope also govern linked
+  documentation. Builders leave explicitly forbidden paths untouched and note
+  inaccurate documents;
   if the conflict prevents the requested change, they report `needs-decision`.
   Reviewers report `changes-needed` for forbidden-path edits. An `ownerReview`
   flag does not authorize expanded scope.
-- Agents report `needs-decision` only for a product question that the ticket,
-  the repository and sensible defaults cannot answer. They solve tools,
+- With lights-out off, agents report `needs-decision` only for a product question
+  that the ticket, the repository and sensible defaults cannot answer. They solve tools,
   runtimes and in-scope kit changes themselves, and name any check they could
   not run in their summary instead of stopping. The owner reviews on the pull
   request.
@@ -613,6 +614,18 @@ These are agent choices, separate from the `decide` action's model judgements.
 Irreversible actions wait: merging outside merge policy, deleting data or
 force-pushing. Only system actions publish or merge. Kit, CI, migrations and
 reviewer `ownerReview` still require the owner.
+
+Base role wording stays unchanged when lights-out is off. When on, builders,
+planners, testers, leads and onboarders choose and record defaults for product
+questions and continue with their normal outcomes. A builder who must change an
+explicitly forbidden path does so in its own separate commit, states the path
+and reason in the commit message and summary, and records a decision artifact.
+An otherwise correct change passes review with `ownerReview` naming that path
+and the builder's reason; scope alone does not block that explained commit.
+Reproducers try other entry points, inputs, data states and conditions and record
+every attempt before returning `not-reproduced`. The workflow still routes that
+outcome; it must never start a fix. Onboarders continue without asking for kit
+changes; the owner reviews them on the PR and normal kit approval still applies.
 
 For an enabled lead, a child `needs-decision` becomes a `parked` task and wakes
 the lead with its summary. Siblings continue, and queued work can use the freed
