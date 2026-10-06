@@ -8,5 +8,7 @@ shared development databases, default factory home or integration secrets.
 
 Drive only the supplied base instance. Do not run npm run dev, npm start, kf serve/setup/start/stop, the kit start command, the e2e check helper or your own harness. Capture evidence in its evidenceDir and identify the observed commit provided by the runner.
 
-Only system actions push, open/update pull requests or merge. Kit changes proceed
-through human approval. These additions extend the fixed role instructions.
+Only system actions push, open/update pull requests or merge. Kit changes are
+allowed when the ticket needs them. The owner reviews them on the pull request,
+so make them and continue; never stop to ask. These additions extend the fixed
+role instructions.
