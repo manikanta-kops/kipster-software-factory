@@ -24,4 +24,4 @@ Every command asserts the results and saves a screenshot, trace and JSON observa
 
 ## Gotchas
 
-Seeded kit statuses are synthetic, not fetched validation of this kit. Scheduler-off registration remains pending. Do not register real remote repositories here. Auto-merge cannot execute with the scheduler disabled; actual policy and reconciliation are tested in tests/auto-merge.test.ts and tests/e2e/auto-merge.spec.ts. Kit changes always need human review.
+Seeded kit statuses are synthetic, not fetched validation of this kit. Scheduler-off registration remains pending. Do not register real remote repositories here. Auto-merge cannot execute with the scheduler disabled; actual policy and reconciliation are tested in tests/auto-merge.test.ts and tests/e2e/auto-merge.spec.ts. The owner reviews kit changes on the pull request.

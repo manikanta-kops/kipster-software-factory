@@ -380,7 +380,7 @@ try {
       ).toContainText('Stale: new commits since verification')
       await expect(
         page.getByRole('region', { name: 'Merge gate' }),
-      ).toContainText('Build work is queued or running')
+      ).toContainText('Waiting for build work')
       await expect(
         page.getByRole('region', { name: 'Merge gate' }),
       ).toContainText('Earlier green head: aaaaaaa')
