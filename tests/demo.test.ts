@@ -1,7 +1,12 @@
 import assert from 'node:assert/strict'
-import { spawn } from 'node:child_process'
+import { execFile, spawn } from 'node:child_process'
 import { once } from 'node:events'
+import { mkdtemp, realpath, rm } from 'node:fs/promises'
 import { createServer } from 'node:net'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
+import { promisify } from 'node:util'
 import { after, before, describe, test } from 'node:test'
 import { seedDemo } from '../scripts/demo-data.ts'
 import {
@@ -107,6 +112,61 @@ test('demo database refuses a scheduler before recovery or repository work', asy
     (await detail(demo.tickets.running)).attempts.at(-1)?.status,
     'running',
   )
+})
+
+test('seed CLI retains and serves demo evidence with a relative home', async (t) => {
+  const store = await createTestStore()
+  const directory = await mkdtemp(join(tmpdir(), 'ksf-relative-demo-'))
+  let factory: Awaited<ReturnType<typeof startFactory>> | undefined
+  t.after(async () => {
+    await factory?.close()
+    await store.close()
+    await rm(directory, { recursive: true, force: true })
+  })
+  const home = join(await realpath(directory), '.local', 'verification-home')
+  const { stdout } = await promisify(execFile)(
+    process.execPath,
+    [
+      fileURLToPath(new URL('../scripts/seed-demo.ts', import.meta.url)),
+      '--database-url',
+      store.url,
+      '--home',
+      '.local/verification-home',
+    ],
+    { cwd: directory, timeout: 15_000 },
+  )
+  assert.match(stdout, /Seeded demo tickets:/)
+  const available = createServer()
+  available.listen(0, '127.0.0.1')
+  await once(available, 'listening')
+  const address = available.address()
+  assert.ok(address && typeof address !== 'string')
+  await new Promise<void>((resolve) => available.close(() => resolve()))
+  factory = await startFactory({
+    databaseUrl: store.url,
+    home,
+    port: address.port,
+    scheduler: false,
+  })
+  const tickets = await listTickets(store.database)
+  const proof = tickets.find(
+    (ticket) => ticket.title === 'Cart quantity changes are proven',
+  )
+  assert.ok(proof)
+  const detail = await getTicketDetail(store.database, proof.number)
+  assert.ok(detail)
+  const files = detail.artifacts.filter((artifact) => artifact.path !== null)
+  assert.equal(files.length, 3)
+  const evidenceRoot = join(await realpath(home), 'evidence')
+  for (const artifact of files) {
+    assert.ok(artifact.path!.startsWith(`${evidenceRoot}/`))
+    const response = await fetch(`${factory.url}/api/artifacts/${artifact.id}`)
+    assert.equal(response.status, 200)
+    assert.ok((await response.arrayBuffer()).byteLength > 0)
+    assert.ok(
+      response.headers.get('content-type')?.startsWith(artifact.mediaType!),
+    )
+  }
 })
 
 test('seeding refuses an active scheduler and leaves the database empty', async (t) => {

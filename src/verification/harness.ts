@@ -212,6 +212,29 @@ export async function startVerification(
       signal,
     })
     await run('git', ['remote', 'remove', 'origin'], { cwd: checkout, signal })
+    // Local clone branches can lag fetched bases. Keep their comparison refs,
+    // without retaining a remote that verification commands could mutate.
+    const bases = await run(
+      'git',
+      [
+        'for-each-ref',
+        '--format=%(objectname) %(refname) %(symref)',
+        'refs/remotes/',
+      ],
+      { cwd: options.repository, signal },
+    )
+    const updates = bases
+      .split('\n')
+      .filter(Boolean)
+      .map((line) => line.trim().split(/\s+/))
+      .filter(([, , symbolic]) => !symbolic)
+      .map(([commit, ref]) => `update ${ref} ${commit}`)
+    if (updates.length)
+      await run('git', ['update-ref', '--stdin'], {
+        cwd: checkout,
+        input: `${updates.join('\n')}\n`,
+        signal,
+      })
     await command('setup', kit.setup)
     if (options.check) await command('check', kit.check)
     if (options.checkOnly)
