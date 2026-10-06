@@ -10,7 +10,11 @@ import { resolve } from 'node:path'
 // before the engine exists.
 import type { ArtifactInput } from '../src/domain/lifecycle.ts'
 import type { TaskRequest } from '../src/domain/catalog.ts'
-import type { Library } from '../src/library/library.ts'
+import {
+  parseUpload,
+  type Library,
+  type LibraryEntry,
+} from '../src/library/library.ts'
 import type { Database } from '../src/store/database.ts'
 import { acquireSchedulerLock } from '../src/store/scheduler.ts'
 import {
@@ -107,11 +111,15 @@ async function seedLocked(
     'git clone failed: Repository not found.',
   )
 
-  const create = async (title: string, body: string) =>
+  const create = async (
+    title: string,
+    body: string,
+    version: LibraryEntry = workflow,
+  ) =>
     (
       await createTicket(database, {
         repository: DEMO_REPOSITORY,
-        workflow,
+        workflow: version,
         lightsOut: false,
         title,
         body,
@@ -223,10 +231,17 @@ async function seedLocked(
   await buildAndReview(waitingForMerge)
   await openPullRequestAndWait(waitingForMerge, 42)
 
-  // Asking you: the reviewer sent the change back until its limit of two.
+  // This synthetic historical workflow demonstrates a review limit that asks the owner.
+  const historical = parseUpload(
+    workflow.source
+      .replace('role: reviewer\n    limit: 5', 'role: reviewer\n    limit: 2')
+      .replace('limit: maintain-pr', 'limit: ask'),
+  )
+  if (!historical.ok) throw new Error(historical.errors.join('; '))
   const askAfterLimit = await create(
     'Validate email addresses on sign-up',
     'Reject malformed email addresses on the sign-up form with a clear message.',
+    historical.entry,
   )
   await run(askAfterLimit, {
     outcome: 'plan-ready',

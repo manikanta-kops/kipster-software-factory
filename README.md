@@ -92,7 +92,11 @@ decision parks while siblings continue. New ticket lets you change the setting;
 children inherit it, and ticket pages show the Decision log. The merge gate
 still applies. Child `task` and `task-pr` tickets without a required verification
 capability skip the tester and carry an **Untested** warning. Their PRs and lead
-PRs containing merged untested tasks require owner merging.
+PRs containing merged untested tasks require owner merging. Settings can select
+parallel lead reviewers from claude and codex. Lead review has five rounds by
+default, then publishes unresolved findings for the owner. The engine replaces
+reviewers and testers whose CLI/model matches a builder when an independent
+candidate exists; otherwise it records the exception and requires owner merging.
 
 ## Run from source
 
@@ -128,7 +132,7 @@ update settings; other configuration fields are retained. For scripts, use
 serve for a separate factory.
 
 Concurrency, the step timeout (120 minutes by default) and the agent for each
-role, globally or per workflow, are edited on the web app's Settings page and
+role and reviewer lists, globally or per workflow, are edited on the web app's Settings page and
 apply to steps that start afterwards, without a restart. `config.json` supplies
 their starting values until the first save; see
 [the architecture](docs/architecture.md#settings-page).

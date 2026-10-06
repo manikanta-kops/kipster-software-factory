@@ -33,7 +33,12 @@ const planner = { cli: 'claude', model: 'claude-sonnet-5-5' } as const
 
 const overridden: Settings = {
   ...DEFAULT_SETTINGS,
-  agents: { default: { cli: 'codex' }, roles: { planner }, allowed: [] },
+  agents: {
+    default: { cli: 'codex' },
+    roles: { planner },
+    allowed: [],
+    reviewers: [],
+  },
   workflows: {
     'data-task': {
       stepTimeoutMinutes: 240,
@@ -114,6 +119,7 @@ describe('settings store and API', () => {
       default: { cli: 'claude' },
       roles: { reviewer: opusMedium },
       allowed: [opusHigh],
+      reviewers: [],
     },
     workflows: {},
   }

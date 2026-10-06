@@ -1460,8 +1460,8 @@ export async function insertArtifacts(
         ? 'text/markdown'
         : 'application/octet-stream')
     const { rows } = await connection.query<{ id: number }>(
-      `INSERT INTO artifacts (ticket_id, attempt_id, kind, title, content, path, media_type, scenario, scenario_result, observed_commit, decision)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING id`,
+      `INSERT INTO artifacts (ticket_id, attempt_id, kind, title, content, path, media_type, scenario, scenario_result, observed_commit, decision, file)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12) RETURNING id`,
       [
         ticketId,
         attemptId,
@@ -1482,6 +1482,7 @@ export async function insertArtifacts(
               reason: artifact.reason,
             })
           : null,
+        artifact.file ?? null,
       ],
     )
     events.push({
@@ -1663,6 +1664,7 @@ const ARTIFACT_SELECT = `
   SELECT a.*, at.step_id FROM artifacts a JOIN attempts at ON at.id = a.attempt_id`
 
 interface ArtifactRow {
+  file: string | null
   decision: Exclude<Artifact['decision'], undefined>
   observed_commit: string | null
   scenario_result: Exclude<Artifact['scenarioResult'], undefined>
@@ -1683,6 +1685,7 @@ interface ArtifactRow {
 
 function toArtifact(row: ArtifactRow): Artifact {
   return {
+    ...(row.file ? { file: row.file } : {}),
     decision: row.decision,
     mediaType: row.media_type,
     observedCommit: row.observed_commit,

@@ -94,7 +94,11 @@ export function stepContract(step: Step): StepContract {
 export function routeKeys(step: Step): readonly string[] {
   const keys = [...stepContract(step).outcomes]
   if (step.kind !== 'human') keys.push(NEEDS_DECISION)
-  if (step.limit !== undefined) keys.push(LIMIT)
+  if (
+    step.limit !== undefined ||
+    (step.kind === 'agent' && step.role === 'reviewer')
+  )
+    keys.push(LIMIT)
   return keys
 }
 
@@ -231,7 +235,11 @@ function checkRoutes(step: Step, ids: Set<string>, errors: string[]) {
   const at = `step "${step.id}"`
   const keys = routeKeys(step)
   for (const [key, target] of Object.entries(step.routes)) {
-    if (key === LIMIT && step.limit === undefined) {
+    if (
+      key === LIMIT &&
+      step.limit === undefined &&
+      !(step.kind === 'agent' && step.role === 'reviewer')
+    ) {
       errors.push(`${at}: a "limit" route needs a limit on the step`)
     } else if (!keys.includes(key)) {
       errors.push(

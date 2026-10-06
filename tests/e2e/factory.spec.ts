@@ -402,7 +402,7 @@ test('workflows render steps and loops, with direct hash links and back navigati
 }) => {
   await page.goto(`${factory.url}/#/workflows/lead`)
   await expect(page.getByRole('heading', { name: 'lead' })).toBeVisible()
-  await expect(page.getByText('after 2 rounds → you')).toBeVisible()
+  await expect(page.getByText('after 5 rounds → maintain-pr')).toBeVisible()
   await page.getByRole('link', { name: /^bug / }).click()
   await expect(page).toHaveURL(/#\/workflows\/bug$/)
   const diagram = page.getByRole('figure', { name: 'bug workflow' })
