@@ -845,3 +845,33 @@ Cancelling a lead cancels its unfinished tasks and their child tickets in the
 same transaction. A child ticket shows its lead and task; a lead ticket shows
 each task with its child, status, result and pull request. The API adds
 `tasks` and `parentTask` to ticket responses.
+
+### Lights-out and agent choices
+
+Migration 013 adds `tickets.lights_out`, default false for existing tickets.
+New tickets default it on for workflow names `lead` and `program-lead`, off
+otherwise; an explicit `lightsOut` in `POST /api/tickets` overrides the default.
+The New ticket checkbox follows the workflow until touched. Children inherit
+exactly their parent's value, and enabled tickets show a Lights-out badge.
+
+When enabled, a lead's `plan-ready` routed to a human `approve-plan` is
+approved by the system in the same lifecycle transaction. Its plan stays
+recorded, `decision.made` records the automatic approval, and the next prompt
+has `planApproved: true`. Other human steps still wait. Every agent prompt adds
+a short instruction to choose sensible defaults, record choices, and continue;
+irreversible actions wait, and publishing remains system work.
+
+Agents emit `{ "kind": "decision", "title": "…", "chose": "…",
+"alternative": "…", "reason": "…" }`, with three nonempty choice fields
+and no content or path. The store retains structured `Artifact.decision` plus
+Markdown for the timeline. The ticket's Decision log lists its choices and links
+to child ticket decision logs. These artifacts are separate from typed workflow
+`decide` judgements and never influence the merge gate.
+
+For a lights-out lead, a child ask with reason `needs-decision` becomes a
+`parked` task. The lead hears its summary once and siblings keep running;
+parked tasks consume no parallel slot and prevent the lead reporting `done`.
+An owner retry or move resumes that child; subsequent polling restores its task
+to running and reports its eventual finish. Cancelling the lead also cancels
+parked children. With lights-out off, approval and task reporting are unchanged.
+Kit, CI and migration changes and reviewer `ownerReview` still require the owner.

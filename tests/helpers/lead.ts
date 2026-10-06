@@ -270,9 +270,10 @@ export async function leadFixture(config: object = {}) {
       await scheduler?.close()
       scheduler = undefined
     },
-    lead(title = 'Lead the change') {
+    lead(title = 'Lead the change', lightsOut = false) {
       return createTicket(store.database, {
         repository: repository.slug,
+        lightsOut,
         workflow: library.get('lead')!,
         title,
         body: 'Build the whole feature through tasks.',

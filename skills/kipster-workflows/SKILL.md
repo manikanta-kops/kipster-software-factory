@@ -634,3 +634,28 @@ npm run kf -- check <directory>
 ```
 
 It prints each error with the file and step, or how many workflows are valid.
+
+## Ticket lights-out
+
+`lightsOut` is a ticket setting; do not add a workflow or step field. It defaults
+on for new tickets using workflow names `lead` and `program-lead`, off for other
+names; existing tickets stay off. Children inherit it. For an enabled ticket,
+a lead's `plan-ready` routed to a human step named `approve-plan` is approved
+by the system with a recorded event, then follows `approved`. Keep that route
+back to the lead; its next prompt has `planApproved: true`. Other human steps
+and workflow limits still wait normally.
+
+Every enabled agent prompt says to choose sensible defaults and continue,
+recording each choice as a decision artifact with `kind: decision`, `title`,
+`chose`, `alternative` and `reason` (three nonempty strings, no content/path).
+These are agent choices, separate from the `decide` action's model judgements.
+Irreversible actions wait: merging outside merge policy, deleting data or
+force-pushing. Only system actions publish or merge. Kit, CI, migrations and
+reviewer `ownerReview` still require the owner.
+
+For an enabled lead, a child `needs-decision` becomes a `parked` task and wakes
+the lead with its summary. Siblings continue, and queued work can use the freed
+parallel slot. Parked tasks remain unfinished: the lead can delegate while
+waiting but cannot report `done`. Owner retry or move resumes the child; its
+finish is reported normally. Cancelling the lead cancels parked children too.
+With lights-out off, the original approval and reporting behaviour applies.

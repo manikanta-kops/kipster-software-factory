@@ -128,6 +128,7 @@ router.post('/__test/fixtures', async (c) => {
       repository: 'kipster/demo-shop',
       workflow: await builtInWorkflow('quick-change'),
       title: 'Inspect artifacts safely',
+      lightsOut: true,
       body: 'A **safe** description.',
     })
     const claimed = await claimAttempts(fixture.database, 100)
@@ -145,6 +146,13 @@ router.post('/__test/fixtures', async (c) => {
           path: 'plan.md',
         },
         { kind: 'log', title: 'Planner log', path: 'planner.log' },
+        {
+          kind: 'decision',
+          title: 'Storage choice',
+          chose: 'PostgreSQL',
+          alternative: 'A file',
+          reason: 'Keep writes transactional',
+        },
       ],
     })
     artifactTicketNumber = artifactTicket.number

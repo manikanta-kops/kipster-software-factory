@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { defaultLightsOut } from '../../../src/domain/records.ts'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import type { Repository, WorkflowSummary } from '../../../src/api/contract.ts'
 import { api } from '../api.ts'
@@ -28,6 +29,8 @@ export function NewTicket() {
   const client = useQueryClient()
   const [repository, setRepository] = useState('')
   const [workflow, setWorkflow] = useState('')
+  const [lightsOutChoice, setLightsOutChoice] = useState<boolean | null>(null)
+  const lightsOut = lightsOutChoice ?? defaultLightsOut(workflow)
   const [title, setTitle] = useState('')
   const [body, setBody] = useState('')
   const [dependencies, setDependencies] = useState<string[]>([])
@@ -83,6 +86,7 @@ export function NewTicket() {
               create.mutate({
                 repository,
                 workflow,
+                lightsOut,
                 title: title.trim(),
                 body,
                 ...(dependencies.length ? { dependencies } : {}),
@@ -205,6 +209,19 @@ export function NewTicket() {
                   ))}
               </fieldset>
             )}
+          <label className="workflow-choice">
+            <input
+              type="checkbox"
+              checked={lightsOut}
+              onChange={(event) => setLightsOutChoice(event.target.checked)}
+            />
+            <span>
+              Lights-out{' '}
+              <span className="muted">
+                Choose sensible defaults and keep working overnight.
+              </span>
+            </span>
+          </label>
           <label htmlFor="title">Title</label>
           <input
             id="title"

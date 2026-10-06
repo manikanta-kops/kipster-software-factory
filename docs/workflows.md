@@ -156,3 +156,16 @@ running or waiting for a decision.
 earlier step. When the step has run `n` times and would send it back again, the
 `limit` route applies instead (default: `ask`). Forward routes are never
 limited.
+
+### Ticket lights-out setting
+
+`lightsOut` belongs to a ticket, not a workflow step. New tickets default it on
+for `lead` and `program-lead` and off for other workflow names; existing tickets
+stay off. Child tasks inherit it. On an enabled ticket, a lead's `plan-ready`
+routed to the human step `approve-plan` is recorded as system-approved and
+routes through its `approved` outcome. Keep the normal approval routes for
+other tickets. Every agent is instructed to choose defaults and emit decision
+artifacts with `kind: decision`, `title`, `chose`, `alternative` and `reason`
+(no content/path). A child `needs-decision` parks that task and reports to the
+lead while siblings continue. Parked tasks remain unfinished until resolved.
+Other human steps, limits and merge policy remain in effect.

@@ -142,3 +142,12 @@ factory-floor.
 ## Slice 6: The factory builds itself
 
 Factory work runs through the factory, then Kipster's does.
+
+Ticket lights-out now defaults on for new `lead` and `program-lead` tickets
+and is inherited by tasks. It system-approves a lead's plan, adds instructions
+to choose and record defaults, and shows typed agent choices on the ticket.
+A child that needs a decision parks locally, reports to the lead, and frees a
+parallel slot while siblings continue. The existing merge gate still leaves
+kit, CI, migrations and reviewer owner-review flags for the owner. Role-file
+rewrites, untested-task handling and repeated-failure detection are separate
+follow-up slices. Live overnight use with real agents remains unverified.

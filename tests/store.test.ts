@@ -60,3 +60,54 @@ describe('store', () => {
     )
   })
 })
+
+test('lights-out migration preserves existing lead tickets as off and keeps old artifacts readable', async () => {
+  const { mkdtemp, copyFile, rm } = await import('node:fs/promises')
+  const { tmpdir } = await import('node:os')
+  const { join } = await import('node:path')
+  const { getTicketDetail } = await import('../src/store/tickets.ts')
+  const fresh = await createTestDatabase()
+  const db = openDatabase(fresh.url)
+  const directory = await mkdtemp(join(tmpdir(), 'lights-out-migrations-'))
+  try {
+    const migrations = await listMigrations()
+    for (const migration of migrations.filter((item) => item.version < 13)) {
+      await copyFile(
+        migration.file,
+        join(
+          directory,
+          `${String(migration.version).padStart(3, '0')}_${migration.name}.sql`,
+        ),
+      )
+    }
+    await migrate(db, directory)
+    const loaded = await loadLibrary(BUILT_IN_WORKFLOWS)
+    assert.ok(loaded.ok)
+    await recordWorkflowVersions(db, loaded.library)
+    const version = loaded.library.get('lead')!.version
+    const repo = await db.query<{ id: number }>(
+      "INSERT INTO repositories (slug, clone_url, default_branch, status) VALUES ('upgrade/app', 'unused', 'main', 'ready') RETURNING id",
+    )
+    const ticket = await db.query<{ id: number }>(
+      `INSERT INTO tickets (number, repository_id, workflow_name, workflow_version, title, branch, current_step, status) VALUES (1, $1, 'lead', $2, 'Existing lead', 'kipster/1', 'lead', 'queued') RETURNING id`,
+      [repo.rows[0]!.id, version],
+    )
+    const attempt = await db.query<{ id: number }>(
+      "INSERT INTO attempts (ticket_id, step_id, status) VALUES ($1, 'lead', 'pending') RETURNING id",
+      [ticket.rows[0]!.id],
+    )
+    await db.query(
+      "INSERT INTO artifacts (ticket_id, attempt_id, kind, title, content) VALUES ($1, $2, 'note', 'Old note', 'Still readable')",
+      [ticket.rows[0]!.id, attempt.rows[0]!.id],
+    )
+    assert.deepEqual(await migrate(db), [13])
+    const detail = await getTicketDetail(db, 1)
+    assert.equal(detail!.ticket.lightsOut, false)
+    assert.equal(detail!.artifacts[0]!.content, 'Still readable')
+    assert.equal(detail!.artifacts[0]!.decision, null)
+  } finally {
+    await db.end()
+    await fresh.drop()
+    await rm(directory, { recursive: true, force: true })
+  }
+})

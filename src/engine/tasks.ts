@@ -140,7 +140,27 @@ export async function pollTasks(
   for (const task of detail.tasks) {
     signal.throwIfAborted()
     const child = task.child
-    if (!child || !['running', 'pr-ready'].includes(task.status)) continue
+    if (!child || !['running', 'parked', 'pr-ready'].includes(task.status))
+      continue
+    if (
+      detail.ticket.lightsOut &&
+      child.waiting?.askReason === 'needs-decision'
+    ) {
+      await updateTask(
+        database,
+        task.id,
+        'parked',
+        child.waiting.summary ?? 'Child needs a decision.',
+      )
+      continue
+    }
+    if (task.status === 'parked')
+      await updateTask(
+        database,
+        task.id,
+        'running',
+        'Child resumed after its decision.',
+      )
     if (child.status === 'done') {
       if (task.land === 'branch')
         await integrate(options, detail.ticket, repository, task, signal)

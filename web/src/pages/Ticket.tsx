@@ -81,6 +81,7 @@ export function TicketPage({
         </p>
         <h1>{ticket.title}</h1>
         <div className="ticket-meta">
+          {ticket.lightsOut && <span className="badge">Lights-out</span>}
           {linkedWait ? (
             <span className="ticket-doing">
               Waiting for linked ticket{' '}
@@ -105,6 +106,7 @@ export function TicketPage({
         )}
         {ticket.body && <Description body={ticket.body} />}
         <Tasks detail={query.data} />
+        <AgentDecisions detail={query.data} />
         <MergeGatePanel detail={query.data} />
         <Verdict
           detail={query.data}
@@ -1116,5 +1118,48 @@ function EventEntry({ event }: { event: FactoryEvent }) {
         <pre>{JSON.stringify(event.data, null, 2)}</pre>
       </details>
     </li>
+  )
+}
+
+function AgentDecisions({ detail }: { detail: TicketResponse }) {
+  const decisions = detail.artifacts.filter(
+    (artifact) => artifact.kind === 'decision' && artifact.decision,
+  )
+  const children = (detail.tasks ?? []).filter((task) => task.child)
+  if (!decisions.length && !children.length) return null
+  return (
+    <section className="steps-card" aria-label="Decision log">
+      <h2 className="section-title">Decision log</h2>
+      {decisions.map((artifact) => (
+        <div key={artifact.id}>
+          <h3>{artifact.title}</h3>
+          <dl>
+            <dt>Chose</dt>
+            <dd>
+              <MarkdownBody>{artifact.decision!.chose}</MarkdownBody>
+            </dd>
+            <dt>Alternative</dt>
+            <dd>
+              <MarkdownBody>{artifact.decision!.alternative}</MarkdownBody>
+            </dd>
+            <dt>Reason</dt>
+            <dd>
+              <MarkdownBody>{artifact.decision!.reason}</MarkdownBody>
+            </dd>
+          </dl>
+        </div>
+      ))}
+      {children.length > 0 && (
+        <ul>
+          {children.map((task) => (
+            <li key={task.id}>
+              <a className="text-link" href={`#/tickets/${task.child!.number}`}>
+                Decisions from {task.title} (#{task.child!.number})
+              </a>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
   )
 }

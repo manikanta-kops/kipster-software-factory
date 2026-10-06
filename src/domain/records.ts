@@ -58,6 +58,7 @@ export const ARTIFACT_KINDS = [
   'evidence',
   'log',
   'note',
+  'decision',
 ] as const
 export type ArtifactKind = (typeof ARTIFACT_KINDS)[number]
 
@@ -131,7 +132,12 @@ export interface Waiting {
   readonly since: string
 }
 
+export function defaultLightsOut(workflow: string): boolean {
+  return workflow === 'lead' || workflow === 'program-lead'
+}
+
 export interface Ticket {
+  readonly lightsOut: boolean
   readonly id: number
   /** Shown to people as #number. */
   readonly number: number
@@ -181,7 +187,14 @@ export interface Attempt {
   readonly finishedAt: string | null
 }
 
+export interface AgentDecision {
+  readonly chose: string
+  readonly alternative: string
+  readonly reason: string
+}
+
 export interface Artifact {
+  readonly decision?: AgentDecision | null
   /** Factory-observed proof surface commit; agents cannot set it in result.json. */
   readonly observedCommit?: string | null
   readonly scenarioResult?:
@@ -236,6 +249,7 @@ export interface TicketLink {
 export const TASK_STATUSES = [
   'pending',
   'running',
+  'parked',
   'pr-ready',
   'merged',
   'left-open',
