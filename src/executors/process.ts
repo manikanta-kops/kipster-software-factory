@@ -2,6 +2,7 @@ import { spawn } from 'node:child_process'
 import { createWriteStream } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { finished } from 'node:stream/promises'
+import { killProcessGroup } from './process-group.ts'
 
 export async function run(
   command: string,
@@ -20,22 +21,42 @@ export async function run(
   const logDone = log ? finished(log) : Promise.resolve()
   // Attach immediately so a disk error cannot become an unhandled rejection.
   void logDone.catch(() => {})
-  const child = spawn(
-    process.execPath,
-    [
-      fileURLToPath(new URL('./supervisor.ts', import.meta.url)),
-      command,
-      ...args,
-    ],
-    {
-      cwd: options.cwd,
-      stdio: ['pipe', 'pipe', 'pipe', 'ipc'],
-    },
-  )
+  // Agent and kit commands can outlive a factory crash, so a supervisor kills their
+  // group. Git is short-lived and frequent; a supervisor per call costs a Node start.
+  const direct = command === 'git'
+  const child = direct
+    ? spawn(command, args, {
+        cwd: options.cwd,
+        detached: true,
+        stdio: ['pipe', 'pipe', 'pipe'],
+      })
+    : spawn(
+        process.execPath,
+        [
+          fileURLToPath(new URL('./supervisor.ts', import.meta.url)),
+          command,
+          ...args,
+        ],
+        {
+          cwd: options.cwd,
+          stdio: ['pipe', 'pipe', 'pipe', 'ipc'],
+        },
+      )
   let output = ''
   let diagnostic = ''
   const abort = () => {
-    if (child.connected) child.send('stop', () => {})
+    if (!direct) {
+      if (child.connected) child.send('stop', () => {})
+      return
+    }
+    if (!child.pid || child.exitCode !== null || child.signalCode !== null)
+      return
+    try {
+      killProcessGroup(child.pid)
+    } catch {
+      // A throw here would escape the abort listener; stopping git itself is enough.
+      child.kill('SIGKILL')
+    }
   }
   options.signal?.addEventListener('abort', abort, { once: true })
   let logFailed = false
