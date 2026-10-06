@@ -129,3 +129,24 @@ export function taskEvent(
     },
   }
 }
+
+/** For each child ticket id, the task it runs and its lead's number. */
+export async function listChildTasks(
+  database: Queryable,
+): Promise<Map<number, { readonly key: string; readonly leadNumber: number }>> {
+  const { rows } = await database.query<{
+    child_ticket_id: number
+    key: string
+    lead_number: number
+  }>(
+    `SELECT k.child_ticket_id, k.key, p.number AS lead_number
+     FROM tasks k JOIN tickets p ON p.id = k.ticket_id
+     WHERE k.child_ticket_id IS NOT NULL`,
+  )
+  return new Map(
+    rows.map((row) => [
+      row.child_ticket_id,
+      { key: row.key, leadNumber: row.lead_number },
+    ]),
+  )
+}

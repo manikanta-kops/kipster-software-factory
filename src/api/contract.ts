@@ -118,7 +118,12 @@ export interface RepositoryResponse {
 // GET /api/tickets?status=needs-you,queued
 export interface TicketsResponse {
   /** Most recently changed first. */
-  readonly tickets: readonly Ticket[]
+  readonly tickets: readonly ListedTicket[]
+}
+
+export interface ListedTicket extends Ticket {
+  /** On a child ticket, the lead task it runs. */
+  readonly task?: { readonly key: string; readonly leadNumber: number } | null
 }
 
 // POST /api/tickets (201, TicketResponse)
