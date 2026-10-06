@@ -12,6 +12,7 @@ import {
   result,
   until,
 } from './helpers/lead.ts'
+import { saveSettings } from '../src/store/settings.ts'
 
 test('a lead runs branch tasks in parallel, hears each finish while others run, and its branch gets all the work', async (t) => {
   const f = await leadFixture()
@@ -428,4 +429,123 @@ test('tasks use the chosen agent, survive a restart, and stop when the lead is c
     ),
   )
   assert.deepEqual(f.errors, [])
+})
+
+test('a task agent runs only the builder; workflow overrides and the allowed list come from saved settings', async (t) => {
+  const sol = { cli: 'codex', model: 'gpt-6.1-sol', effort: 'high' } as const
+  const opusMedium = {
+    cli: 'claude',
+    model: 'claude-opus-5-5',
+    effort: 'medium',
+  } as const
+  const opusHigh = { ...opusMedium, effort: 'high' } as const
+  const globalReviewer = { cli: 'codex', model: 'gpt-review' } as const
+  // config.json allows nothing; the saved settings add opusHigh.
+  const f = await leadFixture({
+    agents: { roles: { reviewer: globalReviewer } },
+  })
+  t.after(() => f.close())
+  await saveSettings(f.store.database, {
+    concurrency: 3,
+    stepTimeoutMinutes: 120,
+    agents: {
+      default: { cli: 'codex' },
+      roles: { reviewer: globalReviewer },
+      allowed: [opusHigh],
+    },
+    workflows: {
+      'data-task': {
+        stepTimeoutMinutes: 240,
+        roles: { builder: sol, reviewer: opusMedium },
+      },
+    },
+  })
+  const leadPrompts: string[] = []
+  f.setBehaviour(async (role, invocation, title) => {
+    if (role === 'lead') {
+      leadPrompts.push(invocation.prompt)
+      const { tasks, allowedAgents } = leadState(invocation.prompt)
+      assert.deepEqual(allowedAgents, [opusHigh])
+      if (tasks.length)
+        return result(invocation.directory, {
+          outcome: tasks.every((task) => task.status === 'merged')
+            ? 'done'
+            : 'delegate',
+          summary: 'Waiting',
+          artifacts: [],
+        })
+      const retry = invocation.prompt.includes(
+        'Previous result validation failed',
+      )
+      return result(invocation.directory, {
+        outcome: 'delegate',
+        summary: 'Three tasks',
+        artifacts: [],
+        tasks: retry
+          ? [
+              {
+                key: 'chosen',
+                title: 'Chosen',
+                instructions: 'Use the chosen agent',
+                workflow: 'data-task',
+                agent: opusHigh,
+              },
+              {
+                key: 'data',
+                title: 'Data',
+                instructions: 'Use the workflow settings',
+                workflow: 'data-task',
+              },
+              {
+                key: 'plain',
+                title: 'Plain',
+                instructions: 'Use the global settings',
+              },
+            ]
+          : [
+              {
+                key: 'other',
+                title: 'Other',
+                instructions: 'Not an allowed agent',
+                agent: { cli: 'claude', model: 'some-other-model' },
+              },
+            ],
+      })
+    }
+    if (role === 'builder')
+      return build(invocation, `${title.toLowerCase()}.txt`, `${title}\n`)
+    return result(invocation.directory, {
+      outcome: 'passed',
+      summary: 'Looks right',
+      artifacts: [],
+    })
+  })
+  const lead = await f.lead()
+  await f.start()
+  await until(
+    async () => f.invocations.filter((item) => item.role === 'reviewer'),
+    (reviewers) => reviewers.length === 3,
+  )
+  assert.match(leadPrompts[1]!, /some-other-model.*is not allowed/)
+  const agentOf = (role: string, title: string) =>
+    f.invocations.find((item) => item.role === role && item.title === title)
+      ?.config
+  assert.deepEqual(agentOf('lead', 'Lead the change'), { cli: 'codex' })
+  assert.deepEqual(agentOf('builder', 'Chosen'), opusHigh)
+  assert.deepEqual(agentOf('reviewer', 'Chosen'), opusMedium)
+  assert.deepEqual(agentOf('builder', 'Data'), sol)
+  assert.deepEqual(agentOf('reviewer', 'Data'), opusMedium)
+  assert.deepEqual(agentOf('builder', 'Plain'), { cli: 'codex' })
+  assert.deepEqual(agentOf('reviewer', 'Plain'), globalReviewer)
+  const chosen = (await f.detail(lead.number)).tasks.find(
+    (task) => task.key === 'chosen',
+  )
+  const child = await f.detail(chosen!.child!.number)
+  assert.deepEqual(
+    child.attempts.map((attempt) => [attempt.stepId, attempt.agent]),
+    [
+      ['build', opusHigh],
+      ['review', opusMedium],
+    ],
+  )
 })

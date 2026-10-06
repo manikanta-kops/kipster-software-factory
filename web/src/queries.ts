@@ -26,6 +26,10 @@ export const workflowsQuery = queryOptions({
   queryKey: ['workflows'],
   queryFn: ({ signal }) => api.workflows(signal),
 })
+export const settingsQuery = queryOptions({
+  queryKey: ['settings'],
+  queryFn: ({ signal }) => api.settings(signal),
+})
 export const ticketQuery = (number: number) =>
   queryOptions({
     queryKey: ['ticket', number],

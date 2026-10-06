@@ -2,7 +2,13 @@ import { signInToGitHubWithCli } from './github/credentials.ts'
 import { fileURLToPath } from 'node:url'
 import { serve } from '@hono/node-server'
 import { createApp } from './api/app.ts'
-import { engineConfig, type EngineConfig, defaultHome } from './config.ts'
+import {
+  engineConfig,
+  type EngineConfig,
+  defaultHome,
+  settingsFromConfig,
+} from './config.ts'
+import { hasSavedSettings } from './store/settings.ts'
 import {
   addUploads,
   BUILT_IN_WORKFLOWS,
@@ -53,9 +59,14 @@ export async function startFactory(
     throw new Error(`Invalid workflows:\n  ${loaded.errors.join('\n  ')}`)
   }
 
+  const config = engineConfig.parse(options)
   const database = openDatabase(options.databaseUrl)
   try {
     await migrate(database)
+    if (await hasSavedSettings(database))
+      console.log(
+        'Engine settings come from the factory database; config.json concurrency, stepTimeoutMinutes and agents are ignored.',
+      )
     await recordWorkflowVersions(database, loaded.library)
     for (const warning of addUploads(
       loaded.library,
@@ -77,7 +88,7 @@ export async function startFactory(
         events,
         library: loaded.library,
         home: options.home ?? defaultHome(),
-        config: engineConfig.parse(options),
+        config,
         ...(loaded.library.get('bug')
           ? { bugWorkflow: loaded.library.get('bug')! }
           : {}),
@@ -92,6 +103,7 @@ export async function startFactory(
     library: loaded.library,
     events,
     home: options.home ?? defaultHome(),
+    settings: settingsFromConfig(config),
     ...(options.allowedOrigins === undefined
       ? {}
       : { allowedOrigins: options.allowedOrigins }),

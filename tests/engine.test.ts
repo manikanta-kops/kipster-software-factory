@@ -15,7 +15,9 @@ import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { test, type TestContext } from 'node:test'
 import { engineConfig, readConfig } from '../src/config.ts'
+import type { Settings } from '../src/domain/settings.ts'
 import { startScheduler } from '../src/engine/scheduler.ts'
+import { saveSettings } from '../src/store/settings.ts'
 import { cliCommand, type AgentExecutor } from '../src/executors/cli.ts'
 import { run } from '../src/executors/process.ts'
 import type { GitHub, PullRequest } from '../src/github/github.ts'
@@ -598,7 +600,7 @@ test('configuration defaults and verified CLI argument sets', async (t) => {
   )
   const config = await readConfig(home)
   assert.equal(config.concurrency, 2)
-  assert.equal(config.stepTimeoutMinutes, 60)
+  assert.equal(config.stepTimeoutMinutes, 120)
   assert.deepEqual(config.agents.default, { cli: 'codex' })
   assert.ok(
     cliCommand({ cli: 'codex' }).args.includes(
@@ -985,3 +987,64 @@ for (const failure of [false, true]) {
     assert.equal(await run('git', ['rev-parse', 'HEAD'], { cwd }), commit)
   })
 }
+
+test('saved settings reach steps that start later without a restart', async (t) => {
+  const f = await setup(t, { planner: [{ wait: true }] })
+  await f.start(engineConfig.parse({ concurrency: 1 }))
+  const first = await f.ticket('First')
+  const second = await f.ticket('Second')
+  await until(
+    async () => f.invocations.length,
+    (value) => value === 1,
+  )
+  await new Promise((resolve) => setTimeout(resolve, 400))
+  assert.equal(f.invocations.length, 1)
+  const sonnet = { cli: 'claude', model: 'claude-sonnet-5-5' } as const
+  const saved = {
+    concurrency: 2,
+    stepTimeoutMinutes: 120,
+    agents: {
+      default: { cli: 'codex' },
+      roles: { planner: sonnet },
+      allowed: [],
+    },
+    workflows: {},
+  } satisfies Settings
+  await saveSettings(f.store.database, saved)
+  await until(
+    async () => f.invocations.length,
+    (value) => value === 2,
+  )
+  assert.deepEqual((await f.detail(first.number)).attempts[0]!.agent, {
+    cli: 'codex',
+  })
+  assert.deepEqual((await f.detail(second.number)).attempts[0]!.agent, sonnet)
+  assert.equal((await f.detail(second.number)).attempts[0]!.executor, 'claude')
+
+  await saveSettings(f.store.database, {
+    ...saved,
+    concurrency: 4,
+    stepTimeoutMinutes: 0.01,
+  })
+  const third = await f.ticket('Third')
+  const timedOut = await until(
+    () => f.detail(third.number),
+    (d) => d.ticket.waiting?.for === 'ask',
+  )
+  assert.match(timedOut.attempts[0]!.error!, /timed out after 0\.01 minutes/)
+
+  await saveSettings(f.store.database, {
+    ...saved,
+    concurrency: 4,
+    workflows: { 'quick-change': { stepTimeoutMinutes: 0.02 } },
+  })
+  const fourth = await f.ticket('Fourth')
+  const overridden = await until(
+    () => f.detail(fourth.number),
+    (d) => d.ticket.waiting?.for === 'ask',
+  )
+  assert.match(overridden.attempts[0]!.error!, /timed out after 0\.02 minutes/)
+  // Steps that started earlier keep the timeout they started with.
+  for (const ticket of [first, second])
+    assert.equal((await f.detail(ticket.number)).attempts[0]!.status, 'running')
+})

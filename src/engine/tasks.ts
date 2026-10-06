@@ -3,6 +3,7 @@ import { type RoleName, runTasksParams } from '../domain/catalog.ts'
 import { FactoryError } from '../domain/errors.ts'
 import { stepOf, type StepResult } from '../domain/lifecycle.ts'
 import type { LeadTask, Repository, Ticket } from '../domain/records.ts'
+import { resolveAgent } from '../domain/settings.ts'
 import { checkDelegation, delegateTarget } from '../domain/tasks.ts'
 import type { AgentStep } from '../domain/workflow.ts'
 import {
@@ -25,15 +26,21 @@ import {
 } from '../store/tickets.ts'
 import type { RunnerOptions } from './runner.ts'
 
-/** A child ticket runs every agent with its task's chosen agent; other tickets use the role settings. */
+/** The agent for a step of this ticket: a child ticket's task agent sets only its builder. */
 export async function agentFor(
   options: Pick<RunnerOptions, 'database' | 'config'>,
-  ticket: Pick<Ticket, 'id'>,
+  context: Pick<AttemptContext, 'ticket' | 'workflow'>,
   role: RoleName,
 ): Promise<AgentConfig> {
-  const owned = await getTaskOfChild(options.database, ticket.id)
-  const { agents } = options.config
-  return owned?.task.agent ?? agents.roles[role] ?? agents.default
+  const owned =
+    role === 'builder'
+      ? await getTaskOfChild(options.database, context.ticket.id)
+      : null
+  return resolveAgent(options.config, {
+    workflow: context.workflow.name,
+    role,
+    taskAgent: owned?.task.agent,
+  })
 }
 
 async function libraryOf(options: RunnerOptions): Promise<Library> {

@@ -50,6 +50,7 @@ for (const colorScheme of ['light', 'dark'] as const) {
           route: '/workflows/quick-change',
           heading: 'quick-change',
         },
+        { name: 'settings', route: '/settings', heading: 'Settings' },
       ]
       for (const screen of pages) {
         await page.goto(`${factory.url}/#${screen.route}`)
@@ -82,6 +83,7 @@ for (const colorScheme of ['light', 'dark'] as const) {
             'new-ticket',
             'repositories',
             'workflows',
+            'settings',
           ].includes(screen.name),
         })
         await testInfo.attach(`${screen.name}-${size}-${colorScheme}`, {

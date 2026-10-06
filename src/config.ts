@@ -4,6 +4,16 @@ import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { z } from 'zod'
 import { agentChoiceSchema } from './domain/catalog.ts'
+import {
+  agentSettingSchema,
+  concurrencySchema,
+  DEFAULT_AGENT,
+  DEFAULT_CONCURRENCY,
+  DEFAULT_STEP_TIMEOUT_MINUTES,
+  roleAgentsSchema,
+  type Settings,
+  timeoutSchema,
+} from './domain/settings.ts'
 
 export const DEFAULT_PORT = 4600
 
@@ -28,35 +38,36 @@ export function defaultHome(): string {
 }
 
 export const agentConfig = agentChoiceSchema
+/** Engine settings as config.json gives them: the starting values until the owner saves settings. */
 export const engineConfig = z.object({
   evidenceRetentionDays: z.int().positive().default(30),
-  concurrency: z.int().positive().default(2),
-  stepTimeoutMinutes: z.number().positive().default(60),
+  concurrency: concurrencySchema.default(DEFAULT_CONCURRENCY),
+  stepTimeoutMinutes: timeoutSchema.default(DEFAULT_STEP_TIMEOUT_MINUTES),
   agents: z
     .strictObject({
-      default: agentConfig.default({ cli: 'codex' }),
-      roles: z
-        .partialRecord(
-          z.enum([
-            'planner',
-            'builder',
-            'reviewer',
-            'writer',
-            'tester',
-            'reproducer',
-            'onboarder',
-            'lead',
-          ]),
-          agentConfig,
-        )
-        .default({}),
+      default: agentSettingSchema.default(DEFAULT_AGENT),
+      roles: roleAgentsSchema.default({}),
       /** The agents a lead may choose for a task. Empty: tasks use the role settings. */
-      allowed: z.array(agentConfig).default([]),
+      allowed: z.array(agentSettingSchema).default([]),
     })
-    .default({ default: { cli: 'codex' }, roles: {}, allowed: [] }),
+    .default({ default: DEFAULT_AGENT, roles: {}, allowed: [] }),
 })
 export type EngineConfig = z.infer<typeof engineConfig>
 export type AgentConfig = z.infer<typeof agentConfig>
+/** What one attempt runs with: config.json's values or the saved settings, with workflow overrides. */
+export type AttemptConfig = EngineConfig & {
+  readonly workflows?: Settings['workflows']
+}
+
+/** The settings config.json supplies when none are saved in the factory database. */
+export function settingsFromConfig(config: EngineConfig): Settings {
+  return {
+    concurrency: config.concurrency,
+    stepTimeoutMinutes: config.stepTimeoutMinutes,
+    agents: config.agents,
+    workflows: {},
+  }
+}
 
 const configFile = z.strictObject({
   ...engineConfig.shape,

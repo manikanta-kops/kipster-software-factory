@@ -192,6 +192,15 @@ Action notes:
   task reports `failed` to the lead instead of waiting for the owner.
 - A pull request task's `merge` waits for the lead: it merges only after the
   lead chooses `merge`, and then only under the normal auto-merge rules.
+- A lead may give a task an `agent` from the factory's allowed list. It runs
+  only the task's `builder` steps; the task's `tester`, `reviewer` and `writer`
+  keep the factory settings, so review can come from another model family.
+- A workflow file never names an agent, model or timeout. The owner sets those
+  on the factory's Settings page, globally or per workflow name. An agent step
+  runs with, in order: the task's agent (builder steps only), the workflow's
+  override for the role, the factory's role setting, then its default. The step
+  timeout is the workflow's override, then the factory's (120 minutes unless
+  changed).
 - `maintain-pr` is the only way a pull request gets published. Put it before
   `merge`.
 - After `maintain-pr` merges the base, prior tester and reviewer verdicts must

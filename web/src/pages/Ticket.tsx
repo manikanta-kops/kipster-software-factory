@@ -17,6 +17,7 @@ import type {
   ResolveRequest,
   TicketResponse,
 } from '../../../src/api/contract.ts'
+import { describeAgent } from '../../../src/domain/settings.ts'
 import { api } from '../api.ts'
 import {
   attention,
@@ -882,7 +883,11 @@ function AttemptEntry({
       </div>
       <div className="attempt-meta">
         <Status value={outcome} />
-        <span>{attempt.executor ?? 'Unassigned'}</span>
+        <span>
+          {attempt.agent
+            ? describeAgent(attempt.agent)
+            : (attempt.executor ?? 'Unassigned')}
+        </span>
         <AttemptDuration attempt={attempt} />
         {attempt.headCommit && (
           <span>

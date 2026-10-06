@@ -196,7 +196,7 @@ export async function runProofAttempt(
         { kind: 'log', title: `${step.role} run ${retry}`, path: log },
       ])
       execution = session.execute({
-        config: await agentFor(options, ticket, step.role),
+        config: await agentFor(options, context, step.role),
         cwd,
         prompt,
         directory,
