@@ -22,6 +22,7 @@ import type { EventSignal } from '../store/events.ts'
 import {
   createRepository,
   listRepositories,
+  retryRepository,
   setAutoMerge,
 } from '../store/repositories.ts'
 import {
@@ -175,6 +176,12 @@ export function createApp({
     })
     return c.json<RepositoryResponse>({ repository }, 201)
   })
+
+  app.post('/api/repositories/:id{[0-9]+}/retry', async (c) =>
+    c.json<RepositoryResponse>({
+      repository: await retryRepository(database, Number(c.req.param('id'))),
+    }),
+  )
 
   app.post('/api/repositories/:id{[0-9]+}/auto-merge', async (c) => {
     const input = await body(c, z.strictObject({ enabled: z.boolean() }))

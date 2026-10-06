@@ -71,6 +71,7 @@ export const EVENT_KINDS = [
   'repository.created',
   'repository.ready',
   'repository.failed',
+  'repository.retried',
   'repository.policy',
   'pull-request.merge-requested',
   'pull-request.merged',
