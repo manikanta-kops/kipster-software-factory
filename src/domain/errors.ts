@@ -13,3 +13,10 @@ export class FactoryError extends Error {
     this.code = code
   }
 }
+
+/** The attempt already finished; whoever acted second has nothing left to do. */
+export class AttemptMovedOn extends FactoryError {
+  constructor(message: string) {
+    super('conflict', message)
+  }
+}

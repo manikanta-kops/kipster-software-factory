@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { AttemptMovedOn } from '../src/domain/errors.ts'
 import { after, before, describe, test } from 'node:test'
 import type { ArtifactInput } from '../src/domain/lifecycle.ts'
 import type { Database } from '../src/store/database.ts'
@@ -376,6 +377,15 @@ describe('the quick-change lifecycle', () => {
       }),
       'conflict',
       /no longer open; the ticket has moved on/,
+    )
+    // Background pollers treat exactly this error as already handled.
+    await assert.rejects(
+      decide(database, {
+        ticketNumber: number,
+        attemptId: attemptId - 1,
+        choice: 'approved',
+      }),
+      AttemptMovedOn,
     )
     await assertFactoryError(
       decide(database, {

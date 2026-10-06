@@ -11,7 +11,12 @@ const child = spawn(command, args, {
 process.stdin.pipe(child.stdin)
 child.stdin.on('error', () => {})
 function kill() {
-  if (child.pid) killProcessGroup(child.pid)
+  try {
+    if (child.pid) killProcessGroup(child.pid)
+  } catch (error) {
+    // A failed kill must not turn a requested stop into a crash of the wrapped command.
+    console.error(error instanceof Error ? error.message : String(error))
+  }
 }
 process.on('disconnect', kill)
 process.on('message', kill)

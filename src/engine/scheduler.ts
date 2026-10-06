@@ -3,6 +3,7 @@ import { agentFor, pollTasks } from './tasks.ts'
 import { listTaskWaits } from '../store/tasks.ts'
 import type { Library } from '../library/library.ts'
 import { invalidateMergeGate } from '../store/merge-gates.ts'
+import { AttemptMovedOn } from '../domain/errors.ts'
 import { pruneEvidence, adoptEvidence } from '../store/evidence.ts'
 import { pollMergeWait } from './merge-wait.ts'
 import { checkAfterMerge } from './post-merge.ts'
@@ -204,7 +205,7 @@ export async function startScheduler(
         AbortSignal.any([lifetime.signal, AbortSignal.timeout(300_000)]),
       )
         .catch((error) => {
-          if (!stopped) report(error)
+          if (!stopped && !(error instanceof AttemptMovedOn)) report(error)
         })
         .finally(() => {
           taskJobs.delete(wait.attemptId)
@@ -231,7 +232,7 @@ export async function startScheduler(
             AbortSignal.any([lifetime.signal, AbortSignal.timeout(30_000)]),
           )
         } catch (error) {
-          if (!stopped) {
+          if (!stopped && !(error instanceof AttemptMovedOn)) {
             await invalidateMergeGate(database, context.ticket.id, error)
             report(error)
           }
@@ -246,7 +247,7 @@ export async function startScheduler(
           AbortSignal.any([lifetime.signal, AbortSignal.timeout(60_000)]),
         )
           .catch(async (error) => {
-            if (!stopped) {
+            if (!stopped && !(error instanceof AttemptMovedOn)) {
               report(error)
               try {
                 await invalidateMergeGate(database, context.ticket.id, error)
