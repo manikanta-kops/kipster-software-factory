@@ -4,6 +4,7 @@ import { getMergeGate } from '../store/merge-gates.ts'
 import { setArtifactHome } from '../store/database.ts'
 import { listDecisions, decisionCounts } from '../store/decisions.ts'
 import { saveUploadedWorkflow } from '../store/workflows.ts'
+import { listChildTasks } from '../store/task-records.ts'
 import { effectiveSettings, saveSettings } from '../store/settings.ts'
 import { AGENT_CLIS, EFFORTS } from '../domain/catalog.ts'
 import {
@@ -244,11 +245,18 @@ export function createApp({
 
   app.get('/api/tickets', async (c) => {
     const status = c.req.query('status')
-    return c.json<TicketsResponse>({
-      tickets: await listTickets(
+    const [tickets, childTasks] = await Promise.all([
+      listTickets(
         database,
         status === undefined ? {} : { status: parse(statusFilter, status) },
       ),
+      listChildTasks(database),
+    ])
+    return c.json<TicketsResponse>({
+      tickets: tickets.map((ticket) => ({
+        ...ticket,
+        task: childTasks.get(ticket.id) ?? null,
+      })),
     })
   })
 

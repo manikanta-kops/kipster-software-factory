@@ -1,7 +1,13 @@
-import { useEffect, useState, type CSSProperties } from 'react'
+import {
+  useEffect,
+  useId,
+  useState,
+  type CSSProperties,
+  type ReactNode,
+} from 'react'
 import { useQueries, useQuery } from '@tanstack/react-query'
 import type {
-  Ticket,
+  ListedTicket,
   TicketResponse,
   WorkflowSummary,
 } from '../../../src/api/contract.ts'
@@ -24,7 +30,7 @@ import {
   ticketsQuery,
   workflowsQuery,
 } from '../queries.ts'
-import { doing, greeting, repositoryTone, since } from '../words.ts'
+import { doing, greeting, humanize, repositoryTone, since } from '../words.ts'
 
 /** Re-render on a slow clock so relative times stay true. */
 function useNow(interval = 30_000) {
@@ -85,6 +91,19 @@ export function NeedsYou({
     .sort(
       (a, b) => Number(a.status === 'queued') - Number(b.status === 'queued'),
     )
+  const leads = new Set(moving.map((ticket) => ticket.number))
+  const tasksOf = new Map<number, ListedTicket[]>()
+  for (const ticket of visible)
+    if (ticket.task && leads.has(ticket.task.leadNumber))
+      tasksOf.set(ticket.task.leadNumber, [
+        ...(tasksOf.get(ticket.task.leadNumber) ?? []),
+        ticket,
+      ])
+  const topMoving = moving.filter(
+    (ticket) => !(ticket.task && leads.has(ticket.task.leadNumber)),
+  )
+  const workflowOf = (ticket: ListedTicket) =>
+    workflows.data?.workflows.find((item) => item.name === ticket.workflow.name)
   const finished = visible.filter((ticket) =>
     ['done', 'cancelled'].includes(ticket.status),
   )
@@ -157,17 +176,33 @@ export function NeedsYou({
                 Moving
               </h2>
               <ul className="rows">
-                {moving.map((ticket) => (
-                  <MovingRow
-                    key={ticket.id}
-                    ticket={ticket}
-                    factoryMerge={factoryMerges.has(ticket.number)}
-                    workflow={workflows.data?.workflows.find(
-                      (item) => item.name === ticket.workflow.name,
-                    )}
-                    now={now}
-                  />
-                ))}
+                {topMoving.map((ticket) => {
+                  const tasks = tasksOf.get(ticket.number)
+                  const row = (
+                    <MovingRow
+                      key={ticket.id}
+                      ticket={ticket}
+                      factoryMerge={factoryMerges.has(ticket.number)}
+                      workflow={workflowOf(ticket)}
+                      now={now}
+                    />
+                  )
+                  return tasks ? (
+                    <LeadGroup
+                      key={ticket.id}
+                      tasks={tasks}
+                      moving={moving}
+                      needsYou={needsYou}
+                      workflowOf={workflowOf}
+                      factoryMerges={factoryMerges}
+                      now={now}
+                    >
+                      {row}
+                    </LeadGroup>
+                  ) : (
+                    row
+                  )
+                })}
               </ul>
             </section>
           )}
@@ -247,7 +282,7 @@ function DecisionCard({
   now,
   index,
 }: {
-  ticket: Ticket
+  ticket: ListedTicket
   detail: TicketResponse | undefined
   now: number
   index: number
@@ -277,6 +312,11 @@ function DecisionCard({
       <div className="decision-main">
         <p className="decision-meta">
           <RepositoryTag repository={ticket.repository} />
+          {ticket.task && (
+            <span>
+              Task {ticket.task.key} of #{ticket.task.leadNumber}
+            </span>
+          )}
           {waiting && <span>waiting {since(waiting.since, now)}</span>}
         </p>
         <h3 id={`decision-${ticket.id}`}>
@@ -311,16 +351,128 @@ function DecisionCard({
   )
 }
 
+type TaskState = 'done' | 'now' | 'you' | 'queued' | 'stopped'
+
+/** A lead's row with its child tickets folded underneath, so one piece of work reads as one. */
+function LeadGroup({
+  tasks,
+  moving,
+  needsYou,
+  workflowOf,
+  factoryMerges,
+  now,
+  children,
+}: {
+  tasks: readonly ListedTicket[]
+  moving: readonly ListedTicket[]
+  needsYou: readonly ListedTicket[]
+  workflowOf: (ticket: ListedTicket) => WorkflowSummary | undefined
+  factoryMerges: ReadonlySet<number>
+  now: number
+  children: ReactNode
+}) {
+  const [open, setOpen] = useState(false)
+  const panelId = useId()
+  const state = (ticket: ListedTicket): TaskState =>
+    needsYou.includes(ticket)
+      ? 'you'
+      : ticket.status === 'done'
+        ? 'done'
+        : ticket.status === 'cancelled'
+          ? 'stopped'
+          : ticket.status === 'queued'
+            ? 'queued'
+            : 'now'
+  const counts = new Map<string, number>()
+  for (const ticket of tasks) {
+    const value = state(ticket)
+    const label =
+      value === 'now'
+        ? factoryMerges.has(ticket.number)
+          ? 'Merging'
+          : doing(
+              ticket,
+              workflowOf(ticket)?.steps.find(
+                (step) => step.id === ticket.currentStep,
+              ),
+            )
+        : {
+            done: 'Done',
+            you: 'Need you',
+            queued: 'Queued',
+            stopped: 'Cancelled',
+          }[value]
+    counts.set(label, (counts.get(label) ?? 0) + 1)
+  }
+  const running = tasks.filter((ticket) => moving.includes(ticket))
+  return (
+    <li className="lead-group">
+      {children}
+      <button
+        type="button"
+        className="lead-tasks-toggle"
+        aria-expanded={open}
+        aria-controls={panelId}
+        onClick={() => setOpen(!open)}
+      >
+        <Icon name="chevronRight" size={11} stroke={2.4} />
+        <span className="lead-tasks-count">
+          {tasks.length} {tasks.length === 1 ? 'task' : 'tasks'}
+        </span>
+        <span className="lead-tasks-summary">
+          {[...counts].map(([label, count]) => `${count} ${label}`).join(' · ')}
+        </span>
+        <span className="task-bar" aria-hidden="true">
+          {tasks.map((ticket) => (
+            <i key={ticket.id} className={state(ticket)} />
+          ))}
+        </span>
+      </button>
+      {open && (
+        <ul className="rows task-rows" id={panelId}>
+          {running.map((ticket) => (
+            <MovingRow
+              key={ticket.id}
+              ticket={ticket}
+              factoryMerge={factoryMerges.has(ticket.number)}
+              workflow={workflowOf(ticket)}
+              now={now}
+              nested
+            />
+          ))}
+          {tasks
+            .filter((ticket) => !running.includes(ticket))
+            .map((ticket) => (
+              <li key={ticket.id}>
+                <a className="task-line" href={`#/tickets/${ticket.number}`}>
+                  <span className={`task-dot ${state(ticket)}`} />
+                  <span className="task-line-title">{ticket.title}</span>
+                  <span className="muted">
+                    {state(ticket) === 'you'
+                      ? 'Needs you'
+                      : humanize(ticket.status)}
+                  </span>
+                </a>
+              </li>
+            ))}
+        </ul>
+      )}
+    </li>
+  )
+}
+
 function MovingRow({
   ticket,
   factoryMerge,
   workflow,
   now,
+  nested = false,
 }: {
-  ticket: Ticket
+  ticket: ListedTicket
   factoryMerge: boolean
   workflow: WorkflowSummary | undefined
   now: number
+  nested?: boolean
 }) {
   const step = workflow?.steps.find((item) => item.id === ticket.currentStep)
   const at = workflow?.steps.findIndex((item) => item.id === ticket.currentStep)
@@ -337,7 +489,16 @@ function MovingRow({
         <span className="row-main">
           <span className="row-title">{ticket.title}</span>
           <span className="row-sub">
-            <RepositoryTag repository={ticket.repository} />
+            {nested && ticket.task ? (
+              <span className="task-key">{ticket.task.key}</span>
+            ) : (
+              <RepositoryTag repository={ticket.repository} />
+            )}
+            {!nested && ticket.task && (
+              <span className="muted">
+                Task {ticket.task.key} of #{ticket.task.leadNumber}
+              </span>
+            )}
             <span className="row-doing">
               {factoryMerge ? 'Factory merge pending' : doing(ticket, step)}
             </span>

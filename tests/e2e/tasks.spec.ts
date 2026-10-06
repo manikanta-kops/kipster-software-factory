@@ -1,4 +1,4 @@
-import type { TicketResponse } from '../../src/api/contract.ts'
+import type { TicketResponse, TicketsResponse } from '../../src/api/contract.ts'
 import { test, expect } from './fixtures.ts'
 
 test.use({ withTasks: true })
@@ -56,4 +56,38 @@ test('a lead ticket lists its tasks and each child links back to its lead', asyn
     land: 'branch',
     parent: { number: lead },
   })
+})
+
+test('Today folds the child tickets of a lead under it until expanded', async ({
+  page,
+  factory,
+  request,
+}) => {
+  const { lead, child } = factory.taskTickets!
+  const { tickets } = (await (
+    await request.get(`${factory.url}/api/tickets`)
+  ).json()) as TicketsResponse
+  expect(tickets.find((item) => item.number === child)?.task).toEqual({
+    key: 'api-export',
+    leadNumber: lead,
+  })
+  expect(tickets.find((item) => item.number === lead)?.task).toBeNull()
+
+  await page.goto(factory.url)
+  const moving = page.getByRole('region', { name: 'Moving', exact: true })
+  await expect(
+    moving.getByRole('link', { name: /Build the export feature/ }),
+  ).toBeVisible()
+  const childRow = moving.getByRole('link', { name: /Add the export endpoint/ })
+  await expect(childRow).toHaveCount(0)
+  const toggle = moving.getByRole('button', { name: /\d+ tasks?/ })
+  await expect(toggle).toHaveAttribute('aria-expanded', 'false')
+  await toggle.click()
+  await expect(toggle).toHaveAttribute('aria-expanded', 'true')
+  await expect(childRow).toBeVisible()
+  await expect(childRow).toContainText('api-export')
+  await childRow.click()
+  await expect(
+    page.getByRole('heading', { name: 'Add the export endpoint' }),
+  ).toBeVisible()
 })
