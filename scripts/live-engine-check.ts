@@ -24,6 +24,8 @@ const now = new Date().toISOString()
 const detail: TicketDetail = {
   dependencies: [],
   links: [],
+  tasks: [],
+  parentTask: null,
   ticket: {
     id: 0,
     number: 0,

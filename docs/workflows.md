@@ -53,6 +53,8 @@ System steps take an `action` and its parameters under `with`:
 | decide            | one per option; no success outcome     |
 | maintain-pr       | ready, conflict, ci-failed, base-moved |
 | merge             | merged, changes-needed, rejected       |
+| lead              | done, delegate, plan-ready             |
+| run-tasks         | reported                               |
 
 Agent and system steps can also report `needs-decision`, which always pauses
 the ticket for you unless routed.
@@ -93,6 +95,44 @@ event wakes do not trigger extra polls. A cancelled
 link, or completion without a confirmed merged PR, asks the owner. The parked
 attempt survives restart and consumes no executor slot. Cancelling the original
 does not cancel linked tickets.
+
+## Lead tasks
+
+A `lead` step's `delegate` must route to a `run-tasks` step, which runs the
+tasks as child tickets and reports `reported` each time one finishes, fails,
+conflicts or has a pull request ready. `run-tasks` takes optional `with`
+parameters: `workflow` (default `task`) and `prWorkflow` (default `task-pr`)
+for the two lands, `maxParallel` (default 3) and `maxTasks` (default 12).
+
+A lead's `result.json` adds:
+
+```json
+{
+  "outcome": "delegate",
+  "summary": "Split into API and UI work",
+  "artifacts": [],
+  "tasks": [
+    {
+      "key": "api-export",
+      "title": "Add the CSV export endpoint",
+      "instructions": "Self-contained instructions for the task's agents.",
+      "land": "branch",
+      "workflow": "task",
+      "agent": { "cli": "claude", "model": "opus", "effort": "high" }
+    }
+  ],
+  "pullRequests": [{ "task": "docs-fix", "decision": "merge" }]
+}
+```
+
+`tasks` only come with `delegate`. `pullRequests` come with `delegate`, or
+with `done` when every decision is `leave-open`. `land` defaults to `branch`:
+the task starts from the lead's branch and the system merges it back. A `pr`
+task starts from the default branch and opens its own pull request; its
+workflow must contain `maintain-pr` and `merge`, and a `branch` task's must
+contain neither. `agent` must match an entry of `agents.allowed` in the
+factory configuration. `done` is refused while a task is still pending,
+running or waiting for a decision.
 
 ## Defaults for unrouted outcomes
 

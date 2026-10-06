@@ -126,8 +126,15 @@ Checkouts share cached objects, pin their commits through force-pushes and cache
 GC, and are removed with their pins after done/cancel even if the ticket worktree
 must be retained. Snapshots exclude Git packs; restoration uses the step signal.
 
-Child tickets are deferred. Build them only when a real ticket needs them; the
-unused child workflows and actions have been removed.
+A `lead` role splits a ticket into tasks; `run-tasks` runs them as child
+tickets, up to a parallel limit, and wakes the lead each time one finishes,
+fails, conflicts or has a pull request ready. Branch tasks merge into the
+lead's branch; pull request tasks merge when the lead chooses and the merge
+policy allows. A lead may give a task an allowed agent, model and effort. A live
+smoke with real Claude sessions on a throwaway repository ran a lead, three
+branch tasks two at a time, a report after each and a final `done`. Pull
+request tasks, testers inside tasks and Codex leads have not run live, nor on
+factory-floor.
 
 ## Slice 6: The factory builds itself
 

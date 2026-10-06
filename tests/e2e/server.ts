@@ -14,6 +14,12 @@ import { listWaitingForMerge } from '../../src/store/tickets.ts'
 import { decide, linkOtherRepository } from '../../src/store/tickets.ts'
 import { decisionWorkflow, confirmDecision } from '../helpers/decisions.ts'
 import { recordDecisionOutcome } from '../../src/store/tickets.ts'
+import {
+  parkForTasks,
+  startTask,
+  updateTask,
+  listTasks,
+} from '../../src/store/tasks.ts'
 // Only this test server exposes fixture creation; production API routes are unchanged.
 import { serve } from '@hono/node-server'
 import { appendFile, rm, writeFile } from 'node:fs/promises'
@@ -215,6 +221,72 @@ router.post('/__test/fixtures', async (c) => {
     detail = (await getTicketDetail(fixture.database, link.linked.number))!
     linkedTickets = { original: original.number, linked: detail.ticket.number }
   }
+  let taskTickets: { lead: number; child: number } | null = null
+  if (c.req.query('tasks') === 'true') {
+    const lead = await createTicket(fixture.database, {
+      repository: 'kipster/demo-shop',
+      workflow: await builtInWorkflow('lead'),
+      title: 'Build the export feature',
+    })
+    const first = (await claimAttempts(fixture.database, 100)).find(
+      (item) => item.ticket.id === lead.id,
+    )!
+    await markRunning(fixture.database, first.attempt.id, 'claude')
+    await completeAttempt(fixture.database, first.attempt.id, {
+      outcome: 'delegate',
+      summary: 'Split into the endpoint and the docs',
+      artifacts: [],
+      tasks: [
+        {
+          key: 'api-export',
+          title: 'Add the export endpoint',
+          instructions: 'Add GET /export returning CSV.',
+          agent: { cli: 'claude', model: 'opus', effort: 'high' },
+        },
+        {
+          key: 'docs',
+          title: 'Document the export',
+          instructions: 'Describe the export in the README.',
+          land: 'pr',
+        },
+      ],
+    })
+    const run = (await claimAttempts(fixture.database, 100)).find(
+      (item) => item.ticket.id === lead.id,
+    )!
+    await markRunning(fixture.database, run.attempt.id, 'system')
+    await parkForTasks(fixture.database, run.attempt.id)
+    const [api, docs] = await listTasks(fixture.database, lead.id)
+    const child = await startTask(
+      fixture.database,
+      api!.id,
+      {
+        repository: 'kipster/demo-shop',
+        workflow: await builtInWorkflow('task'),
+        title: api!.title,
+        body: api!.instructions,
+      },
+      null,
+    )
+    await startTask(
+      fixture.database,
+      docs!.id,
+      {
+        repository: 'kipster/demo-shop',
+        workflow: await builtInWorkflow('task-pr'),
+        title: docs!.title,
+        body: docs!.instructions,
+      },
+      null,
+    )
+    await updateTask(
+      fixture.database,
+      docs!.id,
+      'pr-ready',
+      'Pull request ready for a decision.',
+    )
+    taskTickets = { lead: lead.number, child: child!.number }
+  }
   const fixtureEvents = listenForEvents(fixture.database)
   await fixtureEvents.ready
   const fixtureApp = createApp({
@@ -393,6 +465,7 @@ router.post('/__test/fixtures', async (c) => {
     url,
     tickets: fixture.tickets,
     linkedTickets,
+    taskTickets,
     artifactTicket: artifactTicketNumber,
     decisionTicket,
   })

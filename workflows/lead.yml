@@ -1,0 +1,56 @@
+name: lead
+description: A lead agent splits the ticket into tasks that run as child tickets, then the whole change is tested, reviewed and landed.
+steps:
+  - id: lead
+    kind: agent
+    role: lead
+    routes:
+      plan-ready: approve-plan
+      delegate: run-tasks
+      done: final-test
+
+  - id: approve-plan
+    kind: human
+    routes:
+      approved: lead
+      changes-needed: lead
+
+  - id: run-tasks
+    kind: system
+    action: run-tasks
+    with:
+      maxParallel: 3
+      maxTasks: 12
+    limit: 25
+    routes:
+      reported: lead
+
+  - id: final-test
+    kind: agent
+    role: tester
+    needs: [verify]
+    instructions: Test the whole change against the ticket and the approved plan, not one task.
+    limit: 3
+    routes:
+      changes-needed: lead
+
+  - id: review
+    kind: agent
+    role: reviewer
+    limit: 2
+    routes:
+      changes-needed: lead
+
+  - id: maintain-pr
+    kind: system
+    action: maintain-pr
+    routes:
+      conflict: lead
+      ci-failed: lead
+      base-moved: final-test
+
+  - id: merge
+    kind: system
+    action: merge
+    routes:
+      changes-needed: lead

@@ -81,15 +81,16 @@ Any other key is an error. Step ids `finish`, `cancel` and `ask` are reserved.
 
 ## Roles (agent steps)
 
-| Role         | Does                                                                       | Outcomes, success first        |
-| ------------ | -------------------------------------------------------------------------- | ------------------------------ |
-| `planner`    | Writes a plan with acceptance scenarios. Never commits.                    | `done`                         |
-| `builder`    | The only author of product code. Implements, fixes conflicts and feedback. | `done`, `needs-other-repo`     |
-| `tester`     | Runs the real app at the exact commit and returns a verdict with evidence. | `passed`, `changes-needed`     |
-| `reproducer` | Proves a reported bug on the base branch before any fix.                   | `reproduced`, `not-reproduced` |
-| `reviewer`   | Reads the diff once for serious problems the tester cannot see.            | `passed`, `changes-needed`     |
-| `writer`     | Writes the pull request description.                                       | `done`                         |
-| `onboarder`  | Writes a repository's `.kipster` kit.                                      | `done`                         |
+| Role         | Does                                                                       | Outcomes, success first          |
+| ------------ | -------------------------------------------------------------------------- | -------------------------------- |
+| `planner`    | Writes a plan with acceptance scenarios. Never commits.                    | `done`                           |
+| `builder`    | The only author of product code. Implements, fixes conflicts and feedback. | `done`, `needs-other-repo`       |
+| `tester`     | Runs the real app at the exact commit and returns a verdict with evidence. | `passed`, `changes-needed`       |
+| `reproducer` | Proves a reported bug on the base branch before any fix.                   | `reproduced`, `not-reproduced`   |
+| `reviewer`   | Reads the diff once for serious problems the tester cannot see.            | `passed`, `changes-needed`       |
+| `writer`     | Writes the pull request description.                                       | `done`                           |
+| `onboarder`  | Writes a repository's `.kipster` kit.                                      | `done`                           |
+| `lead`       | Splits the ticket into tasks run as child tickets; decides from reports.   | `done`, `delegate`, `plan-ready` |
 
 Role notes:
 
@@ -120,6 +121,13 @@ Role notes:
 - `needs-other-repo` is handled by the factory: it opens a linked ticket in
   the other repository and resumes the builder after that pull request merges.
   Do not route it.
+- A `lead` never commits. `delegate` hands out tasks and must route to a
+  `run-tasks` step; the validator rejects a lead without that route.
+  `plan-ready` comes with a plan; route it to a human step whose `approved`
+  and `changes-needed` both route back to the lead. `done` means every task
+  has finished; route it forward to the final tester. Route the final
+  tester's, reviewer's and `maintain-pr`'s failures back to the lead, which
+  fixes them with new tasks.
 
 ## Actions (system steps)
 
@@ -129,6 +137,7 @@ Role notes:
 | `verify-kit`  | Proves the committed kit: setup, check and a running instance.                                     | none                                    | `passed`, `failed`                             |
 | `maintain-pr` | Syncs with the base branch, publishes the pull request and waits for CI.                           | optional, see below                     | `ready`, `conflict`, `ci-failed`, `base-moved` |
 | `merge`       | Merges when the repository allows auto-merge and every rule passes; otherwise waits for the owner. | none                                    | `merged`, `changes-needed`, `rejected`         |
+| `run-tasks`   | Runs a lead's tasks as child tickets and reports each time one finishes.                           | optional, see below                     | `reported`                                     |
 
 `decide` parameters:
 
@@ -161,8 +170,28 @@ so an unrouted option pauses the ticket.
 | `ciSettleMinutes`  | 3       | How long to wait after a push for CI to register before treating "no checks" as final. |
 | `maxBaseSyncs`     | 3       | How many base-branch moves in a row it syncs and re-tests before asking the owner.     |
 
+`run-tasks` parameters, all optional:
+
+| Parameter     | Default   | Meaning                                                    |
+| ------------- | --------- | ---------------------------------------------------------- |
+| `workflow`    | `task`    | Workflow for tasks that land on the lead's branch.         |
+| `prWorkflow`  | `task-pr` | Workflow for tasks that land as their own pull request.    |
+| `maxParallel` | 3         | How many tasks run at once. Queued tasks start in order.   |
+| `maxTasks`    | 12        | How many tasks one ticket may ask for over its whole life. |
+
 Action notes:
 
+- `run-tasks` only works as the target of a lead's `delegate`; the validator
+  rejects it anywhere else. Route `reported` back to the lead, and give the
+  step a `limit`: every report is one more lead session.
+- A task's workflow is checked when the lead asks for it, not at upload. A
+  task that lands on the lead's branch must not contain `maintain-pr` or
+  `merge`: the system merges it into the lead's branch when it finishes. A
+  task that lands as a pull request must contain both. Task workflows cannot
+  contain a `lead`. Give their backwards routes `limit: cancel`, so a stuck
+  task reports `failed` to the lead instead of waiting for the owner.
+- A pull request task's `merge` waits for the lead: it merges only after the
+  lead chooses `merge`, and then only under the normal auto-merge rules.
 - `maintain-pr` is the only way a pull request gets published. Put it before
   `merge`.
 - After `maintain-pr` merges the base, prior tester and reviewer verdicts must
@@ -352,6 +381,129 @@ steps:
       changes-needed: fix
 ```
 
+`lead`: a lead splits the ticket into tasks, `run-tasks` runs them and wakes
+the lead after each one, then the whole change is tested, reviewed and landed.
+
+```yaml
+name: lead
+description: A lead agent splits the ticket into tasks that run as child tickets, then the whole change is tested, reviewed and landed.
+steps:
+  - id: lead
+    kind: agent
+    role: lead
+    routes:
+      plan-ready: approve-plan
+      delegate: run-tasks
+      done: final-test
+
+  - id: approve-plan
+    kind: human
+    routes:
+      approved: lead
+      changes-needed: lead
+
+  - id: run-tasks
+    kind: system
+    action: run-tasks
+    with:
+      maxParallel: 3
+      maxTasks: 12
+    limit: 25
+    routes:
+      reported: lead
+
+  - id: final-test
+    kind: agent
+    role: tester
+    needs: [verify]
+    instructions: Test the whole change against the ticket and the approved plan, not one task.
+    limit: 3
+    routes:
+      changes-needed: lead
+
+  - id: review
+    kind: agent
+    role: reviewer
+    limit: 2
+    routes:
+      changes-needed: lead
+
+  - id: maintain-pr
+    kind: system
+    action: maintain-pr
+    routes:
+      conflict: lead
+      ci-failed: lead
+      base-moved: final-test
+
+  - id: merge
+    kind: system
+    action: merge
+    routes:
+      changes-needed: lead
+```
+
+The tasks run `task` (lands on the lead's branch) or `task-pr` (its own pull
+request):
+
+```yaml
+name: task
+description: One task from a lead, built and tested on its own branch. The system merges it into the lead's branch when it passes.
+steps:
+  - id: build
+    kind: agent
+    role: builder
+
+  - id: test
+    kind: agent
+    role: tester
+    needs: [verify]
+    limit: 3
+    routes:
+      changes-needed: build
+      limit: cancel
+```
+
+```yaml
+name: task-pr
+description: One task from a lead that lands as its own pull request. The lead decides whether the system merges it.
+steps:
+  - id: build
+    kind: agent
+    role: builder
+
+  - id: test
+    kind: agent
+    role: tester
+    needs: [verify]
+    limit: 3
+    routes:
+      changes-needed: build
+      limit: cancel
+
+  - id: review
+    kind: agent
+    role: reviewer
+    limit: 2
+    routes:
+      changes-needed: build
+      limit: cancel
+
+  - id: maintain-pr
+    kind: system
+    action: maintain-pr
+    routes:
+      conflict: build
+      ci-failed: build
+      base-moved: test
+
+  - id: merge
+    kind: system
+    action: merge
+    routes:
+      changes-needed: build
+```
+
 `quick-change` is `feature` without the tester, for repositories with no
 verify kit. Its `maintain-pr` routes `base-moved` back to `review`.
 `onboard-repo` is write-kit (onboarder), verify-kit (limit 3,
@@ -432,8 +584,8 @@ past `approve-plan` explicitly.
   It answers 201 for a new name, 200 for a new version of an uploaded name,
   400 with `issues` when invalid, and 409 for a name owned by a workflow file.
 - **Files:** a workflow file in the factory's workflow directory loads at
-  startup. The built-in `feature`, `bug`, `quick-change` and `onboard-repo`
-  are files, so uploads cannot reuse those names.
+  startup. The built-in `feature`, `bug`, `quick-change`, `onboard-repo`,
+  `lead`, `task` and `task-pr` are files, so uploads cannot reuse those names.
 
 ## Versions
 
@@ -457,6 +609,8 @@ Before you hand it over, check:
 - [ ] A workflow with a `reproducer` has no path that reaches a `tester`
       without reproducing first.
 - [ ] Product code changes pass through `maintain-pr` before `merge`.
+- [ ] Every `lead` routes `delegate` to a `run-tasks` step whose `reported`
+      routes back to that lead and which has a `limit`.
 - [ ] Following the success outcomes from the first step reaches the end.
 
 When you have the factory repository, validate a directory of workflows:

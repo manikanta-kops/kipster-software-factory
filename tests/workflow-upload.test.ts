@@ -158,7 +158,7 @@ steps:
     )
     assert.equal(problem.error, 'The workflow is not valid')
     assert.deepEqual(problem.issues, [
-      'step "build": role must be one of planner, builder, tester, reproducer, reviewer, writer, onboarder',
+      'step "build": role must be one of planner, builder, tester, reproducer, reviewer, writer, onboarder, lead',
       'step "test": cannot route "failed"; this step can report passed, changes-needed, needs-decision',
       'step "test": route "changes-needed" goes to unknown step "deploy" (exits: finish, cancel, ask)',
     ])

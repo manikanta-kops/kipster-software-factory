@@ -147,6 +147,8 @@ const STEP_ICONS: Record<string, string> = {
   'maintain-pr': 'pr',
   merge: 'merge',
   decide: 'sparkle',
+  lead: 'layers',
+  'run-tasks': 'hourglass',
 }
 
 /** The glyph for a step: its role or action, or a raised hand for you. */
@@ -168,6 +170,7 @@ export function stepHue(step: StepSummary | undefined) {
       reviewer: 'purple',
       writer: 'teal',
       onboarder: 'brown',
+      lead: 'indigo',
     }[step.does ?? ''] ?? 'grey'
   )
 }

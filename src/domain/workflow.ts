@@ -132,6 +132,7 @@ export function parseWorkflow(source: string): ParseResult {
   }
 
   for (const step of steps) checkRoutes(step, ids, errors)
+  checkDelegation(steps, errors)
 
   if (errors.length > 0) return { ok: false, errors }
   return {
@@ -243,6 +244,30 @@ function checkRoutes(step: Step, ids: Set<string>, errors: string[]) {
       )
     }
   }
+}
+
+// A lead's tasks only run when its delegate outcome reaches a run-tasks step.
+function checkDelegation(steps: readonly Step[], errors: string[]) {
+  const targets = new Set<string>()
+  for (const step of steps) {
+    if (step.kind !== 'agent' || step.role !== 'lead') continue
+    const target = steps.find((item) => item.id === step.routes['delegate'])
+    if (target?.kind === 'system' && target.action === 'run-tasks')
+      targets.add(target.id)
+    else
+      errors.push(
+        `step "${step.id}": route delegate to a run-tasks step, which runs the lead's tasks`,
+      )
+  }
+  for (const step of steps)
+    if (
+      step.kind === 'system' &&
+      step.action === 'run-tasks' &&
+      !targets.has(step.id)
+    )
+      errors.push(
+        `step "${step.id}": run-tasks only runs a lead's tasks; route a lead step's delegate here`,
+      )
 }
 
 function message(error: unknown): string {

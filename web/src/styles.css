@@ -407,8 +407,17 @@ output {
   color: var(--green);
 }
 .badge.cancelled,
-.badge.rejected {
+.badge.rejected,
+.badge.left-open {
   color: var(--grey);
+}
+.badge.conflict {
+  background: var(--red-wash);
+  color: var(--red-ink);
+}
+.badge.pr-ready {
+  background: var(--amber-wash);
+  color: var(--amber);
 }
 .chips {
   display: flex;
@@ -1084,6 +1093,26 @@ section.quiet {
 }
 .steps-card .section-title {
   margin-bottom: 8px;
+}
+.task-list {
+  display: grid;
+  gap: 12px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.task-list .task-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+}
+.task-list .task-key {
+  font-family: var(--mono, ui-monospace, monospace);
+  font-size: 0.9em;
+}
+.task-list p {
+  margin: 4px 0 0;
 }
 .step-list {
   margin: 0;

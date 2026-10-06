@@ -14,6 +14,7 @@ export function humanize(id: string) {
 const ACTION_NAMES: Record<string, string> = {
   'maintain-pr': 'Pull request',
   'verify-kit': 'Verify kit',
+  'run-tasks': 'Run tasks',
 }
 
 /** A step's name for people; system steps named after their action read as the action. */
@@ -31,10 +32,12 @@ const VERBS: Record<string, string> = {
   reviewer: 'Reviewing',
   writer: 'Writing',
   onboarder: 'Writing the kit',
+  lead: 'Leading',
   'verify-kit': 'Verifying the kit',
   'maintain-pr': 'Updating the pull request',
   merge: 'Ready to merge',
   decide: 'Deciding',
+  'run-tasks': 'Running tasks',
 }
 
 /** What a ticket is doing now, in a word or two. */
@@ -44,6 +47,7 @@ export function doing(ticket: Ticket, step: StepSummary | undefined) {
   if (ticket.status === 'cancelled') return 'Cancelled'
   if (ticket.waiting?.for === 'pull-request-checks') return 'Waiting for CI'
   if (ticket.waiting?.for === 'other-repo') return 'Waiting for linked ticket'
+  if (ticket.waiting?.for === 'tasks') return 'Waiting for tasks'
   if (ticket.status === 'needs-you') return 'Waiting for you'
   if (!step) return humanize(ticket.currentStep)
   if (step.kind === 'human') return 'Waiting for you'
@@ -87,4 +91,13 @@ export function greeting(now = new Date()) {
       : hour < 18
         ? 'Good afternoon'
         : 'Good evening'
+}
+
+/** `{ cli: 'claude', model: 'opus', effort: 'high' }` → `claude · opus · high`. */
+export function agentLabel(agent: {
+  readonly cli: string
+  readonly model?: string | undefined
+  readonly effort?: string | undefined
+}) {
+  return [agent.cli, agent.model, agent.effort].filter(Boolean).join(' · ')
 }

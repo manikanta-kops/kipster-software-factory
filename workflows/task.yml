@@ -1,0 +1,15 @@
+name: task
+description: One task from a lead, built and tested on its own branch. The system merges it into the lead's branch when it passes.
+steps:
+  - id: build
+    kind: agent
+    role: builder
+
+  - id: test
+    kind: agent
+    role: tester
+    needs: [verify]
+    limit: 3
+    routes:
+      changes-needed: build
+      limit: cancel

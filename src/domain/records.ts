@@ -1,5 +1,6 @@
 // The factory's records as the store returns them and the API sends them.
 // Timestamps are ISO 8601 strings so the same shapes work on both sides of the wire.
+import type { AgentChoice } from './catalog.ts'
 import type { Next } from './routing.ts'
 
 export const REPOSITORY_STATUSES = ['pending', 'ready', 'failed'] as const
@@ -35,6 +36,7 @@ export const WAITING_FOR = [
   'ask',
   'pull-request-merge',
   'pull-request-checks',
+  'tasks',
 ] as const
 export type WaitingFor = (typeof WAITING_FOR)[number]
 
@@ -75,6 +77,7 @@ export const EVENT_KINDS = [
   'post-merge.checked',
   'ticket.created',
   'ticket.linked',
+  'task.updated',
   'ticket.status',
   'ticket.pull-request',
   'attempt.queued',
@@ -225,4 +228,58 @@ export interface TicketLink {
   >
   readonly mergeCommit: string | null
   readonly resolvedAt: string | null
+}
+
+export const TASK_STATUSES = [
+  'pending',
+  'running',
+  'pr-ready',
+  'merged',
+  'left-open',
+  'conflict',
+  'failed',
+  'cancelled',
+] as const
+export type TaskStatus = (typeof TASK_STATUSES)[number]
+
+/** One task a lead handed out, run as a child ticket. */
+export interface LeadTask {
+  readonly id: number
+  /** The lead's ticket. */
+  readonly ticketId: number
+  /** The lead attempt that asked for it. */
+  readonly attemptId: number
+  readonly key: string
+  readonly title: string
+  readonly instructions: string
+  /** `branch` merges into the lead's branch; `pr` opens its own pull request. */
+  readonly land: 'branch' | 'pr'
+  readonly workflow: string
+  readonly agent: AgentChoice | null
+  readonly status: TaskStatus
+  /** The lead's call on a ready pull request. */
+  readonly decision: 'merge' | 'leave-open' | null
+  /** What happened, in a sentence, once the task is past running. */
+  readonly result: string | null
+  /** The lead branch commit a branch task started from. */
+  readonly baseCommit: string | null
+  readonly child: {
+    readonly id: number
+    readonly number: number
+    readonly status: TicketStatus
+    readonly branch: string
+    readonly currentStep: string
+    readonly pullRequestUrl: string | null
+    readonly waiting: Waiting | null
+  } | null
+  readonly createdAt: string
+  readonly updatedAt: string
+}
+
+/** On a child ticket: the lead ticket and task it belongs to. */
+export interface ParentTask {
+  readonly key: string
+  readonly land: 'branch' | 'pr'
+  readonly status: TaskStatus
+  readonly parent: Pick<Ticket, 'id' | 'number' | 'title' | 'status'>
 }

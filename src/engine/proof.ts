@@ -31,6 +31,7 @@ import {
 } from '../verification/harness.ts'
 import { artifactPath, buildPrompt, readResult } from './prompt.ts'
 import type { RunnerOptions } from './runner.ts'
+import { agentFor } from './tasks.ts'
 
 type Instance = VerificationInstance & {
   surface: 'base' | 'head'
@@ -50,7 +51,7 @@ export async function runProofAttempt(
   diff: string,
   signal: AbortSignal,
 ): Promise<void> {
-  const { database, home, config } = options
+  const { database, home } = options
   const { ticket, attempt, step, repository } = context
   if (
     step.kind !== 'agent' ||
@@ -195,7 +196,7 @@ export async function runProofAttempt(
         { kind: 'log', title: `${step.role} run ${retry}`, path: log },
       ])
       execution = session.execute({
-        config: config.agents.roles[step.role] ?? config.agents.default,
+        config: await agentFor(options, ticket, step.role),
         cwd,
         prompt,
         directory,
