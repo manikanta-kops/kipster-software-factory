@@ -117,6 +117,12 @@ update settings; other configuration fields are retained. For scripts, use
 `npm run kf -- setup --non-interactive`. Use `--home <directory>` on setup and
 serve for a separate factory.
 
+Concurrency, the step timeout (120 minutes by default) and the agent for each
+role, globally or per workflow, are edited on the web app's Settings page and
+apply to steps that start afterwards, without a restart. `config.json` supplies
+their starting values until the first save; see
+[the architecture](docs/architecture.md#settings-page).
+
 TypeSafe is optional: its key powers decision steps (for example judging whether
 a PR is safe to auto-merge). Without it those decisions come to you. Store a key
 with `kf secret set typesafe`, or validate one from stdin during setup with

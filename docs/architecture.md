@@ -167,7 +167,7 @@ pushes and GitHub mutations for system steps.
 {
   "port": 4600,
   "concurrency": 2,
-  "stepTimeoutMinutes": 60,
+  "stepTimeoutMinutes": 120,
   "agents": {
     "default": { "cli": "codex" },
     "roles": {
@@ -188,7 +188,37 @@ exact `{ cli, model, effort }` choices a lead may give a task; it is empty by
 default, so tasks use the role settings. Accepted CLI names are `codex` and
 `claude`; accepted role keys come from the catalog. `allowedOrigins` retains its
 existing meaning. The existing `--database-url` shortcut runs with defaults
-instead of reading `config.json`.
+instead of reading `config.json`. The defaults are concurrency 2, a 120-minute
+step timeout and Codex for every role.
+
+#### Settings page
+
+The web app's Settings page (`#/settings`, `GET`/`POST /api/settings`) edits
+`concurrency`, `stepTimeoutMinutes` and `agents` (default, roles and allowed)
+while the factory runs, plus per-workflow overrides of role agents and the step
+timeout. Until the owner saves, the factory uses the `config.json` values (or
+the defaults) and the API reports `source: "config"`. The first save stores the
+whole document in the single-row `settings` table (migration 012); from then on
+the database owns these fields, `config.json` values for them are ignored and
+`kf serve` logs that at startup. `evidenceRetentionDays`, `port`, `databaseUrl`
+and `allowedOrigins` stay in `config.json`. A saved row that no longer parses is
+logged and the `config.json` values apply.
+
+The scheduler reads the settings on every tick. Concurrency applies to the next
+claim; a lower value never stops running steps. Each attempt takes a snapshot
+when it starts: its step timeout and every agent choice in that attempt come
+from that snapshot, so a running step keeps the values it started with.
+Post-merge checks use the global step timeout.
+
+An agent step's agent is, in order: a lead task's `agent` (child builder steps
+only), the workflow override for the role, the global role setting, then the
+default. Testers, reproducers, reviewers and writers of a child ticket never take
+the task's agent, so review can come from another model family than the author.
+The step timeout is the workflow override, then the global value. Overrides are
+keyed by workflow name; saving rejects names that are not in the library, and
+an override for a workflow that later disappears is ignored. The step schema is
+unchanged. Each started agent attempt records the choice it ran with
+(`Attempt.agent`), which the ticket page shows next to the step.
 
 Without `databaseUrl`, the factory runs a private PostgreSQL cluster in
 `<home>/postgres`. It listens only on a Unix socket in a `0700` directory under
@@ -801,8 +831,9 @@ scheduler tick, `engine/tasks.ts` advances each parked lead:
 - Pending tasks start in order while fewer than `maxParallel` run. A branch
   task's child branch starts from the lead's current head, recorded as
   `baseCommit`, and its prompts compare against it. A pull request task starts
-  from the default branch. Children inherit the lead's dependencies and run
-  every agent with the task's agent choice when given.
+  from the default branch. Children inherit the lead's dependencies. A task's
+  agent choice, when given, runs only the child's builder steps; its testers,
+  reviewers and writer use the factory settings.
 - When any task reaches `pr-ready`, `merged`, `conflict` or `failed` since the
   lead last heard, or nothing is left to wait for, the step finishes with
   `reported`, a "Task report" note, and routes back to the lead.

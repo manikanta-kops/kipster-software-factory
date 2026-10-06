@@ -4,7 +4,7 @@ import {
 } from './artifact-preparation.ts'
 import { listTicketLinks, listDependencies } from './ticket-links.ts'
 import { getTaskOfChild, listTasks, taskEvent } from './task-records.ts'
-import { runTasksParams } from '../domain/catalog.ts'
+import { type AgentChoice, runTasksParams } from '../domain/catalog.ts'
 import { delegateTarget, taskWorkflowName } from '../domain/tasks.ts'
 import type { DecisionInput } from '../domain/decisions.ts'
 import { insertDecision, finishDecision } from './decisions.ts'
@@ -382,6 +382,7 @@ export async function markRunning(
   database: Database,
   attemptId: number,
   executor: string,
+  agent: AgentChoice | null = null,
 ): Promise<Attempt> {
   return transaction(database, async (connection) => {
     const locked = await lockByAttempt(connection, attemptId)
@@ -399,9 +400,9 @@ export async function markRunning(
         locked.id,
       ])
     const { rows } = await connection.query<AttemptRow>(
-      `UPDATE attempts SET status = 'running', executor = $2, started_at = now()
+      `UPDATE attempts SET status = 'running', executor = $2, agent = $3, started_at = now()
        WHERE id = $1 RETURNING *`,
-      [attemptId, executor],
+      [attemptId, executor, agent && JSON.stringify(agent)],
     )
     const events: NewEvent[] = [
       {
@@ -1515,6 +1516,7 @@ interface AttemptRow {
   outcome: string | null
   summary: string | null
   executor: string | null
+  agent: AgentChoice | null
   error: string | null
   waiting_for: WaitingFor | null
   ask_reason: TicketAskReason | null
@@ -1538,6 +1540,7 @@ function toAttempt(row: AttemptRow): Attempt {
     outcome: row.outcome,
     summary: row.summary,
     executor: row.executor,
+    agent: row.agent,
     error: row.error,
     waitingFor: row.waiting_for,
     askReason: row.ask_reason,

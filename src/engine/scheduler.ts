@@ -15,7 +15,14 @@ import type { DecisionDependencies } from './decisions.ts'
 import type { LibraryEntry } from '../library/library.ts'
 import { setArtifactHome } from '../store/database.ts'
 import { pollPullRequestChecks } from './pull-requests.ts'
-import { engineConfig, type EngineConfig } from '../config.ts'
+import {
+  type AttemptConfig,
+  engineConfig,
+  type EngineConfig,
+  settingsFromConfig,
+} from '../config.ts'
+import { type Settings, stepTimeoutFor } from '../domain/settings.ts'
+import { effectiveSettings } from '../store/settings.ts'
 import { executeAgent, type AgentExecutor } from '../executors/cli.ts'
 import { github as realGitHub, type GitHub } from '../github/github.ts'
 import type { Database } from '../store/database.ts'
@@ -61,6 +68,7 @@ export async function startScheduler(
   const { database, events } = options
   setArtifactHome(database, options.home)
   const config = engineConfig.parse(options.config ?? {})
+  const fallback = settingsFromConfig(config)
   const workspaces = new Workspaces(
     options.home,
     (repository, defaultBranch, kit) =>
@@ -114,37 +122,33 @@ export async function startScheduler(
     throw error
   }
 
-  async function run(context: AttemptContext, controller: AbortController) {
+  // A step keeps the settings it started with; later saves apply to later steps.
+  async function run(
+    context: AttemptContext,
+    controller: AbortController,
+    settings: Settings,
+  ) {
     const { attempt, ticket, step } = context
+    const attemptConfig: AttemptConfig = { ...config, ...settings }
+    const minutes = stepTimeoutFor(settings, context.workflow.name)
     const timer = setTimeout(
       () =>
-        controller.abort(
-          new Error(
-            `Step timed out after ${config.stepTimeoutMinutes} minutes`,
-          ),
-        ),
-      config.stepTimeoutMinutes * 60_000,
+        controller.abort(new Error(`Step timed out after ${minutes} minutes`)),
+      minutes * 60_000,
     )
     try {
       controller.signal.throwIfAborted()
-      await markRunning(
-        database,
-        attempt.id,
+      const agent =
         step.kind === 'agent'
-          ? (await agentFor({ database, config }, ticket, step.role)).cli
-          : 'system',
-      )
+          ? await agentFor(
+              { database, config: attemptConfig },
+              context,
+              step.role,
+            )
+          : null
+      await markRunning(database, attempt.id, agent?.cli ?? 'system', agent)
       await runAttempt(
-        {
-          ...(options.library ? { library: options.library } : {}),
-          database,
-          home: workspaces.home,
-          config,
-          workspaces,
-          github,
-          execute: options.execute ?? executeAgent,
-          ...(options.decisions ? { decisions: options.decisions } : {}),
-        },
+        { ...runnerOptions, config: attemptConfig },
         context,
         controller.signal,
       )
@@ -175,6 +179,8 @@ export async function startScheduler(
   async function tick() {
     await checkCancellations()
     if (stopped) return
+    const { settings } = await effectiveSettings(database, fallback)
+    const polling = { ...runnerOptions, config: { ...config, ...settings } }
     if (!pruning && Date.now() >= nextPrune) {
       nextPrune = Date.now() + 60 * 60_000
       pruning = adoptEvidence(database, options.home)
@@ -186,12 +192,12 @@ export async function startScheduler(
           pruning = undefined
         })
     }
-    const capacity = config.concurrency - active.size
+    const capacity = settings.concurrency - active.size
     if (capacity > 0) {
       for (const context of await claimAttempts(database, capacity)) {
         if (stopped) break
         const controller = new AbortController()
-        const done = run(context, controller).catch(report)
+        const done = run(context, controller, settings).catch(report)
         active.set(context.attempt.id, { context, controller, done })
       }
     }
@@ -200,7 +206,7 @@ export async function startScheduler(
       if (stopped) return
       if (taskJobs.has(wait.attemptId)) continue
       const job = pollTasks(
-        runnerOptions,
+        polling,
         wait,
         AbortSignal.any([lifetime.signal, AbortSignal.timeout(300_000)]),
       )
@@ -215,7 +221,7 @@ export async function startScheduler(
     if (Date.now() >= nextMergePoll) {
       nextMergePoll = Date.now() + (options.mergePollMs ?? 60_000)
       await pollLinkedTickets(
-        runnerOptions,
+        polling,
         AbortSignal.any([lifetime.signal, AbortSignal.timeout(30_000)]),
         report,
       ).catch(report)
@@ -227,7 +233,7 @@ export async function startScheduler(
         if (active.has(context.attempt.id)) continue
         try {
           await pollPullRequestChecks(
-            runnerOptions,
+            polling,
             context,
             AbortSignal.any([lifetime.signal, AbortSignal.timeout(30_000)]),
           )
@@ -242,7 +248,7 @@ export async function startScheduler(
         if (stopped) return
         if (mergeJobs.has(context.attempt.id)) continue
         const job = pollMergeWait(
-          runnerOptions,
+          polling,
           context,
           AbortSignal.any([lifetime.signal, AbortSignal.timeout(60_000)]),
         )
@@ -268,11 +274,11 @@ export async function startScheduler(
         if (postMergeJobs.has(key)) continue
         await markPostMergePolled(database, check)
         const job = checkAfterMerge(
-          runnerOptions,
+          polling,
           check,
           AbortSignal.any([
             lifetime.signal,
-            AbortSignal.timeout(config.stepTimeoutMinutes * 60_000),
+            AbortSignal.timeout(settings.stepTimeoutMinutes * 60_000),
           ]),
           options.bugWorkflow,
         )
