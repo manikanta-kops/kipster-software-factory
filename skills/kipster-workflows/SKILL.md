@@ -134,7 +134,7 @@ Role notes:
   these base snapshots without fetching or using shared development state.
 - `needs-other-repo` is handled by the factory: it opens a linked ticket in
   the other repository and resumes the builder after that pull request merges.
-  Do not route it.
+  Its optional `otherRepository.workflow` defaults to `lead`. Do not route it.
 - A `lead` never commits. `delegate` hands out tasks and must route to a
   `run-tasks` step; the validator rejects a lead without that route.
   `plan-ready` comes with a plan; route it to a human step whose `approved`
@@ -306,56 +306,10 @@ explicitly says otherwise, and then say which rule you broke and why.
 
 ## Built-in workflows
 
+New ticket offers `bug`, `lead` and `onboard-repo`, plus uploaded workflows.
+`lead` covers features and small changes. `task` and `task-pr` remain built-ins
+for child tickets delegated by leads; New ticket hides them.
 Use these as patterns. Prefer adapting one over starting from nothing.
-
-`feature`: plan, approve, build, test, review, publish, merge.
-
-```yaml
-name: feature
-description: Agree a plan with you, build it, prove it in the running app and land it.
-steps:
-  - id: plan
-    kind: agent
-    role: planner
-
-  - id: approve-plan
-    kind: human
-    routes:
-      changes-needed: plan
-
-  - id: build
-    kind: agent
-    role: builder
-
-  - id: test
-    kind: agent
-    role: tester
-    needs: [verify]
-    limit: 3
-    routes:
-      changes-needed: build
-
-  - id: review
-    kind: agent
-    role: reviewer
-    limit: 2
-    routes:
-      changes-needed: build
-
-  - id: maintain-pr
-    kind: system
-    action: maintain-pr
-    routes:
-      conflict: build
-      ci-failed: build
-      base-moved: test
-
-  - id: merge
-    kind: system
-    action: merge
-    routes:
-      changes-needed: build
-```
 
 `bug`: reproduce, fix, prove base fails and branch passes, review, publish,
 merge.
@@ -430,8 +384,8 @@ steps:
     action: run-tasks
     with:
       maxParallel: 3
-      maxTasks: 12
-    limit: 25
+      maxTasks: 20
+    limit: 50
     routes:
       reported: lead
 
@@ -527,8 +481,6 @@ steps:
       changes-needed: build
 ```
 
-`quick-change` is `feature` without the tester, for repositories with no
-verify kit. Its `maintain-pr` routes `base-moved` back to `review`.
 `onboard-repo` is write-kit (onboarder), verify-kit (limit 3,
 `failed` back to write-kit), approve-kit, maintain-pr, merge.
 
@@ -536,7 +488,7 @@ An example that branches with `decide`: the planner writes a plan, then the
 decision model chooses whether the owner must approve it.
 
 ```yaml
-name: feature-fast-lane
+name: change-fast-lane
 description: Plan, let the decision model skip plan approval for small clear changes, then build, prove and land it.
 steps:
   - id: plan
@@ -607,8 +559,8 @@ past `approve-plan` explicitly.
   It answers 201 for a new name, 200 for a new version of an uploaded name,
   400 with `issues` when invalid, and 409 for a name owned by a workflow file.
 - **Files:** a workflow file in the factory's workflow directory loads at
-  startup. The built-in `feature`, `bug`, `quick-change`, `onboard-repo`,
-  `lead`, `task` and `task-pr` are files, so uploads cannot reuse those names.
+  startup. The built-in `bug`, `lead`, `onboard-repo`,
+  `task` and `task-pr` are files, so uploads cannot reuse those names.
 
 ## Versions
 

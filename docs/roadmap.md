@@ -60,7 +60,7 @@ owner still performs every merge.
 Proven live on factory-floor with required GitHub CI and real writer sessions:
 an unrelated README merge advanced protected `next`, triggering synchronization
 and fresh proof; a PR review comment reached the builder and produced a tested
-keyboard regression; a later bug merge advanced the base while feature CI was
+keyboard regression; a later bug merge advanced the base while planned-change CI was
 waiting, exposing and validating recovery from an obsolete merge wait. The
 factory detected owner merges and refreshed the repository's verify capability
 after the kit landed. CI waits also survived a deliberate safe server restart.

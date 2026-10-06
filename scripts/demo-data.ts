@@ -5,7 +5,7 @@ import { setArtifactHome } from '../src/store/database.ts'
 import { defaultHome } from '../src/config.ts'
 import { writeDemoEvidence } from './demo-evidence.ts'
 import { resolve } from 'node:path'
-// Fills a database with repositories and quick-change tickets in every state, using the
+// Fills a database with repositories and lead tickets in every state, using the
 // same store functions the engine and API use. The web app can be built against it
 // before the engine exists.
 import type { ArtifactInput } from '../src/domain/lifecycle.ts'
@@ -69,8 +69,8 @@ async function seedLocked(
   if (await getRepository(database, DEMO_REPOSITORY)) {
     throw new Error(`The database already has demo data (${DEMO_REPOSITORY})`)
   }
-  const workflow = library.get('quick-change')
-  if (!workflow) throw new Error('The library has no quick-change workflow')
+  const workflow = library.get('lead')
+  if (!workflow) throw new Error('The library has no lead workflow')
 
   const shop = await createRepository(database, { slug: DEMO_REPOSITORY })
   await markRepositoryReady(database, shop.id, {
@@ -157,7 +157,7 @@ async function seedLocked(
 
   const planAndApprove = async (number: number, plan: string) => {
     await run(number, {
-      outcome: 'done',
+      outcome: 'plan-ready',
       summary: 'Wrote the plan with acceptance scenarios.',
       artifacts: [{ kind: 'plan', title: 'Plan', content: plan }],
     })
@@ -171,7 +171,11 @@ async function seedLocked(
   const buildAndReview = async (number: number) => {
     await run(number, {
       outcome: 'done',
-      summary: 'Implemented the plan and added tests.',
+      summary: 'The lead finished coordinating the change.',
+    })
+    await run(number, {
+      outcome: 'passed',
+      summary: 'Tested the whole change.',
     })
     await run(number, {
       outcome: 'passed',
@@ -212,7 +216,7 @@ async function seedLocked(
     'Reject malformed email addresses on the sign-up form with a clear message.',
   )
   await run(askAfterLimit, {
-    outcome: 'done',
+    outcome: 'plan-ready',
     summary: 'Wrote the plan.',
     artifacts: [
       {
@@ -236,7 +240,11 @@ async function seedLocked(
   for (const round of [1, 2]) {
     await run(askAfterLimit, {
       outcome: 'done',
-      summary: `Implemented validation (round ${round}).`,
+      summary: `Coordinated validation (round ${round}).`,
+    })
+    await run(askAfterLimit, {
+      outcome: 'passed',
+      summary: 'Tested validation.',
     })
     await run(askAfterLimit, {
       outcome: 'changes-needed',
@@ -258,7 +266,7 @@ async function seedLocked(
     'Let shop owners download any report as CSV from the report page.',
   )
   await run(approvePlan, {
-    outcome: 'done',
+    outcome: 'plan-ready',
     summary: 'Wrote the plan with three acceptance scenarios.',
     artifacts: [
       {
@@ -275,7 +283,7 @@ async function seedLocked(
     'Move the checkout pages to a new UI framework.',
   )
   await run(cancelled, {
-    outcome: 'done',
+    outcome: 'plan-ready',
     summary: 'Wrote a migration plan.',
     artifacts: [
       {
@@ -297,7 +305,7 @@ async function seedLocked(
     const number = (
       await createTicket(database, {
         repository: DEMO_REPOSITORY,
-        workflow: library.get('feature')!,
+        workflow,
         title: stale
           ? 'Cart proof needs another run'
           : 'Cart quantity changes are proven',
@@ -308,7 +316,7 @@ async function seedLocked(
     const commit = 'a'.repeat(40)
     await run(
       number,
-      { outcome: 'done', summary: 'Implemented cart quantity updates.' },
+      { outcome: 'done', summary: 'Coordinated cart quantity updates.' },
       'codex',
       commit,
     )
@@ -356,7 +364,7 @@ async function seedLocked(
         number,
         {
           outcome: 'done',
-          summary: 'Later commit changed the cart; previous verdict is stale.',
+          summary: 'Later task changed the cart; previous verdict is stale.',
         },
         'codex',
         'b'.repeat(40),
@@ -433,7 +441,7 @@ async function seedLocked(
       )
   }
 
-  // Running: the planner is working on it.
+  // Running: the lead is working on it.
   const running = await create(
     'Fix the typo on the pricing page',
     'The pricing page says "anually"; it should say "annually".',

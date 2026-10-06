@@ -114,7 +114,7 @@ three times, then report an unavailable check with the reason.
   branch paths and commits; dependency edits fail to the owner and are restored.
 - **Request the needed change.** A builder uses `needs-other-repo` with a target,
   title and body explaining the change and why it is needed. The system opens a
-  linked ticket with its own workflow (default `feature`) and plan approval.
+  linked ticket with its own workflow (default `lead`) and plan approval.
 - **Resume on confirmed merge.** The original parks without an executor slot and
   starts a fresh builder attempt after the linked ticket finishes with a confirmed
   merged PR. That attempt receives the original builder explanation, full request,

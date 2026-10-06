@@ -82,6 +82,17 @@ test('a lead ticket lists its tasks and each child links back to its lead', asyn
   const childDetail = (await (
     await request.get(`${factory.url}/api/tickets/${child}`)
   ).json()) as TicketResponse
+  expect(childDetail.workflow.name).toBe('task')
+  const prTask = leadDetail.tasks!.find((task) => task.key === 'docs')!
+  const prDetail = (await (
+    await request.get(`${factory.url}/api/tickets/${prTask.child!.number}`)
+  ).json()) as TicketResponse
+  expect(prDetail.workflow.name).toBe('task-pr')
+  expect(prDetail.parentTask).toMatchObject({
+    key: 'docs',
+    land: 'pr',
+    parent: { number: lead },
+  })
   expect(childDetail.parentTask).toMatchObject({
     key: 'api-export',
     land: 'branch',

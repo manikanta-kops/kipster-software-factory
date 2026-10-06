@@ -71,15 +71,15 @@ describe('settings resolution', () => {
         { cli: 'codex' },
       )
     assert.deepEqual(
-      resolveAgent(overridden, { workflow: 'feature', role: 'planner' }),
+      resolveAgent(overridden, { workflow: 'lead', role: 'planner' }),
       planner,
     )
     assert.deepEqual(
-      resolveAgent(overridden, { workflow: 'feature', role: 'reviewer' }),
+      resolveAgent(overridden, { workflow: 'lead', role: 'reviewer' }),
       { cli: 'codex' },
     )
     assert.equal(stepTimeoutFor(overridden, 'data-task'), 240)
-    assert.equal(stepTimeoutFor(overridden, 'feature'), 120)
+    assert.equal(stepTimeoutFor(overridden, 'lead'), 120)
     assert.equal(stepTimeoutFor({ stepTimeoutMinutes: 30 }, 'data-task'), 30)
   })
 
@@ -94,7 +94,7 @@ describe('settings resolution', () => {
 
   test('overrides must name a known workflow', () => {
     assert.deepEqual(settingsProblems(overridden, ['data-task']), [])
-    assert.deepEqual(settingsProblems(overridden, ['feature']), [
+    assert.deepEqual(settingsProblems(overridden, ['lead']), [
       'workflows.data-task: unknown workflow',
     ])
     assert.equal(settingsSchema.safeParse(overridden).success, true)
@@ -160,7 +160,7 @@ describe('settings store and API', () => {
     assert.ok(response.choices.efforts.includes('high'))
     assert.ok(response.choices.roles.includes('reviewer'))
     assert.ok(response.workflows.includes('data-task'))
-    assert.ok(response.workflows.includes('feature'))
+    assert.ok(response.workflows.includes('lead'))
   })
 
   test('invalid settings are rejected with a named issue and nothing is saved', async () => {

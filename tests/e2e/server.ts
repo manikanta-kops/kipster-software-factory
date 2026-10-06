@@ -1,3 +1,5 @@
+import { readFile } from 'node:fs/promises'
+import { parseUpload } from '../../src/library/library.ts'
 import { mergePolicy } from '../../src/domain/auto-merge.ts'
 import { getMergeGate } from '../../src/store/merge-gates.ts'
 import {
@@ -40,7 +42,7 @@ import {
   addAttemptArtifacts,
 } from '../../src/store/tickets.ts'
 import { createDemoStore } from '../helpers/demo.ts'
-import { builtInLibrary, builtInWorkflow } from '../helpers/store.ts'
+import { builtInLibrary, testWorkflow } from '../helpers/store.ts'
 
 const port = Number(process.env['KSF_E2E_PORT'])
 if (!process.env['KSF_TEST_DATABASE_URL'] || !port)
@@ -126,11 +128,43 @@ router.post('/__test/fixtures', async (c) => {
     fixture.database,
     fixture.tickets.running,
   ))!.artifacts.find((a) => a.title === 'Live agent log')!.path!
+  let legacyTicket: number | null = null
+  if (c.req.query('legacy') === 'true') {
+    const source = (
+      await readFile(
+        new URL('../fixtures/workflows/planned-change.yml', import.meta.url),
+        'utf8',
+      )
+    ).replace('name: planned-change', 'name: quick-change')
+    const parsed = parseUpload(source)
+    if (!parsed.ok) throw new Error(parsed.errors.join('\n'))
+    const created = await createTicket(fixture.database, {
+      repository: 'kipster/demo-shop',
+      workflow: parsed.entry,
+      title: 'Historical quick-change ticket',
+    })
+    const context = (await claimAttempts(fixture.database, 100)).find(
+      (candidate) => candidate.ticket.id === created.id,
+    )!
+    await markRunning(fixture.database, context.attempt.id, 'codex')
+    await completeAttempt(fixture.database, context.attempt.id, {
+      outcome: 'done',
+      summary: 'Historical plan ready.',
+      artifacts: [
+        {
+          kind: 'plan',
+          title: 'Historical plan',
+          content: 'Retain the old workflow history.',
+        },
+      ],
+    })
+    legacyTicket = created.number
+  }
   let artifactTicketNumber: number | null = null
   if (c.req.query('artifacts') === 'true') {
     const artifactTicket = await createTicket(fixture.database, {
       repository: 'kipster/demo-shop',
-      workflow: await builtInWorkflow('quick-change'),
+      workflow: await testWorkflow('planned-change'),
       title: 'Inspect artifacts safely',
       body: 'A **safe** description.',
     })
@@ -181,7 +215,7 @@ router.post('/__test/fixtures', async (c) => {
   if (c.req.query('links') === 'true') {
     const original = await createTicket(fixture.database, {
       repository: 'kipster/demo-shop',
-      workflow: await builtInWorkflow('quick-change'),
+      workflow: await testWorkflow('planned-change'),
       title: 'Use the library API',
       dependencies: ['kipster/legacy-api'],
     })
@@ -216,10 +250,10 @@ router.post('/__test/fixtures', async (c) => {
           repository: 'kipster/invalid-kit',
           title: 'Expose the library API',
           body: 'The caller needs a new API.',
-          workflow: 'quick-change',
+          workflow: 'planned-change',
         },
       },
-      await builtInWorkflow('quick-change'),
+      await testWorkflow('planned-change'),
       'a'.repeat(40),
     )
     detail = (await getTicketDetail(fixture.database, link.linked.number))!
@@ -229,7 +263,7 @@ router.post('/__test/fixtures', async (c) => {
   if (c.req.query('tasks') === 'true') {
     const lead = await createTicket(fixture.database, {
       repository: 'kipster/demo-shop',
-      workflow: await builtInWorkflow('lead'),
+      workflow: await testWorkflow('lead'),
       title: 'Build the export feature',
     })
     const first = (await claimAttempts(fixture.database, 100)).find(
@@ -295,7 +329,7 @@ router.post('/__test/fixtures', async (c) => {
       api!.id,
       {
         repository: 'kipster/demo-shop',
-        workflow: await builtInWorkflow('task'),
+        workflow: await testWorkflow('task'),
         title: api!.title,
         body: api!.instructions,
       },
@@ -309,7 +343,7 @@ router.post('/__test/fixtures', async (c) => {
       docs!.id,
       {
         repository: 'kipster/demo-shop',
-        workflow: await builtInWorkflow('task-pr'),
+        workflow: await testWorkflow('task-pr'),
         title: docs!.title,
         body: docs!.instructions,
       },
@@ -399,7 +433,7 @@ router.post('/__test/fixtures', async (c) => {
             },
           ],
         },
-        await builtInWorkflow('bug'),
+        await testWorkflow('bug'),
       )
     },
     gate: async (state, number = fixture.tickets.proofPassed) => {
@@ -513,6 +547,7 @@ router.post('/__test/fixtures', async (c) => {
     linkedTickets,
     taskTickets,
     artifactTicket: artifactTicketNumber,
+    legacyTicket,
     decisionTicket,
   })
 })

@@ -67,6 +67,8 @@ export interface StepSummary {
 }
 
 export interface WorkflowSummary {
+  /** Whether people can select this workflow on New ticket. */
+  readonly selectable?: boolean
   readonly name: string
   readonly version: string
   readonly description: string

@@ -82,7 +82,7 @@ test('needs-other-repo creates one link across restart, releases its slot, and r
   const link = parked.links[0]!
   assert.deepEqual(link.request, {
     ...request.otherRepository,
-    workflow: 'feature',
+    workflow: 'lead',
   })
   const linked = await until(
     () => f.detail(link.linked.number),
@@ -111,7 +111,7 @@ test('needs-other-repo creates one link across restart, releases its slot, and r
     f.database,
     link.attemptId,
     request,
-    f.library.get('feature')!,
+    f.library.get('lead')!,
     parked.attempts[0]!.headCommit!,
   )
   await f.start()
@@ -523,7 +523,7 @@ test('linked-ticket polling is throttled despite frequent scheduler wakes', asyn
     f.database,
     context.attempt.id,
     request,
-    f.library.get('feature')!,
+    f.library.get('lead')!,
     'b'.repeat(40),
   )
   const linkedPlan = (await claimAttempts(f.database, 1))[0]!

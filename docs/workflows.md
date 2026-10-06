@@ -1,5 +1,11 @@
 # Workflow format
 
+New ticket offers the built-in `bug`, `lead` and `onboard-repo`, plus uploaded
+workflows. `lead` covers features and small changes, with at most 20 tasks and
+50 task reports. `task` and `task-pr` remain available for lead child tickets
+but are hidden from New ticket. Stored tickets keep their workflow definition
+and history even after its file is removed.
+
 Workflows are YAML files named `<name>.yml`. Validate a directory with
 `npm run kf -- check <dir>`.
 
@@ -9,7 +15,7 @@ file's name; uploading an existing uploaded name creates a new version. To have
 a model write one, give it `skills/kipster-workflows/SKILL.md`.
 
 ```yaml
-name: feature # lowercase, digits and hyphens; matches the file name
+name: sample # lowercase, digits and hyphens; matches the file name
 description: One line saying what the workflow is for.
 steps:
   - id: test # unique; not finish, cancel or ask
@@ -73,13 +79,13 @@ builder's `result.json` adds `otherRepository`:
     "repository": "owner/library",
     "title": "Expose the library API",
     "body": "Describe the needed change and why the original ticket needs it.",
-    "workflow": "feature"
+    "workflow": "lead"
   }
 }
 ```
 
 Repository, title and body are required and nonempty. `workflow` is optional,
-with default `feature`; it must be a loaded workflow. Only builders can report
+with default `lead`; it must be a loaded workflow. Only builders can report
 this request, and other outcomes must omit `otherRepository`. The target must be
 another registered, ready repository with the workflow's capabilities. Invalid
 results get the normal one fresh retry, then ask the owner; unregistered or

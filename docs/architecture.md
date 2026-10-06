@@ -196,7 +196,9 @@ step timeout and Codex for every role.
 The web app's Settings page (`#/settings`, `GET`/`POST /api/settings`) edits
 `concurrency`, `stepTimeoutMinutes` and `agents` (default, roles and allowed)
 while the factory runs, plus per-workflow overrides of role agents and the step
-timeout. Until the owner saves, the factory uses the `config.json` values (or
+timeout. Workflow names retained by stored tickets remain available for overrides
+after their files are removed; they do not reappear on New ticket. Until the
+owner saves, the factory uses the `config.json` values (or
 the defaults) and the API reports `source: "config"`. The first save stores the
 whole document in the single-row `settings` table (migration 012); from then on
 the database owns these fields, `config.json` values for them are ignored and
@@ -215,9 +217,9 @@ only), the workflow override for the role, the global role setting, then the
 default. Testers, reproducers, reviewers and writers of a child ticket never take
 the task's agent, so review can come from another model family than the author.
 The step timeout is the workflow override, then the global value. Overrides are
-keyed by workflow name; saving rejects names that are not in the library, and
-an override for a workflow that later disappears is ignored. The step schema is
-unchanged. Each started agent attempt records the choice it ran with
+keyed by workflow name; saving accepts names in the library or retained by
+stored tickets, so retired workflows keep their agent and timeout overrides.
+The step schema is unchanged. Each started agent attempt records the choice it ran with
 (`Attempt.agent`), which the ticket page shows next to the step.
 
 Without `databaseUrl`, the factory runs a private PostgreSQL cluster in
@@ -418,7 +420,7 @@ See the [roadmap](roadmap.md) for the acceptance scope and remaining limits.
 
 `tests/engine.test.ts` uses a scripted executable, real PostgreSQL and local bare
 Git repositories, with GitHub calls substituted behind the interface. It covers
-the quick-change approval/review loop, merge waiting, failure/retry, process-group
+a test-local approval/review loop, merge waiting, failure/retry, process-group
 timeout/cancellation, crash recovery, lock exclusion, concurrency and ownership.
 `node scripts/live-engine-check.ts [source-repository]` is an explicit opt-in
 smoke check using the real default CLI: it clones the source into a temporary
@@ -469,7 +471,7 @@ freshness from a summary or a null commit. Slice 3 checks verdict freshness agai
 publication and routes stale verdicts back to testing.
 
 `seed:demo` generates synthetic image, WebM and log files inside the selected
-home, and includes valid/invalid kits plus passed/current and stale feature
+home, and includes valid/invalid kits plus passed/current and stale lead
 verdicts without running an engine. `npm run dev` keeps the factory alive during
 source edits; explicit restart loads changes. `npm run dev -- --watch` opts into
 restarts. Web hot reload remains enabled in either mode.
@@ -715,7 +717,7 @@ fields, the comparison link, retention bookkeeping and gate snapshots.
 
 The builder catalog result adds `otherRepository` for `needs-other-repo`:
 registered `owner/name`, nonempty title and body explaining the needed change,
-and optional workflow (default `feature`). The agent proposes; the engine creates
+and optional workflow (default `lead`). The agent proposes; the engine creates
 and validates the target ticket. Missing registrations, unavailable workflows,
 capabilities and malformed requests go to the owner. The step schema is unchanged.
 
@@ -785,7 +787,7 @@ caches remain; dependency checkouts do not accumulate for done/cancelled tickets
 characters, with a JSON content type. It validates the source with the same
 `parseWorkflow` as workflow files and answers 400 with every error in `issues`.
 A name owned by a workflow file answers 409, so uploads never replace the
-built-in `feature` that linked-ticket requests default to. Otherwise one
+built-in `lead` that linked-ticket requests default to. Otherwise one
 transaction records the version in `workflow_versions` and makes it current in
 `uploaded_workflows` (migration 010). The response is 201 for a new name and
 200 for a new version of an uploaded one.
