@@ -793,3 +793,43 @@ test.describe('retired workflow history', () => {
     })
   })
 })
+
+test('seeded retired quick-change ticket renders its historical plan', async ({
+  page,
+  factory,
+  request,
+}, testInfo) => {
+  const response = await request.get(`${factory.url}/api/workflows`)
+  expect(response.ok()).toBeTruthy()
+  expect(
+    (await response.json()).workflows.map(
+      (workflow: { name: string }) => workflow.name,
+    ),
+  ).not.toContain('quick-change')
+  await page.goto(`${factory.url}/#/tickets/${factory.tickets.retiredWorkflow}`)
+  await expect(
+    page.getByRole('heading', { name: 'Historical quick-change ticket' }),
+  ).toBeVisible()
+  await expect(
+    page.locator('.ticket-kicker').getByRole('link', {
+      name: 'Quick change',
+      exact: true,
+    }),
+  ).toBeVisible()
+  await expect(
+    page.getByText('Historical plan ready.', { exact: true }),
+  ).toBeVisible()
+  await expect(
+    page.getByText(
+      'Retain the old workflow history. Keep its completed plan readable after quick-change is retired from the library.',
+      { exact: true },
+    ),
+  ).toBeVisible()
+  await expect(
+    page.getByRole('button', { name: 'Approve', exact: true }),
+  ).toBeVisible()
+  await page.screenshot({
+    path: testInfo.outputPath('seeded-quick-change-history.png'),
+    fullPage: true,
+  })
+})

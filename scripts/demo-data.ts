@@ -43,6 +43,43 @@ import {
 
 export const DEMO_REPOSITORY = 'kipster/demo-shop'
 
+// Preserve the retired workflow source without making it available for new tickets.
+const RETIRED_QUICK_CHANGE = `name: quick-change
+description: Agree a plan with you, build it, have it reviewed and land it. Needs nothing from the repository's kit.
+steps:
+  - id: plan
+    kind: agent
+    role: planner
+
+  - id: approve-plan
+    kind: human
+    routes:
+      changes-needed: plan
+
+  - id: build
+    kind: agent
+    role: builder
+
+  - id: review
+    kind: agent
+    role: reviewer
+    limit: 2
+    routes:
+      changes-needed: build
+
+  - id: maintain-pr
+    kind: system
+    action: maintain-pr
+    routes:
+      conflict: build
+      ci-failed: build
+      base-moved: review
+
+  - id: merge
+    kind: system
+    action: merge
+`
+
 /** Ticket numbers of the demo tickets, by the state each one is left in. */
 export interface DemoTickets {
   readonly proofPassed: number
@@ -54,6 +91,7 @@ export interface DemoTickets {
   readonly cancelled: number
   readonly running: number
   readonly queued: number
+  readonly retiredWorkflow: number
   readonly lightsOutLead: number
   readonly lightsOutChild: number
   readonly lightsOutUntestedChild: number
@@ -576,6 +614,30 @@ async function seedLocked(
     'Synthetic merged task. Untested: no verify capability (skipped test). No real merge ran.',
   )
 
+  const retired = parseUpload(RETIRED_QUICK_CHANGE)
+  if (!retired.ok) {
+    throw new Error(
+      `Cannot parse the historical quick-change demo workflow: ${retired.errors.join('; ')}`,
+    )
+  }
+  const retiredWorkflow = await create(
+    'Historical quick-change ticket',
+    'This ticket ran a retired quick-change workflow.',
+    retired.entry,
+  )
+  await run(retiredWorkflow, {
+    outcome: 'done',
+    summary: 'Historical plan ready.',
+    artifacts: [
+      {
+        kind: 'plan',
+        title: 'Historical plan',
+        content:
+          'Retain the old workflow history. Keep its completed plan readable after quick-change is retired from the library.',
+      },
+    ],
+  })
+
   // Running: the lead is working on it.
   const running = await create(
     'Fix the typo on the pricing page',
@@ -602,6 +664,7 @@ async function seedLocked(
     lightsOutLead,
     lightsOutChild,
     lightsOutUntestedChild,
+    retiredWorkflow,
   }
 }
 

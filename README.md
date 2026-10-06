@@ -182,7 +182,8 @@ different home. The demo includes valid/invalid kits and current/stale lead
 verdicts with recorded commits. Override with `npm run dev -- --home <directory>`.
 It also includes **Overnight report export (synthetic demo)**, a lights-out lead
 with a Decision log, a parked child with a recorded choice and a merged
-untested child. These are
+untested child. **Historical quick-change ticket** retains a completed plan from
+the retired workflow and waits for plan approval. These are
 synthetic choices for UI inspection; no agents or real verification ran.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md). Licensed under [Apache-2.0](LICENSE).
