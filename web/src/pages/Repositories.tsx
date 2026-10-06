@@ -49,6 +49,10 @@ export function Repositories() {
       void client.invalidateQueries({ queryKey: ['repositories'] })
     },
   })
+  const retry = useMutation({
+    mutationFn: (id: number) => api.retryRepository(id),
+    onSettled: () => client.invalidateQueries({ queryKey: ['repositories'] }),
+  })
   const policy = useMutation({
     mutationFn: ({ id, enabled }: { id: number; enabled: boolean }) =>
       api.setAutoMerge(id, { enabled }),
@@ -142,6 +146,16 @@ export function Repositories() {
               )}
               {repository.lastError && (
                 <p className="error">{repository.lastError}</p>
+              )}
+              {repository.status === 'failed' && (
+                <button
+                  type="button"
+                  className="button"
+                  disabled={retry.isPending}
+                  onClick={() => retry.mutate(repository.id)}
+                >
+                  Retry
+                </button>
               )}
             </div>
             <div>

@@ -569,6 +569,35 @@ test('repositories show valid and invalid kits and gate workflows on capabilitie
   await expect(page.getByText(/needs a verified kit/).first()).toBeVisible()
 })
 
+test('a failed repository shows its error and can be retried', async ({
+  page,
+  factory,
+}) => {
+  await page.goto(`${factory.url}/#/repositories`)
+  const failed = page
+    .locator('.repository-list li')
+    .filter({ hasText: 'kipster/legacy-api' })
+  await expect(failed.locator('.error')).toBeVisible()
+  const retried = page.waitForResponse(
+    (response) =>
+      response.url().endsWith('/retry') &&
+      response.request().method() === 'POST',
+  )
+  await failed.getByRole('button', { name: 'Retry' }).click()
+  const response = await retried
+  expect(response.status()).toBe(200)
+  expect((await response.json()).repository).toMatchObject({
+    status: 'pending',
+    lastError: null,
+  })
+  await expect(
+    page
+      .locator('.repository-list li')
+      .filter({ hasText: 'kipster/demo-shop' })
+      .getByRole('button', { name: 'Retry' }),
+  ).toHaveCount(0)
+})
+
 test('demo evidence endpoints provide decodable image and video with recorded verdict commits', async ({
   page,
   factory,

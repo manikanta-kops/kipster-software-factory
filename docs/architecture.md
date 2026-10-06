@@ -231,7 +231,10 @@ by default so its database and workspace IDs stay together across checkouts.
 ### Workspaces and evidence
 
 `workspace/` serializes Git operations per repository. Registered pending
-repositories are cloned and marked ready or failed through the store. The cache's
+repositories are cloned and marked ready or failed through the store. A failed
+repository keeps its error until the owner retries it (`POST
+/api/repositories/:id/retry`, Retry on the Repositories page), which returns it
+to pending. The cache's
 `origin/HEAD` supplies the default branch; attempts also repair old registrations
 that assumed `main`. The cache
 is kept at `repositories/<repository-id>/repo`; ticket worktrees live at
