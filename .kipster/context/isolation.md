@@ -18,9 +18,12 @@ than creating a second managed cluster. It does not read or write the scratch
 factory's application tables. Provisioning and dropping that dedicated database
 are the harness's responsibility.
 
-The verification home is `.local/verification-home` relative to the harness's
-disposable exact-commit checkout, never the ticket worktree's home. The existing
-seeder applies migrations, writes synthetic media there and marks the database
+The start command passes `"$PWD/.local/verification-home"` as an absolute home
+inside the harness's disposable exact-commit checkout, never the ticket worktree's
+home. Both seeder and server receive the same path. Demo media paths include the
+home; artifact retention resolves relative paths against that home, so a relative
+home would duplicate the prefix and fail with `Cannot retain artifact: missing`.
+The existing seeder applies migrations, writes synthetic media there and marks the database
 as demo. The server also migrates idempotently, binds loopback at the allocated
 port, serves `dist/web` and explicitly disables the scheduler. The demo marker
 also refuses scheduler startup. `--secret-backend file` is explicit; there are

@@ -19,8 +19,11 @@ before the verification database is allocated.
 
 Verify uses the harness's dedicated empty `verify_<uuid>` database, passed
 explicitly to both seeder and server. It shares no application tables with the
-scratch factory. `.local/verification-home` is inside the disposable checkout
-and contains only this instance's synthetic media/state. `serve` receives
+scratch factory. The shell expands `"$PWD/.local/verification-home"` to an
+absolute path inside the disposable checkout for both seeder and server. An
+absolute home is required so artifact retention can resolve seeded media paths
+without duplicating the home prefix. It contains only this instance's synthetic
+media/state. `serve` receives
 explicit home, allocated port, database URL, `--no-scheduler` and
 `--secret-backend file`. No config, default home, Keychain, GitHub CLI state or
 TypeSafe key is needed. The seeder applies migrations and marks the database
