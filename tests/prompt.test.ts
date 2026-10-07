@@ -26,6 +26,7 @@ const variants: Partial<
       'commit message and summary',
       'Never report\nneeds-decision for this conflict.',
       'sensible default that can be completed in this repository',
+      'fixing a failed CI\ncheck, required or not',
     ],
     absent: [
       'Report done, needs-other-repo, or needs-decision.',

@@ -188,6 +188,16 @@ findings after round five and keeps the PR for the owner. Later lead rounds chec
 earlier fixes; new findings on unchanged files become notes. An unavailable
 independent candidate is recorded and always requires owner merging.
 
+### Every failed check returns to the builder (implemented)
+
+`maintain-pr` still waits only for required checks, but any check on the pull
+request head that has already failed, required or not, routes `ci-failed` with
+its name, link and log excerpt and blocks the merge gate. A non-required check
+still pending when the required checks pass is not awaited. Under lights-out the
+builder fixes a failure outside the ticket's scope in its own commit and flags
+it for the owner. Adapter and real PostgreSQL routing tests cover this; a live
+non-required GitHub failure remains unverified.
+
 ### Lessons (implemented)
 
 Ticket completion, cancellation and owner waits now propose one-line lessons

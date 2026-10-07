@@ -229,7 +229,12 @@ Action notes:
   timeout is the workflow's override, then the factory's (120 minutes unless
   changed).
 - `maintain-pr` is the only way a pull request gets published. Put it before
-  `merge`.
+  `merge`. It waits only for the repository's required checks (all checks when
+  none are required). Any check that has already failed, required or not,
+  reports `ci-failed` with its name, link and log excerpt; a non-required check
+  still running is not awaited. Route `ci-failed` to the builder, or to the
+  lead in a lead workflow. Under lights-out the builder puts a fix outside the
+  ticket's scope in its own commit and flags it for the owner.
 - After `maintain-pr` merges the base, prior tester and reviewer verdicts must
   match the new commit. Route `base-moved` back to the tester step, followed by
   review. Without a tester, route it to review. With neither prior verdict,
