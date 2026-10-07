@@ -273,6 +273,21 @@ export async function pollPullRequestChecks(
   else if (result) await finish(result.outcome, result.summary)
 }
 
+/** The summary and one finding per failed check, with its link and log excerpt, for the builder. */
+export function ciFailure(failures: Checks['failures']): {
+  summary: string
+  artifacts: ArtifactInput[]
+} {
+  return {
+    summary: `CI failed: ${failures.map((f) => f.name).join(', ')}`,
+    artifacts: failures.map((f) => ({
+      kind: 'finding',
+      title: `CI failed: ${f.name}`.slice(0, 200),
+      content: `[${f.name}](${f.url})\n\n${f.excerpt.slice(-2000)}`,
+    })),
+  }
+}
+
 /** The maintain-pr result for one CI snapshot; null while awaited checks are pending. */
 export function checksResult(
   checks: Checks,
@@ -286,15 +301,7 @@ export function checksResult(
       artifacts: [],
     }
   if (checks.state === 'failed')
-    return {
-      outcome: 'ci-failed',
-      summary: `CI failed: ${checks.failures.map((f) => f.name).join(', ')}`,
-      artifacts: checks.failures.map((f) => ({
-        kind: 'finding',
-        title: `CI failed: ${f.name}`.slice(0, 200),
-        content: `[${f.name}](${f.url})\n\n${f.excerpt.slice(-2000)}`,
-      })),
-    }
+    return { outcome: 'ci-failed', ...ciFailure(checks.failures) }
   if (checks.state === 'pending') return null
   return {
     outcome: 'ready',

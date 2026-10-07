@@ -140,11 +140,11 @@ branch tasks two at a time, a report after each and a final `done`. Pull
 request tasks, testers inside tasks and Codex leads have not run live, nor on
 factory-floor.
 
-Tasks on the `task` and `task-pr` child workflows now skip a tester when its
-declared kit capabilities are missing, recording a durable **untested** marker.
-Task reports, ticket pages, task PRs and the lead's final PR make this explicit;
-the merge gate retains owner merging for merged untested tasks. Top-level
-workflows and reproducer steps still reject missing capabilities.
+Tasks on the `task` and `task-pr` child workflows used to skip a tester when its
+declared kit capabilities were missing, recording a durable **untested** marker
+that task reports, ticket pages, task PRs and the lead's final PR showed.
+Steps that declare `needs`, such as the `bug` reproducer and tester, still
+reject missing capabilities.
 
 Every task and the lead's final change are now always checked, replacing that
 skip. Testers in `task`, `task-pr` and `lead` no longer need `verify`: without a
@@ -222,6 +222,14 @@ check inspection and maintain-pr result over fixture GitHub output, so "Bundle
 check failed on the pull request" is back at build with the `Bundle` link and log
 excerpt, and "Optional check still running" is ready with `Bundle` pending and
 not required. `drive.mjs ci-failed` and `ci-pending` assert them in the browser.
+
+A check that fails after maintain-pr reported `ready`, such as a non-required
+check still running then, now also returns to the builder: the merge wait sees
+it on the pull request head and the merge step reports `changes-needed` with the
+same `CI failed` findings, with auto-merge on or off. Real PostgreSQL tests and
+the demo ticket "Bundle check failed while waiting to merge" (`drive.mjs
+ci-late-failed`) cover this; live polling of a real GitHub pull request remains
+unverified.
 
 The `.kipster/verify` drivers and feature maps now follow the current app and
 built-in workflows. Every scenario runs once, in the guide's order, on one

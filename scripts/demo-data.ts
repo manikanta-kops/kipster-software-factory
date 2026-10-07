@@ -1,5 +1,5 @@
 import { evaluateMergeGate, type MergeFacts } from '../src/domain/merge-gate.ts'
-import { checksResult } from '../src/engine/pull-requests.ts'
+import { checksResult, ciFailure } from '../src/engine/pull-requests.ts'
 import { mergedTaskResult } from '../src/engine/tasks.ts'
 import { checkerVerdict, untestedReasons } from '../src/domain/task-testing.ts'
 import type { run as runCommand } from '../src/executors/process.ts'
@@ -129,6 +129,7 @@ export interface DemoTickets {
   readonly uploadChild: number
   readonly bundleFailed: number
   readonly bundlePending: number
+  readonly bundleLateFailed: number
   readonly checkedWithoutVerifyLead: number
   readonly checkedWithoutVerifyChild: number
   readonly checkedWithVerifyLead: number
@@ -1061,6 +1062,29 @@ async function seedLocked(
       'pull-request-checks',
       head,
     )
+    const checks = await ciSnapshot(
+      maintain.ticket.id,
+      head,
+      pull,
+      bundle,
+      logs,
+    )
+    const result = checksResult(checks, url)
+    if (!result) throw new Error(`Demo CI for #${number} is still awaited`)
+    await completeAttempt(database, maintain.attempt.id, result, {
+      headCommit: head,
+    })
+    return number
+  }
+  /** Inspects one fixture check snapshot and saves the merge gate it produces. */
+  const ciSnapshot = async (
+    ticketId: number,
+    head: string,
+    pull: number,
+    bundle: object,
+    logs: Record<string, string>,
+  ) => {
+    const url = `https://github.com/${DEMO_REPOSITORY}/pull/${pull}`
     const checks = await inspectChecks(
       fixtureGh(
         head,
@@ -1085,7 +1109,7 @@ async function seedLocked(
     )
     await saveMergeGate(
       database,
-      maintain.ticket.id,
+      ticketId,
       evaluateMergeGate(
         {
           head,
@@ -1113,12 +1137,7 @@ async function seedLocked(
         new Date().toISOString(),
       ),
     )
-    const result = checksResult(checks, url)
-    if (!result) throw new Error(`Demo CI for #${number} is still awaited`)
-    await completeAttempt(database, maintain.attempt.id, result, {
-      headCommit: head,
-    })
-    return number
+    return checks
   }
   const bundlePending = await ciTicket(
     'Optional check still running',
@@ -1137,6 +1156,24 @@ async function seedLocked(
     {},
   )
   await openPullRequestAndWait(bundlePending, 45)
+  // Ready while Bundle ran, then Bundle failed during the merge wait: the merge step sends it back to build.
+  const lateHead = '9'.repeat(40)
+  const lateBundle = {
+    kind: 'CheckRun',
+    name: 'Bundle',
+    isRequired: false,
+    detailsUrl: `https://github.com/${DEMO_REPOSITORY}/actions/runs/480/job/482`,
+    databaseId: 482,
+  }
+  const bundleLateFailed = await ciTicket(
+    'Bundle check failed while waiting to merge',
+    'Synthetic demo: the required check passed while the optional **Bundle** check was still running, so maintain-pr reported ready. Bundle then failed while the ticket waited to merge, so the merge step sent it back to the builder. No real GitHub or agents ran.',
+    lateHead,
+    48,
+    { ...lateBundle, status: 'IN_PROGRESS', conclusion: null },
+    {},
+  )
+  const lateMerge = await openPullRequestAndWait(bundleLateFailed, 48)
   // Left queued at build: the scheduler is off, so the builder never picks it up.
   const bundleFailed = await ciTicket(
     'Bundle check failed on the pull request',
@@ -1156,6 +1193,26 @@ async function seedLocked(
       '442':
         'Bundle\tSize\tdist/assets/index.js is 312.4 kB, over the 250 kB budget (synthetic demo)\nBundle\tSize\tError: Process completed with exit code 1.',
     },
+  )
+
+  // A queued build would be claimed by the next ticket's seeding, so Bundle fails only after the last CI ticket.
+  const lateChecks = await ciSnapshot(
+    (await getTicket(database, bundleLateFailed))!.id,
+    lateHead,
+    48,
+    { ...lateBundle, status: 'COMPLETED', conclusion: 'FAILURE' },
+    {
+      '482':
+        'Bundle\tSize\tdist/assets/vendor.js is 410.2 kB, over the 250 kB budget (synthetic demo)\nBundle\tSize\tError: Process completed with exit code 1.',
+    },
+  )
+  if (lateChecks.state !== 'failed')
+    throw new Error(`Demo CI for #${bundleLateFailed} did not fail`)
+  await completeAttempt(
+    database,
+    lateMerge,
+    { outcome: 'changes-needed', ...ciFailure(lateChecks.failures) },
+    { headCommit: lateHead },
   )
 
   // Queued: nothing has picked it up yet.
@@ -1189,6 +1246,7 @@ async function seedLocked(
     uploadChild,
     bundleFailed,
     bundlePending,
+    bundleLateFailed,
     checkedWithoutVerifyLead: withoutVerify.lead,
     checkedWithoutVerifyChild: withoutVerify.child,
     checkedWithVerifyLead: withVerify.lead,

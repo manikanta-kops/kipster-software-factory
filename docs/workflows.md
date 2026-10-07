@@ -73,6 +73,13 @@ System steps take an `action` and its parameters under `with`:
 Agent and system steps can also report `needs-decision`, which always pauses
 the ticket for you unless routed.
 
+`maintain-pr` waits only for required checks, so a non-required check may still
+be running when the ticket reaches `merge`. If any check on the pull request
+head fails while `merge` waits, `merge` reports `changes-needed` with the same
+`CI failed: <name>` findings (link and log excerpt) that `ci-failed` carries.
+New pull request review feedback also reports `changes-needed`. Route it to the
+builder, or to the lead in a lead workflow; every built-in workflow does.
+
 ## Builder requests for another repository
 
 `needs-other-repo` has factory behaviour before ordinary outcome routing. The

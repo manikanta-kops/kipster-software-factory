@@ -437,6 +437,15 @@ links and at most 2,000 characters of log per check. Actions logs come from
 and unavailable logs are explicitly labelled. API errors leave the wait intact;
 the deadline still applies.
 
+The owner-merge wait refreshes the merge gate from the checks on the open pull
+request's head at every poll. If one has failed, typically a non-required check
+still running when maintain-pr reported `ready`, the waiting merge attempt
+finishes `changes-needed` with the same `CI failed: <names>` summary and
+findings (`pull-requests.ts:ciFailure`) before feedback, base movement or
+auto-merge are considered. Built-in workflows route that to the builder (or
+lead). Pending, passed or absent checks and a changed head do not route from
+this wait.
+
 CI and owner-merge waits also fetch the default branch. If it contains commits
 missing from the ticket, the lifecycle closes the obsolete wait and queues a
 fresh attempt of the most recent `maintain-pr` step. This works with the ticket's
@@ -541,15 +550,18 @@ verdicts without running an engine. `npm run dev` keeps the factory alive during
 source edits; explicit restart loads changes. `npm run dev -- --watch` opts into
 restarts. Web hot reload remains enabled in either mode.
 
-The demo also seeds two `task-pr` tickets whose CI outcome comes from product
+The demo also seeds three `task-pr` tickets whose CI outcome comes from product
 code rather than written facts: `inspectChecks` runs against fixture `gh` output
 supplied through its injected command runner, and maintain-pr's `checksResult`
 gives the outcome that `completeAttempt` routes. "Bundle check failed on the pull
 request" has a failed non-required `Bundle` check and sits back at build with the
 check's link and log excerpt; "Optional check still running" has `Bundle`
-pending and reported ready. Their merge gates come from `evaluateMergeGate` over
-the inspected checks. The served instance never calls GitHub, and the merge
-readiness card labels each check required or not required.
+pending and reported ready. "Bundle check failed while waiting to merge" was
+ready with `Bundle` pending, then a second snapshot has `Bundle` failed and its
+merge attempt finishes `changes-needed` with `ciFailure`'s findings, the result
+the merge wait gives, so it is back at build. Their merge gates come from
+`evaluateMergeGate` over the inspected checks. The served instance never calls
+GitHub, and the merge readiness card labels each check required or not required.
 
 Two lights-out leads show every task being checked. One is in `kipster/docs-site`,
 whose valid kit has no verify block; the other is in demo-shop. Their state comes
@@ -580,8 +592,10 @@ The prompt includes the exact commit, instance URL, database URL, evidence
 directory, verification documents and the approved plan's acceptance scenarios.
 All maps are supplied so a relevant entry point cannot be lost to heuristic
 selection. The agent drives the actual user surface first; state inspection may
-only corroborate that run. Skipped entry points, wrong surfaces, stale builds,
-inconclusive results and self-reports cannot pass. The factory validates
+only corroborate that run. Wrong surfaces, stale builds and self-reports cannot
+pass. A skipped or inconclusive scenario stays unverified and is reported with
+`scenarioResult: unverified`; the tester outcome may still pass, and the merge
+gate shows the change as untested. The factory validates
 nonempty evidence files in the current instance's evidence directory, excluding
 startup logs. A `changes-needed` result requires findings naming Scenario,
 Observed, Expected and an attached Evidence filename. These checks enforce the

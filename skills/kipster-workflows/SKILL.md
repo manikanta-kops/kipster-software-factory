@@ -245,7 +245,11 @@ Action notes:
   repository, the latest `tester` and `reviewer` both passed at the exact pull
   request head, and no rule needs the owner. Migrations, kit and CI changes
   always need the owner. Otherwise the owner merges on GitHub, and owner
-  review comments report `changes-needed`.
+  review comments report `changes-needed`. A check on the pull request head
+  that fails while `merge` waits, such as a non-required check that was still
+  running at `ready`, also reports `changes-needed` with the same
+  `CI failed: <name>` findings as `ci-failed`. Route `merge`'s
+  `changes-needed` to the builder, or to the lead in a lead workflow.
 
 ## Human steps
 

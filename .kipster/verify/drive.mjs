@@ -26,6 +26,7 @@ const scenarios = [
   'stale',
   'ci-failed',
   'ci-pending',
+  'ci-late-failed',
   'checked-without-verify',
   'checked-with-verify',
   'untested-gate',
@@ -562,6 +563,38 @@ try {
       await expect(ciChecks()).toContainText('Bundle: pending · not required')
       await expect(maintainRun()).toContainText('ready')
       await expect(maintainRun()).toContainText('CI passed.')
+      break
+    }
+    case 'ci-late-failed': {
+      await openFromToday('Bundle check failed while waiting to merge')
+      await expect(status).toHaveText('queued')
+      const now = page.getByRole('region', { name: 'Now' })
+      await expect(now).toContainText('Step 1 of 5')
+      await expect(now).toContainText('Latest from Merge')
+      await expect(now).toContainText('CI failed: Bundle')
+      await expect(mergeGate().getByRole('heading')).toContainText(
+        'Blocked: CI failed',
+      )
+      await expect(ciChecks()).toContainText('Bundle: failed · not required')
+      await expect(maintainRun()).toContainText('ready')
+      await expect(maintainRun()).toContainText('CI passed.')
+      const merge = page.locator('.attempt-entry').filter({
+        has: page.getByRole('heading', { name: /^merge\b/ }),
+      })
+      await expect(merge).toContainText('changes needed')
+      await expect(merge).toContainText('CI failed: Bundle')
+      await merge
+        .getByText('CI failed: Bundle finding', { exact: true })
+        .click()
+      await expect(
+        merge.getByRole('link', { name: 'Bundle', exact: true }),
+      ).toHaveAttribute(
+        'href',
+        'https://github.com/kipster/demo-shop/actions/runs/480/job/482',
+      )
+      await expect(merge).toContainText(
+        'dist/assets/vendor.js is 410.2 kB, over the 250 kB budget',
+      )
       break
     }
     case 'checked-without-verify':
