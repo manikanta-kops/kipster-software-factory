@@ -197,6 +197,22 @@ their ticket numbers. Done and cancelled tickets keep their stored copy and
 still open. Real PostgreSQL and browser tests cover this; existing uploads were
 not removed.
 
+### Every failed check returns to the builder (implemented)
+
+`maintain-pr` still waits only for required checks, but any check on the pull
+request head that has already failed, required or not, routes `ci-failed` with
+its name, link and log excerpt and blocks the merge gate. A non-required check
+still pending when the required checks pass is not awaited. Under lights-out the
+builder fixes a failure outside the ticket's scope in its own commit and flags
+it for the owner. Adapter and real PostgreSQL routing tests cover this; a live
+non-required GitHub failure remains unverified.
+
+The verification demo shows both cases without GitHub: seeding runs the real
+check inspection and maintain-pr result over fixture GitHub output, so "Bundle
+check failed on the pull request" is back at build with the `Bundle` link and log
+excerpt, and "Optional check still running" is ready with `Bundle` pending and
+not required. `drive.mjs ci-failed` and `ci-pending` assert them in the browser.
+
 ### Lessons (implemented)
 
 Ticket completion, cancellation and owner waits now propose one-line lessons

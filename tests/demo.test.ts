@@ -13,6 +13,7 @@ import {
   createRepository,
   listRepositories,
 } from '../src/store/repositories.ts'
+import { getMergeGate } from '../src/store/merge-gates.ts'
 import { getTicketDetail, listTickets } from '../src/store/tickets.ts'
 import { createDemoStore } from './helpers/demo.ts'
 import { WorkflowInUse } from '../src/domain/errors.ts'
@@ -61,6 +62,8 @@ describe('demo data', () => {
       [tickets.askAfterLimit, 'needs-you', 'ask'],
       [tickets.waitingForMerge, 'needs-you', 'pull-request-merge'],
       [tickets.done, 'done', null],
+      [tickets.bundleFailed, 'queued', null],
+      [tickets.bundlePending, 'needs-you', 'pull-request-merge'],
       [tickets.cancelled, 'cancelled', null],
     ] as const
     for (const [number, status, waitingFor] of expected) {
@@ -68,7 +71,7 @@ describe('demo data', () => {
       assert.equal(ticket.status, status, `#${number}`)
       assert.equal(ticket.waiting?.for ?? null, waitingFor, `#${number}`)
     }
-    assert.equal((await listTickets(demo.database)).length, 16)
+    assert.equal((await listTickets(demo.database)).length, 18)
   })
 
   test('retired quick-change keeps its stored workflow and completed plan', async () => {
@@ -215,6 +218,59 @@ describe('demo data', () => {
     assert.equal(running.attempts.at(-1)?.executor, 'claude-code')
     const merge = await detail(demo.tickets.waitingForMerge)
     assert.match(merge.ticket.pullRequestUrl ?? '', /\/pull\/42$/)
+  })
+
+  test('a failed non-required check sends the ticket back to build through maintain-pr', async () => {
+    const { ticket, attempts, artifacts } = await detail(
+      demo.tickets.bundleFailed,
+    )
+    const mergeGate = await getMergeGate(demo.database, ticket.id)
+    assert.equal(ticket.title, 'Bundle check failed on the pull request')
+    assert.equal(ticket.currentStep, 'build')
+    const maintain = attempts.findLast((a) => a.stepId === 'maintain-pr')
+    assert.equal(maintain?.outcome, 'ci-failed')
+    assert.equal(maintain?.summary, 'CI failed: Bundle')
+    assert.equal(attempts.at(-1)?.stepId, 'build')
+    assert.equal(attempts.at(-1)?.status, 'pending')
+    const finding = artifacts.find((a) => a.attemptId === maintain?.id)
+    assert.equal(finding?.kind, 'finding')
+    assert.equal(finding?.title, 'CI failed: Bundle')
+    assert.match(
+      finding?.content ?? '',
+      /^\[Bundle\]\(https:\/\/github\.com\/kipster\/demo-shop\/actions\/runs\/440\/job\/442\)/,
+    )
+    assert.match(finding?.content ?? '', /over the 250 kB budget/)
+    assert.equal(mergeGate?.latest.facts.ci, 'failed')
+    assert.ok(mergeGate?.latest.blockers.includes('CI failed'))
+    assert.deepEqual(
+      mergeGate?.latest.facts.checks.map((c) => [c.name, c.state, c.required]),
+      [
+        ['Demo repository checks', 'passed', true],
+        ['Bundle', 'failed', false],
+      ],
+    )
+  })
+
+  test('a pending non-required check is not awaited', async () => {
+    const { ticket, attempts } = await detail(demo.tickets.bundlePending)
+    const mergeGate = await getMergeGate(demo.database, ticket.id)
+    assert.equal(ticket.title, 'Optional check still running')
+    const maintain = attempts.findLast((a) => a.stepId === 'maintain-pr')
+    assert.equal(maintain?.outcome, 'ready')
+    assert.equal(
+      maintain?.summary,
+      'Pull request: https://github.com/kipster/demo-shop/pull/45. CI passed.',
+    )
+    assert.equal(ticket.currentStep, 'merge')
+    assert.equal(mergeGate?.latest.facts.ci, 'passed')
+    assert.equal(mergeGate?.latest.ready, true)
+    assert.deepEqual(
+      mergeGate?.latest.facts.checks.map((c) => [c.name, c.state, c.required]),
+      [
+        ['Demo repository checks', 'passed', true],
+        ['Bundle', 'pending', false],
+      ],
+    )
   })
 
   test('refuses to seed twice', async () => {

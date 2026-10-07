@@ -32,7 +32,9 @@ expand the agreed scope. If a conflict prevents completing the requested change
 without editing an explicitly forbidden path, make the necessary forbidden-path
 change in its own separate commit. State the path and why the change was needed
 in the commit message and summary, and record a decision artifact. Never report
-needs-decision for this conflict.
+needs-decision for this conflict. The same applies when fixing a failed CI
+check, required or not: a fix outside the ticket's scope goes in its own commit
+and is flagged for the owner this way.
 
 <!-- /lights-out -->
 
