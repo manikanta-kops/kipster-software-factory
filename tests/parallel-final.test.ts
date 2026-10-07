@@ -298,7 +298,11 @@ for (const testing of ['verify', 'missing'] as const) {
         ['passed', head],
       ],
     )
-    const gate = (await getMergeGate(f.database, ticket.id))!.latest
+    const snapshot = await until(
+      () => getMergeGate(f.database, ticket.id),
+      (gate) => gate?.latest.ready === true,
+    )
+    const gate = snapshot!.latest
     assert.equal(gate.ready, true)
     assert.equal(gate.facts.tester!.commit, head)
     assert.deepEqual(
