@@ -370,9 +370,10 @@ for (const mode of ['failure', 'timeout', 'cancel', 'crash'] as const) {
       })
       try {
         await until(async () => {
-          const invocation = f.invocations.at(-1)!
-          if (!invocation.prompt.startsWith('You are an independent tester'))
-            return false
+          const invocation = f.invocations.findLast((invocation) =>
+            invocation.prompt.startsWith('You are an independent tester'),
+          )
+          if (!invocation) return false
           return access(join(invocation.directory, 'observations.json')).then(
             () => true,
             () => false,
