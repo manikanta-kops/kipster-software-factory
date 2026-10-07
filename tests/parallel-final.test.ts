@@ -368,6 +368,27 @@ test('a lead correction through a child commit restarts both verdicts', async (t
     }
   })
   await f.start()
+  // Bound each phase's hang rather than the whole correction flow under load.
+  for (const rounds of [1, 2]) {
+    await until(
+      () => f.detail(ticket.number),
+      (d) =>
+        d.attempts.filter(
+          (a) =>
+            ['final-test', 'review'].includes(a.stepId) &&
+            a.status === 'finished',
+        ).length >=
+        rounds * 2,
+    )
+    if (rounds === 1)
+      await until(
+        () => f.detail(ticket.number),
+        (d) =>
+          d.tasks.some(
+            (task) => task.key === 'correction' && task.status === 'merged',
+          ),
+      )
+  }
   const detail = await until(
     () => f.detail(ticket.number),
     (d) => d.ticket.waiting?.for === 'pull-request-merge',
