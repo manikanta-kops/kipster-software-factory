@@ -4,6 +4,7 @@ import type { DemoTickets } from '../../scripts/demo-data.ts'
 interface FactoryFixture {
   url: string
   tickets: DemoTickets
+  legacyTicket: number | null
   artifactTicket: number | null
   decisionTicket: number | null
   linkedTickets: { original: number; linked: number } | null
@@ -11,23 +12,29 @@ interface FactoryFixture {
 }
 export const test = base.extend<{
   factory: FactoryFixture
+  withLessons: boolean
   withAutoMerge: boolean
   withLinks: boolean
   withTasks: boolean
+  withLegacy: boolean
   withArtifacts: boolean
   withDecisions: boolean
   verdict: 'changes-needed' | 'unobserved' | 'default'
 }>({
+  withLessons: [false, { option: true }],
   withAutoMerge: [false, { option: true }],
   withLinks: [false, { option: true }],
   withTasks: [false, { option: true }],
   withDecisions: [false, { option: true }],
+  withLegacy: [false, { option: true }],
   withArtifacts: [false, { option: true }],
   verdict: ['default', { option: true }],
   factory: async (
     {
       request,
+      withLessons,
       withArtifacts,
+      withLegacy,
       verdict,
       withDecisions,
       withAutoMerge,
@@ -37,7 +44,7 @@ export const test = base.extend<{
     runTest,
   ) => {
     const response = await request.post(
-      `/__test/fixtures?artifacts=${withArtifacts}&decisions=${withDecisions}&verdict=${verdict}&autoMerge=${withAutoMerge}&links=${withLinks}&tasks=${withTasks}`,
+      `/__test/fixtures?lessons=${withLessons}&legacy=${withLegacy}&artifacts=${withArtifacts}&decisions=${withDecisions}&verdict=${verdict}&autoMerge=${withAutoMerge}&links=${withLinks}&tasks=${withTasks}`,
     )
     expect(response.ok()).toBeTruthy()
     const fixture = (await response.json()) as FactoryFixture

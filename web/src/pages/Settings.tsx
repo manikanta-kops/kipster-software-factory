@@ -7,6 +7,7 @@ import type {
 } from '../../../src/api/contract.ts'
 import {
   settingsProblems,
+  sameReviewerFamily,
   settingsSchema,
 } from '../../../src/domain/settings.ts'
 import { api, ApiError } from '../api.ts'
@@ -22,6 +23,7 @@ interface AgentDraft {
   effort: string
 }
 interface OverrideDraft {
+  reviewers: AgentDraft[] | undefined
   workflow: string
   timeout: string
   roles: Partial<Record<Role, AgentDraft>>
@@ -31,6 +33,7 @@ interface Draft {
   timeout: string
   default: AgentDraft
   roles: Partial<Record<Role, AgentDraft>>
+  reviewers: AgentDraft[]
   allowed: AgentDraft[]
   overrides: OverrideDraft[]
 }
@@ -53,10 +56,12 @@ function toDraft(settings: Settings): Draft {
     timeout: String(settings.stepTimeoutMinutes),
     default: agentDraft(settings.agents.default),
     roles: roleDrafts(settings.agents.roles),
+    reviewers: settings.agents.reviewers.map(agentDraft),
     allowed: settings.agents.allowed.map(agentDraft),
     overrides: Object.entries(settings.workflows).map(
       ([workflow, override]) => ({
         workflow,
+        reviewers: override.reviewers?.map(agentDraft),
         timeout:
           override.stepTimeoutMinutes === undefined
             ? ''
@@ -92,6 +97,7 @@ function fromDraft(draft: Draft): unknown {
     agents: {
       default: agentInput(draft.default),
       roles: roleInputs(draft.roles),
+      reviewers: draft.reviewers.map(agentInput),
       allowed: draft.allowed.map(agentInput),
     },
     workflows: Object.fromEntries(
@@ -102,6 +108,9 @@ function fromDraft(draft: Draft): unknown {
             ? {}
             : { stepTimeoutMinutes: number(override.timeout) }),
           roles: roleInputs(override.roles),
+          ...(override.reviewers === undefined
+            ? {}
+            : { reviewers: override.reviewers.map(agentInput) }),
         },
       ]),
     ),
@@ -124,7 +133,9 @@ function validate(
         ]),
       ),
     }
-  const problems = settingsProblems(parsed.data, workflows)
+  const problems = settingsProblems(parsed.data, workflows).filter(
+    (problem) => !problem.includes(': warning: '),
+  )
   if (problems.length)
     return {
       issues: new Map(
@@ -254,6 +265,15 @@ function SettingsForm({ response }: { response: SettingsResponse }) {
         ))}
       </fieldset>
 
+      <ReviewerFields
+        label="Global reviewer"
+        value={draft.reviewers}
+        choices={choices}
+        issues={issues}
+        prefix="agents.reviewers"
+        onChange={(reviewers) => update((d) => ({ ...d, reviewers }))}
+      />
+
       <fieldset>
         <legend>Agents a lead may choose for a task</legend>
         <p className="muted">
@@ -356,6 +376,26 @@ function SettingsForm({ response }: { response: SettingsResponse }) {
                 issue={issueAt(issues, `${at}.stepTimeoutMinutes`)}
                 onChange={(value) => change({ timeout: value })}
               />
+              <label>
+                <input
+                  type="checkbox"
+                  checked={override.reviewers === undefined}
+                  onChange={(event) =>
+                    change({ reviewers: event.target.checked ? undefined : [] })
+                  }
+                />
+                Use global reviewers for {override.workflow}
+              </label>
+              {override.reviewers !== undefined && (
+                <ReviewerFields
+                  label={`${override.workflow} reviewer`}
+                  value={override.reviewers}
+                  choices={choices}
+                  issues={issues}
+                  prefix={`${at}.reviewers`}
+                  onChange={(reviewers) => change({ reviewers })}
+                />
+              )}
               {choices.roles.map((role) => (
                 <AgentFields
                   key={role}
@@ -394,7 +434,12 @@ function SettingsForm({ response }: { response: SettingsResponse }) {
                 ...d,
                 overrides: [
                   ...d.overrides,
-                  { workflow: adding, timeout: '', roles: {} },
+                  {
+                    workflow: adding,
+                    timeout: '',
+                    roles: {},
+                    reviewers: undefined,
+                  },
                 ],
               }))
               setAdding('')
@@ -508,6 +553,75 @@ function AgentFields({
         ))}
       </select>
       {issue && <p className="error">{issue}</p>}
+    </fieldset>
+  )
+}
+
+function ReviewerFields({
+  label,
+  value,
+  choices,
+  issues,
+  prefix,
+  onChange,
+}: {
+  label: string
+  value: AgentDraft[]
+  choices: Choices
+  issues: Issues
+  prefix: string
+  onChange: (value: AgentDraft[]) => void
+}) {
+  return (
+    <fieldset>
+      <legend>{label} list</legend>
+      <p className="muted">
+        Lead tickets run these reviewers in parallel. An empty list uses the
+        reviewer role setting.
+      </p>
+      {sameReviewerFamily(
+        value
+          .filter((agent) => agent.cli)
+          .map((agent) => ({ cli: agent.cli as AgentChoice['cli'] })),
+      ) && (
+        <output>
+          Warning: reviewers share a CLI model family. Choose claude and codex
+          for different families.
+        </output>
+      )}
+      {value.map((agent, index) => (
+        <div className="settings-row" key={index}>
+          <AgentFields
+            label={`${label} ${index + 1}`}
+            value={agent}
+            choices={choices}
+            issue={issueAt(issues, `${prefix}.${index}`)}
+            onChange={(next) =>
+              onChange(value.map((old, at) => (at === index ? next : old)))
+            }
+          />
+          <button
+            type="button"
+            className="button"
+            aria-label={`Remove ${label.toLowerCase()} ${index + 1}`}
+            onClick={() => onChange(value.filter((_, at) => at !== index))}
+          >
+            Remove
+          </button>
+        </div>
+      ))}
+      <button
+        type="button"
+        className="button"
+        onClick={() =>
+          onChange([
+            ...value,
+            { ...EMPTY_AGENT, cli: value.length ? 'codex' : 'claude' },
+          ])
+        }
+      >
+        Add {label.toLowerCase()}
+      </button>
     </fieldset>
   )
 }

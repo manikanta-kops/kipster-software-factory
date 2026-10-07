@@ -44,7 +44,7 @@ test.describe('rule-based auto-merge', () => {
     const title = detail.ticket.title
     await page.goto(`${factory.url}/#/`)
     const needsYou = page.getByRole('region', {
-      name: 'Needs you',
+      name: 'Ticket summaries',
       exact: true,
     })
     const moving = page.getByRole('region', { name: 'Moving', exact: true })

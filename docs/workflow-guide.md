@@ -34,8 +34,10 @@ failure seen in practice.
 - **Route on typed outcomes,** never on free text.
 - **Every loop has a limit.** Running out means "needs you" with everything
   attached, or an explicit route such as opening the PR with notes.
-- **Review once.** A fresh reviewer always finds one more thing; block only on
-  serious findings and let the author decline the rest in writing.
+- **Bound review.** Leads use up to five rounds, with parallel reviewers from
+  configured CLI families. Later rounds check earlier corrections and serious
+  problems added by fixes. Other workflows retain their explicit review limits;
+  block only on serious findings and let the author decline the rest in writing.
 - **Agents propose, the system acts.** Only system steps push, open pull
   requests or merge.
 
@@ -114,7 +116,7 @@ three times, then report an unavailable check with the reason.
   branch paths and commits; dependency edits fail to the owner and are restored.
 - **Request the needed change.** A builder uses `needs-other-repo` with a target,
   title and body explaining the change and why it is needed. The system opens a
-  linked ticket with its own workflow (default `feature`) and plan approval.
+  linked ticket with its own workflow (default `lead`) and plan approval.
 - **Resume on confirmed merge.** The original parks without an executor slot and
   starts a fresh builder attempt after the linked ticket finishes with a confirmed
   merged PR. That attempt receives the original builder explanation, full request,

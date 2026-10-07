@@ -40,7 +40,7 @@ import {
   resolveAsk,
 } from '../src/store/tickets.ts'
 import { Workspaces } from '../src/workspace/workspaces.ts'
-import { builtInWorkflow, createTestStore } from './helpers/store.ts'
+import { testWorkflow, createTestStore } from './helpers/store.ts'
 
 const fixture = fileURLToPath(
   new URL('./fixtures/fake-agent.ts', import.meta.url),
@@ -173,7 +173,7 @@ async function setup(t: TestContext, script: object = {}) {
     return createTicket(store.database, {
       repository: repository.slug,
       title,
-      workflow: await builtInWorkflow('quick-change'),
+      workflow: await testWorkflow('planned-change'),
     })
   }
   const detail = async (number: number) =>
@@ -201,7 +201,7 @@ async function setup(t: TestContext, script: object = {}) {
   }
 }
 
-test('quick-change: approval, two builds, review loop, PR, merge wait and terminal cleanup', async (t) => {
+test('planned-change: approval, two builds, review loop, PR, merge wait and terminal cleanup', async (t) => {
   const f = await setup(t, {
     builder: [{ commit: true }, { commit: true }],
     reviewer: [{ outcome: 'changes-needed' }, { outcome: 'passed' }],
@@ -898,7 +898,7 @@ for (const failure of [false, true]) {
     const ticket = await createTicket(f.store.database, {
       repository: repository.slug,
       title: 'Onboard fixture',
-      workflow: await builtInWorkflow('onboard-repo'),
+      workflow: await testWorkflow('onboard-repo'),
     })
     const cwd = await workspaces.prepare(ticket, repository, signal)
     await mkdir(join(cwd, '.kipster/verify/features'), { recursive: true })
@@ -1007,6 +1007,7 @@ test('saved settings reach steps that start later without a restart', async (t) 
       default: { cli: 'codex' },
       roles: { planner: sonnet },
       allowed: [],
+      reviewers: [],
     },
     workflows: {},
   } satisfies Settings
@@ -1036,7 +1037,7 @@ test('saved settings reach steps that start later without a restart', async (t) 
   await saveSettings(f.store.database, {
     ...saved,
     concurrency: 4,
-    workflows: { 'quick-change': { stepTimeoutMinutes: 0.02 } },
+    workflows: { 'planned-change': { stepTimeoutMinutes: 0.02 } },
   })
   const fourth = await f.ticket('Fourth')
   const overridden = await until(

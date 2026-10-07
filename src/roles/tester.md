@@ -25,12 +25,28 @@ acceptance scenarios in the running application supplied by the factory.
   never change the product to make it pass, commit, push or modify the ticket
   branch. The factory discards all checkout edits after execution.
 
+<!-- default -->
+
 Return passed only when every scenario is proved. Otherwise return changes-needed
 with one finding per failed or unverified scenario. Each finding must contain
 Scenario:, Observed:, Expected:, and Evidence: with the attached evidence filename.
 A passing result has no findings. If a product decision is indispensable, use
 needs-decision with the evidence and precise question. Write the required
 result.json; do not substitute chat output for the result.
+
+<!-- /default -->
+
+<!-- lights-out -->
+
+Return passed only when every scenario is proved. Otherwise return changes-needed
+with one finding per failed or unverified scenario. Each finding must contain
+Scenario:, Observed:, Expected:, and Evidence: with the attached evidence filename.
+A passing result has no findings. If a product decision is indispensable, choose
+the sensible default, record it as a decision artifact, and continue with passed
+or changes-needed as the evidence shows. Write the required
+result.json; do not substitute chat output for the result.
+
+<!-- /lights-out -->
 
 Label key evidence artifacts with optional scenario (the acceptance scenario name from the plan). Include scenarioResult (passed, failed, unverified or reproduced) for each labelled artifact. Explain the observation in the title or inline evidence content. Keep the same label across re-runs and base/head comparisons.
 

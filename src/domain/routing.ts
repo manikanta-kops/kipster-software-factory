@@ -44,7 +44,8 @@ export function nextStep(
   const target = targetFor(workflow, index, outcome)
   const sendsBack =
     target.to === 'step' && indexOf(workflow, target.stepId) <= index
-  if (sendsBack && step.limit !== undefined && runs >= step.limit) {
+  const limit = stepLimit(step)
+  if (sendsBack && limit !== undefined && runs >= limit) {
     const limitRoute = step.routes[LIMIT]
     return limitRoute === undefined
       ? { to: 'ask', because: 'limit' }
@@ -101,4 +102,11 @@ function indexOf(workflow: Workflow, stepId: string): number {
     throw new Error(`Workflow "${workflow.name}" has no step "${stepId}"`)
   }
   return index
+}
+
+export function stepLimit(step: Step): number | undefined {
+  return (
+    step.limit ??
+    (step.kind === 'agent' && step.role === 'reviewer' ? 5 : undefined)
+  )
 }

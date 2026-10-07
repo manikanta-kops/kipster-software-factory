@@ -55,7 +55,10 @@ gated workflows offer one-click onboarding when the repository is ready.
 form validates with the same schema as the server (`src/domain/settings.ts`)
 before sending, shows each problem next to its field, and shows the server's
 issues when it rejects a save. Attempts show the agent CLI, model and effort
-they ran with.
+they ran with. Global and workflow reviewer lists have add/remove controls;
+workflow lists can inherit the global list. Same-family reviewer choices warn
+without blocking a save. Independence replacements and exceptions appear as
+notes in the ticket timeline.
 
 ## Browser verification
 
@@ -65,3 +68,32 @@ plan/log fixture. Fixture endpoints exist only in `tests/e2e/server.ts`.
 `appearance.spec.ts` captures every page plus ask/merge ticket states at 390 px
 and 1280 px in light and dark themes and checks for horizontal page overflow.
 Screenshots are attached to Playwright test results.
+
+A task whose tester was skipped shows **Untested** near its status, including
+the missing capability and skipped step. Lead tickets also show this warning
+for merged untested tasks. These warnings persist independently of verdicts.
+
+New ticket offers `bug`, `lead`, `onboard-repo` and uploaded workflows; child
+workflows stay hidden. The Lights-out checkbox defaults on for `lead` and
+`program-lead`, follows workflow changes until touched, and is saved with the
+ticket. Enabled tickets show a Lights-out badge. Their Decision log shows
+typed choices, alternatives and reasons, with links to child decision logs.
+A child awaiting a decision stays unfinished as a parked task while siblings
+continue. Lights-out leaves the merge gate and untested warnings in effect.
+
+Ticket pages show a compact fact-based summary for parked and finished tickets:
+Ready, Needs you with an action count, or Blocked; linked actions, activity and
+only present issues/unverified facts. View details scrolls and moves keyboard
+focus to the rest of the ticket. Today shows one compact row per summarized
+ticket needing attention or finished within 24 hours, respecting filters and
+factory auto-merge. Older tickets with no stored summary retain their existing
+view. Resumed tickets hide their last parked report. Summary events refresh both
+views. The appearance suite covers these reports at 390px and 1280px in both
+themes, including the details control.
+
+Today's compact Lessons group lists proposed repository and engine mistakes
+with Accept and Reject controls. Repository filters narrow repository lessons;
+engine lessons remain visible and workflow filters do not filter lessons.
+Repositories has an Accepted lessons section with a required reason for retiring.
+No new routes are added. `lesson.*` events refresh both lists, including changes
+from another browser. Suggestions are independent of ticket decisions.

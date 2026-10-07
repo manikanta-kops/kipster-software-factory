@@ -1,12 +1,22 @@
+import { LESSON_STATUSES } from '../domain/lessons.ts'
+import {
+  listLessons,
+  acceptLesson,
+  rejectLesson,
+  retireLesson,
+} from '../store/lessons.ts'
 import { evaluateMergeGate } from '../domain/merge-gate.ts'
 import { scenarioIndex } from '../domain/evidence.ts'
 import { getMergeGate } from '../store/merge-gates.ts'
 import { setArtifactHome } from '../store/database.ts'
 import { listDecisions, decisionCounts } from '../store/decisions.ts'
-import { saveUploadedWorkflow } from '../store/workflows.ts'
+import {
+  saveUploadedWorkflow,
+  ticketWorkflowNames,
+} from '../store/workflows.ts'
 import { listChildTasks } from '../store/task-records.ts'
 import { effectiveSettings, saveSettings } from '../store/settings.ts'
-import { AGENT_CLIS, EFFORTS } from '../domain/catalog.ts'
+import { AGENT_CLIS, EFFORTS, LEAD_ONLY_WORKFLOWS } from '../domain/catalog.ts'
 import {
   DEFAULT_SETTINGS,
   ROLE_NAMES,
@@ -24,7 +34,7 @@ import { z } from 'zod'
 import { DEFAULT_ALLOWED_ORIGINS } from '../config.ts'
 import { FactoryError } from '../domain/errors.ts'
 import { runsOf } from '../domain/lifecycle.ts'
-import { describeRoutes } from '../domain/routing.ts'
+import { describeRoutes, stepLimit } from '../domain/routing.ts'
 import { type Step, stepContract, type Workflow } from '../domain/workflow.ts'
 import { type LibraryEntry, parseUpload } from '../library/library.ts'
 import type { Database } from '../store/database.ts'
@@ -47,6 +57,8 @@ import {
 } from '../store/tickets.ts'
 import { openArtifactFile, inspectArtifactFile } from './artifact-files.ts'
 import type {
+  LessonResponse,
+  LessonsResponse,
   ErrorResponse,
   DecisionsResponse,
   HealthResponse,
@@ -139,6 +151,50 @@ export function createApp({
     }),
   )
 
+  app.get('/api/lessons', async (c) => {
+    const repository = c.req.query('repository')
+    const status = c.req.query('status')
+    return c.json<LessonsResponse>({
+      lessons: await listLessons(database, {
+        ...(repository !== undefined
+          ? {
+              repositoryId:
+                repository === 'engine'
+                  ? null
+                  : parse(z.coerce.number().int().positive(), repository),
+            }
+          : {}),
+        ...(status !== undefined
+          ? { status: parse(z.enum(LESSON_STATUSES), status) }
+          : {}),
+      }),
+    })
+  })
+  for (const action of ['accept', 'reject', 'retire'] as const) {
+    app.post(`/api/lessons/:id/${action}`, async (c) => {
+      const id = parse(z.coerce.number().int().positive(), c.req.param('id'))
+      const lesson =
+        action === 'retire'
+          ? await retireLesson(
+              database,
+              id,
+              (
+                await body(
+                  c,
+                  z.strictObject({
+                    reason: z.string().trim().min(1).max(10000),
+                  }),
+                )
+              ).reason,
+            )
+          : await (action === 'accept' ? acceptLesson : rejectLesson)(
+              database,
+              id,
+            )
+      return c.json<LessonResponse>({ lesson })
+    })
+  }
+
   app.get('/api/health', async (c) => {
     await database.query('SELECT 1')
     return c.json<HealthResponse>({ status: 'ok', database: 'ok' })
@@ -173,11 +229,17 @@ export function createApp({
     )
   })
 
+  async function settingsWorkflows() {
+    return [
+      ...new Set([...library.keys(), ...(await ticketWorkflowNames(database))]),
+    ].sort()
+  }
+
   async function settingsResponse(): Promise<SettingsResponse> {
     return {
       ...(await effectiveSettings(database, fallback)),
       choices: { clis: AGENT_CLIS, efforts: EFFORTS, roles: ROLE_NAMES },
-      workflows: [...library.keys()].sort(),
+      workflows: await settingsWorkflows(),
     }
   }
 
@@ -189,7 +251,9 @@ export function createApp({
     if (!c.req.header('Content-Type')?.startsWith('application/json'))
       throw new FactoryError('invalid', 'Send the settings as JSON')
     const input = await body(c, settingsSchema)
-    const problems = settingsProblems(input, [...library.keys()])
+    const problems = settingsProblems(input, await settingsWorkflows()).filter(
+      (problem) => !problem.includes(': warning: '),
+    )
     if (problems.length)
       throw new InvalidRequest(problems, 'The settings are not valid')
     await saveSettings(database, input)
@@ -271,6 +335,7 @@ export function createApp({
     }
     const ticket = await createTicket(database, {
       repository: input.repository,
+      ...(input.lightsOut === undefined ? {} : { lightsOut: input.lightsOut }),
       ...(input.dependencies === undefined
         ? {}
         : { dependencies: input.dependencies }),
@@ -418,6 +483,7 @@ export function createApp({
         }
       : null
     return {
+      summary: detail.ticket.summary,
       dependencies: detail.dependencies,
       links: detail.links,
       tasks: detail.tasks,
@@ -507,6 +573,8 @@ function summarizeWorkflow({
     description: workflow.description,
     steps: workflow.steps.map((step) => summarize(workflow, step)),
     origin: uploaded ? 'upload' : 'file',
+    selectable:
+      Boolean(uploaded) || !LEAD_ONLY_WORKFLOWS.includes(workflow.name),
   }
 }
 
@@ -518,6 +586,7 @@ function summarize(workflow: Workflow, step: Step): StepSummary {
         ? step.action
         : undefined
   const { success } = stepContract(step)
+  const limit = stepLimit(step)
   return {
     id: step.id,
     kind: step.kind,
@@ -526,7 +595,7 @@ function summarize(workflow: Workflow, step: Step): StepSummary {
     ...(step.instructions === undefined
       ? {}
       : { instructions: step.instructions }),
-    ...(step.limit === undefined ? {} : { limit: step.limit }),
+    ...(limit === undefined ? {} : { limit }),
     needs: step.kind === 'human' ? [] : step.needs,
     routes: describeRoutes(workflow, step),
   }

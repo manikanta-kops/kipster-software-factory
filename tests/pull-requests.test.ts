@@ -946,3 +946,25 @@ test('writer contract rejects local links but allows ordinary routes and public 
   ])
     assert.ok(!validDescription(body(rejected), head, 3, []), rejected)
 })
+
+test('open review findings fit the description contract even with long finding text', async () => {
+  const { openFindingsNotice, validDescription } =
+    await import('../src/engine/pr-writer.ts')
+  const head = 'a'.repeat(40)
+  const notice = openFindingsNotice(
+    Array.from({ length: 30 }, (_, index) => ({
+      title: `Finding ${index} ${'x'.repeat(190)}`,
+      file: 'src/app.ts',
+    })),
+  )
+  assert.match(notice, /Open review findings/)
+  assert.match(notice, /further findings/)
+  assert.ok(
+    validDescription(
+      `Verified at ${head}\nEvidence on ticket #1 in the factory\nMerge danger: two-way door.${notice}`,
+      head,
+      1,
+      [],
+    ),
+  )
+})

@@ -21,11 +21,28 @@ inputs, initial state, expected behaviour, observed failure, the base commit and
 attached evidence filenames. Later builder and tester sessions receive this note
 and must be able to repeat the same path.
 
+<!-- default -->
+
 Return not-reproduced when the failure does not occur, the surface is wrong,
 a required path cannot run, or the result is inconclusive. Include the same
 Reproduction steps note describing exactly what you tried, observations, missing
 conditions and evidence. This outcome asks the owner; it must never start a fix.
 Every finding must name Scenario:, Observed:, Expected:, and Evidence: with an
 attached evidence filename. Write the required result.json.
+
+<!-- /default -->
+
+<!-- lights-out -->
+
+Before returning not-reproduced, try other entry points, inputs, data states and
+conditions on the supplied base instance. Record every attempt in the Reproduction
+steps note with observations, missing conditions and evidence. Then return
+not-reproduced when the failure does not occur, the surface is wrong, a required
+path cannot run, or the result is inconclusive, and let the workflow route the
+outcome; it must never start a fix. Every finding must name Scenario:, Observed:,
+Expected:, and Evidence: with an attached evidence filename. Write the required
+result.json.
+
+<!-- /lights-out -->
 
 Label key evidence artifacts with optional scenario (the acceptance scenario name from the plan). Include scenarioResult (passed, failed, unverified or reproduced) for each labelled artifact. Explain the observation in the title or inline evidence content. Keep the same label across re-runs and base/head comparisons.

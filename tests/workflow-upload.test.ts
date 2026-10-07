@@ -97,12 +97,24 @@ describe('uploading a workflow', () => {
     )
     assert.equal(workflow.name, 'review-only')
     assert.equal(workflow.origin, 'upload')
+    assert.equal(workflow.selectable, true)
     assert.deepEqual(
       workflow.steps.map((step) => step.id),
       ['build', 'review'],
     )
     const listed = await workflows()
-    assert.equal(listed.find((w) => w.name === 'feature')?.origin, 'file')
+    assert.deepEqual(
+      listed.filter((item) => item.selectable).map((item) => item.name),
+      ['bug', 'lead', 'onboard-repo', 'review-only'],
+    )
+    assert.deepEqual(
+      listed
+        .filter((item) => !item.selectable)
+        .map((item) => item.name)
+        .sort(),
+      ['task', 'task-pr'],
+    )
+    assert.equal(listed.find((w) => w.name === 'lead')?.origin, 'file')
     assert.deepEqual(
       listed.find((w) => w.name === 'review-only'),
       workflow,
@@ -174,15 +186,15 @@ steps:
   })
 
   test('cannot replace a workflow file', async () => {
-    const feature = (await workflows()).find((w) => w.name === 'feature')
+    const lead = (await workflows()).find((w) => w.name === 'lead')
     const problem = await json<ErrorResponse>(
-      await upload(reviewOnly().replace('review-only', 'feature')),
+      await upload(reviewOnly().replace('review-only', 'lead')),
       409,
     )
-    assert.match(problem.error, /"feature" is a workflow file/)
+    assert.match(problem.error, /"lead" is a workflow file/)
     assert.deepEqual(
-      (await workflows()).find((w) => w.name === 'feature'),
-      feature,
+      (await workflows()).find((w) => w.name === 'lead'),
+      lead,
     )
   })
 
@@ -201,14 +213,14 @@ describe('saved uploads', () => {
   test('a file with the same name wins and a now-invalid upload is left out', async () => {
     const library = await builtInLibrary()
     const warnings = addUploads(library, [
-      { name: 'feature', source: reviewOnly() },
+      { name: 'lead', source: reviewOnly() },
       { name: 'stale', source: 'name: stale\ndescription: Old.\nsteps: []' },
       { name: 'review-only', source: reviewOnly() },
     ])
     assert.equal(warnings.length, 2)
-    assert.match(warnings[0] ?? '', /"feature" is hidden by the workflow file/)
+    assert.match(warnings[0] ?? '', /"lead" is hidden by the workflow file/)
     assert.match(warnings[1] ?? '', /"stale" is no longer valid/)
-    assert.equal(library.get('feature')?.uploaded, undefined)
+    assert.equal(library.get('lead')?.uploaded, undefined)
     assert.equal(library.get('review-only')?.uploaded, true)
     assert.ok(!library.has('stale'))
   })

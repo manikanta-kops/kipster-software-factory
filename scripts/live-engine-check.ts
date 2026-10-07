@@ -27,6 +27,9 @@ const detail: TicketDetail = {
   tasks: [],
   parentTask: null,
   ticket: {
+    summary: null,
+    summaryAt: null,
+    lightsOut: false,
     id: 0,
     number: 0,
     repository: { id: 0, slug: 'local/throwaway' },
@@ -55,6 +58,7 @@ for (const role of ['planner', 'builder'] as const) {
   await mkdir(directory)
   const step = { kind: 'agent' as const, id: role, role, routes: {}, needs: [] }
   const prompt = await buildPrompt({
+    database: null,
     step,
     detail,
     directory,

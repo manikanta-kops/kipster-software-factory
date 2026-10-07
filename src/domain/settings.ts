@@ -44,6 +44,7 @@ export const timeoutSchema = z
 export const workflowOverrideSchema = z.strictObject({
   stepTimeoutMinutes: timeoutSchema.optional(),
   roles: roleAgentsSchema.optional(),
+  reviewers: z.array(agentSettingSchema).optional(),
 })
 export type WorkflowOverride = z.infer<typeof workflowOverrideSchema>
 
@@ -56,6 +57,7 @@ export const settingsSchema = z.strictObject({
     roles: roleAgentsSchema,
     /** The agents a lead may choose for a task. Empty: tasks use the role settings. */
     allowed: z.array(agentSettingSchema),
+    reviewers: z.array(agentSettingSchema).default([]),
   }),
   /** Overrides for one workflow, keyed by workflow name. */
   workflows: z.record(z.string().min(1), workflowOverrideSchema),
@@ -65,7 +67,7 @@ export type Settings = z.infer<typeof settingsSchema>
 export const DEFAULT_SETTINGS: Settings = {
   concurrency: DEFAULT_CONCURRENCY,
   stepTimeoutMinutes: DEFAULT_STEP_TIMEOUT_MINUTES,
-  agents: { default: DEFAULT_AGENT, roles: {}, allowed: [] },
+  agents: { default: DEFAULT_AGENT, roles: {}, allowed: [], reviewers: [] },
   workflows: {},
 }
 
@@ -104,14 +106,44 @@ export function stepTimeoutFor(
   )
 }
 
-/** Problems zod cannot see: overrides must name a workflow in the library. */
+/** Unknown workflow overrides and reviewer family warnings. */
 export function settingsProblems(
   settings: Settings,
   workflows: readonly string[],
 ): string[] {
-  return Object.keys(settings.workflows)
-    .filter((name) => !workflows.includes(name))
-    .map((name) => `workflows.${name}: unknown workflow`)
+  return Object.entries(settings.workflows).flatMap(([name, override]) => [
+    ...(!workflows.includes(name)
+      ? [`workflows.${name}: unknown workflow`]
+      : []),
+    ...(sameReviewerFamily(override.reviewers ?? settings.agents.reviewers)
+      ? [
+          `workflows.${name}.reviewers: warning: reviewers share a CLI model family`,
+        ]
+      : []),
+  ])
+}
+
+export function sameReviewerFamily(agents: readonly AgentChoice[]): boolean {
+  return new Set(agents.map((agent) => agent.cli)).size < agents.length
+}
+
+export function independentAgent(
+  original: AgentChoice,
+  builders: readonly AgentChoice[],
+  candidates: readonly AgentChoice[],
+): { agent: AgentChoice; replaced: boolean; independent: boolean } {
+  const independent = (agent: AgentChoice) =>
+    !builders.some(
+      (builder) => builder.cli === agent.cli && builder.model === agent.model,
+    )
+  if (independent(original))
+    return { agent: original, replaced: false, independent: true }
+  const replacement = candidates.find(independent)
+  return {
+    agent: replacement ?? original,
+    replaced: !!replacement,
+    independent: !!replacement,
+  }
 }
 
 /** `claude · claude-opus-5-5 · medium` */
