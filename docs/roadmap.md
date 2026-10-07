@@ -198,6 +198,12 @@ builder fixes a failure outside the ticket's scope in its own commit and flags
 it for the owner. Adapter and real PostgreSQL routing tests cover this; a live
 non-required GitHub failure remains unverified.
 
+The verification demo shows both cases without GitHub: seeding runs the real
+check inspection and maintain-pr result over fixture GitHub output, so "Bundle
+check failed on the pull request" is back at build with the `Bundle` link and log
+excerpt, and "Optional check still running" is ready with `Bundle` pending and
+not required. `drive.mjs ci-failed` and `ci-pending` assert them in the browser.
+
 ### Lessons (implemented)
 
 Ticket completion, cancellation and owner waits now propose one-line lessons

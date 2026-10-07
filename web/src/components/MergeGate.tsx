@@ -88,7 +88,7 @@ export function MergeGatePanel({ detail }: { detail: TicketResponse }) {
                 check.name
               )}
               : {check.state}
-              {check.required ? ' · required' : ''}
+              {check.required ? ' · required' : ' · not required'}
             </li>
           ))}
         </ul>

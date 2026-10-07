@@ -1,4 +1,7 @@
 import { evaluateMergeGate, type MergeFacts } from '../src/domain/merge-gate.ts'
+import { checksResult } from '../src/engine/pull-requests.ts'
+import type { run as runCommand } from '../src/executors/process.ts'
+import { inspectChecks } from '../src/github/checks.ts'
 import { saveMergeGate } from '../src/store/merge-gates.ts'
 import { getTicketDetail } from '../src/store/tickets.ts'
 import { setArtifactHome } from '../src/store/database.ts'
@@ -95,6 +98,8 @@ export interface DemoTickets {
   readonly lightsOutLead: number
   readonly lightsOutChild: number
   readonly lightsOutUntestedChild: number
+  readonly bundleFailed: number
+  readonly bundlePending: number
 }
 
 export async function seedDemo(
@@ -645,6 +650,142 @@ async function seedLocked(
   )
   await run(running)
 
+  // CI outcomes come from the real check inspection and maintain-pr result, fed fixture gh output.
+  const taskPr = library.get('task-pr')
+  if (!taskPr) throw new Error('The library has no task-pr workflow')
+  const ciTicket = async (
+    title: string,
+    body: string,
+    head: string,
+    pull: number,
+    bundle: object,
+    logs: Record<string, string>,
+  ) => {
+    const number = await create(title, body, taskPr)
+    await run(
+      number,
+      { outcome: 'done', summary: 'Built the change and committed it.' },
+      'claude-code',
+      head,
+    )
+    await run(
+      number,
+      { outcome: 'passed', summary: 'Tested the change at its head.' },
+      'codex',
+      head,
+    )
+    await run(
+      number,
+      { outcome: 'passed', summary: 'Reviewed the tested commit.' },
+      'codex',
+      head,
+    )
+    const maintain = await run(number, undefined, 'system')
+    const url = `https://github.com/${DEMO_REPOSITORY}/pull/${pull}`
+    await setPullRequestUrl(database, maintain.ticket.id, url)
+    await waitForPullRequestMerge(
+      database,
+      maintain.attempt.id,
+      'pull-request-checks',
+      head,
+    )
+    const checks = await inspectChecks(
+      fixtureGh(
+        head,
+        [
+          {
+            kind: 'CheckRun',
+            name: 'Demo repository checks',
+            isRequired: true,
+            status: 'COMPLETED',
+            conclusion: 'SUCCESS',
+            detailsUrl: `https://github.com/${DEMO_REPOSITORY}/actions/runs/${pull}0/job/${pull}1`,
+            databaseId: Number(`${pull}1`),
+          },
+          bundle,
+        ],
+        logs,
+      ),
+      DEMO_REPOSITORY,
+      url,
+      head,
+      AbortSignal.timeout(10_000),
+    )
+    await saveMergeGate(
+      database,
+      maintain.ticket.id,
+      evaluateMergeGate(
+        {
+          head,
+          localHead: head,
+          base: 'c'.repeat(40),
+          behind: 0,
+          tester: { status: 'finished', outcome: 'passed', commit: head },
+          hasTester: true,
+          hasReviewer: true,
+          reviewer: { status: 'finished', outcome: 'passed', commit: head },
+          reproducer: null,
+          hasReproducer: false,
+          ci: checks.state,
+          checks: checks.checks ?? [],
+          feedback: [],
+          buildWork: false,
+          state: 'OPEN',
+          draft: false,
+          mergeable: 'MERGEABLE',
+          paths: [],
+          migrationGlobs: [],
+          trustedKitError: null,
+          approvedUnverified: [],
+        },
+        new Date().toISOString(),
+      ),
+    )
+    const result = checksResult(checks, url)
+    if (!result) throw new Error(`Demo CI for #${number} is still awaited`)
+    await completeAttempt(database, maintain.attempt.id, result, {
+      headCommit: head,
+    })
+    return number
+  }
+  const bundlePending = await ciTicket(
+    'Optional check still running',
+    'Synthetic demo: the required check passed while the optional **Bundle** check is still running. maintain-pr does not wait for it. No real GitHub or agents ran.',
+    'e'.repeat(40),
+    45,
+    {
+      kind: 'CheckRun',
+      name: 'Bundle',
+      isRequired: false,
+      status: 'IN_PROGRESS',
+      conclusion: null,
+      detailsUrl: `https://github.com/${DEMO_REPOSITORY}/actions/runs/450/job/452`,
+      databaseId: 452,
+    },
+    {},
+  )
+  await openPullRequestAndWait(bundlePending, 45)
+  // Left queued at build: the scheduler is off, so the builder never picks it up.
+  const bundleFailed = await ciTicket(
+    'Bundle check failed on the pull request',
+    'Synthetic demo: the required check passed but the optional **Bundle** check failed, so maintain-pr sent the ticket back to the builder. No real GitHub or agents ran.',
+    'd'.repeat(40),
+    44,
+    {
+      kind: 'CheckRun',
+      name: 'Bundle',
+      isRequired: false,
+      status: 'COMPLETED',
+      conclusion: 'FAILURE',
+      detailsUrl: `https://github.com/${DEMO_REPOSITORY}/actions/runs/440/job/442`,
+      databaseId: 442,
+    },
+    {
+      '442':
+        'Bundle\tSize\tdist/assets/index.js is 312.4 kB, over the 250 kB budget (synthetic demo)\nBundle\tSize\tError: Process completed with exit code 1.',
+    },
+  )
+
   // Queued: nothing has picked it up yet.
   const queued = await create(
     'Update the README badges',
@@ -665,6 +806,45 @@ async function seedLocked(
     lightsOutChild,
     lightsOutUntestedChild,
     retiredWorkflow,
+    bundleFailed,
+    bundlePending,
+  }
+}
+
+/** Answers the gh calls check inspection makes with fixed pull request checks. */
+function fixtureGh(
+  head: string,
+  nodes: readonly object[],
+  logs: Readonly<Record<string, string>>,
+): typeof runCommand {
+  return async (command, args) => {
+    const call = `${command} ${args.join(' ')}`
+    if (command === 'gh' && args[0] === 'api' && args[1] === 'graphql')
+      return JSON.stringify({
+        data: {
+          repository: {
+            pullRequest: {
+              headRefOid: head,
+              baseRefName: 'main',
+              baseRef: { branchProtectionRule: null },
+            },
+            object: {
+              statusCheckRollup: {
+                contexts: {
+                  nodes,
+                  pageInfo: { hasNextPage: false, endCursor: '' },
+                },
+              },
+            },
+          },
+        },
+      })
+    if (command === 'gh' && args[0] === 'api' && args.includes('--slurp'))
+      return '[[]]'
+    const job = args[args.indexOf('--job') + 1] ?? ''
+    if (command === 'gh' && args[0] === 'run' && logs[job] !== undefined)
+      return logs[job]
+    throw new Error(`Unexpected demo GitHub call: ${call}`)
   }
 }
 

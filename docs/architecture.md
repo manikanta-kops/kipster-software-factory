@@ -542,6 +542,16 @@ verdicts without running an engine. `npm run dev` keeps the factory alive during
 source edits; explicit restart loads changes. `npm run dev -- --watch` opts into
 restarts. Web hot reload remains enabled in either mode.
 
+The demo also seeds two `task-pr` tickets whose CI outcome comes from product
+code rather than written facts: `inspectChecks` runs against fixture `gh` output
+supplied through its injected command runner, and maintain-pr's `checksResult`
+gives the outcome that `completeAttempt` routes. "Bundle check failed on the pull
+request" has a failed non-required `Bundle` check and sits back at build with the
+check's link and log excerpt; "Optional check still running" has `Bundle`
+pending and reported ready. Their merge gates come from `evaluateMergeGate` over
+the inspected checks. The served instance never calls GitHub, and the merge
+readiness card labels each check required or not required.
+
 ## Independent proof (Slice 2B)
 
 Tester and reproducer steps use `engine/proof.ts`, separate from ordinary agent
