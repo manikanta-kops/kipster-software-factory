@@ -38,6 +38,18 @@ import {
 } from '../src/engine/pull-requests.ts'
 import { startScheduler } from '../src/engine/scheduler.ts'
 import { listenForEvents } from '../src/store/events.ts'
+import { FACTORY_MARKER } from '../src/github/feedback.ts'
+import {
+  factoryDescription,
+  fitGitHubLimit,
+  openFindingsNotice,
+  withUntestedNotice,
+  writePullRequest,
+} from '../src/engine/pr-writer.ts'
+import {
+  getPullRequestDescription,
+  savePullRequestDescription,
+} from '../src/store/pull-requests.ts'
 
 const signal = new AbortController().signal
 function entry(workflow: Workflow) {
@@ -276,6 +288,42 @@ async function fixture(
       await run('git', ['push', bare, 'main'], { cwd: source })
       return baseHead
     },
+  }
+}
+
+function writerRuns(
+  f: Awaited<ReturnType<typeof fixture>>,
+  runs: {
+    notes?: string[]
+    outcome?: string
+    missing?: boolean
+    crash?: boolean
+    invalid?: boolean
+  }[],
+) {
+  const execute = f.options.execute
+  let index = 0
+  f.options.execute = async (invocation) => {
+    await execute(invocation)
+    const scripted = runs[index++]!
+    if (scripted.crash) throw new Error('Writer session crashed')
+    const path = join(invocation.directory, 'result.json')
+    if (scripted.missing) await rm(path)
+    else
+      await writeFile(
+        path,
+        scripted.invalid
+          ? '{invalid'
+          : JSON.stringify({
+              outcome: scripted.outcome ?? 'done',
+              summary: 'Writer run completed',
+              artifacts: (scripted.notes ?? []).map((content) => ({
+                kind: 'note',
+                title: 'PR description',
+                content,
+              })),
+            }),
+      )
   }
 }
 
@@ -697,38 +745,42 @@ test('changed head while waiting cannot use the original commit’s green checks
   )
 })
 
-test('writer invalid output retries in a fresh session before publication', async (t) => {
+test('writer invalid result retries in a fresh session before publication', async (t) => {
   const f = await fixture(t)
-  await writeFile(
-    join(f.root, 'script.json'),
-    JSON.stringify({ writer: [{ invalid: true }, {}] }),
-  )
-  await f.publish()
+  writerRuns(f, [{ invalid: true }, { notes: ['Second run note'] }])
+  const context = await f.publish()
   assert.equal(f.writers(), 2)
-  assert.equal(f.bodies.length, 1)
+  assert.deepEqual(f.bodies, [`Second run note\n\n${FACTORY_MARKER}`])
+  const directory = join(
+    f.options.home,
+    'steps',
+    String(f.ticket.id),
+    String(context.attempt.id),
+  )
+  assert.match(
+    await readFile(join(directory, 'writer-1', 'result-error.txt'), 'utf8'),
+    /SyntaxError/,
+  )
+  assert.doesNotMatch(
+    await readFile(join(directory, 'writer-2', 'prompt.md'), 'utf8'),
+    /previous description/,
+  )
   assert.equal(
     (await f.detail()).artifacts.filter((a) => a.kind === 'log').length,
     2,
   )
 })
 
-test('maintenance replaces a cached description containing local evidence links', async (t) => {
-  const { getPullRequestDescription, savePullRequestDescription } =
-    await import('../src/store/pull-requests.ts')
+test('maintenance reuses a cached description without wording checks', async (t) => {
   const f = await fixture(t)
-  await savePullRequestDescription(
-    f.store.database,
-    f.ticket.id,
-    f.head,
-    `Verified at ${f.head}\nEvidence on ticket #${f.ticket.number} in the factory\nMerge danger: two-way door\n[Evidence](http://localhost:4600/api/artifacts/1)`,
-  )
+  const note = '  [Evidence](http://localhost:4600/api/artifacts/1)  '
+  await savePullRequestDescription(f.store.database, f.ticket.id, f.head, note)
   await f.publish()
-  assert.equal(f.writers(), 1)
-  assert.equal(f.bodies.length, 1)
-  assert.doesNotMatch(f.bodies[0]!, /localhost|127\.0\.0\.1/)
+  assert.equal(f.writers(), 0)
+  assert.deepEqual(f.bodies, [`${note}\n\n${FACTORY_MARKER}`])
   assert.equal(
     await getPullRequestDescription(f.store.database, f.ticket.id, f.head),
-    f.bodies[0]!.split('\n\n<!--')[0],
+    note,
   )
 })
 
@@ -902,47 +954,439 @@ for (const path of [
   })
 }
 
-for (const suffix of [
-  '[proof](http://factory.lan:4600/#/tickets/1)',
-  '[proof](/api/artifacts/1)',
+test('writer publishes paraphrased scenarios and unrestricted wording unchanged', async (t) => {
+  const { addAttemptArtifacts } = await import('../src/store/tickets.ts')
+  const f = await fixture(t, true)
+  const scenarios = [
+    'Empty checkout succeeds',
+    'Repeated checkout is idempotent',
+  ]
+  const tester = (await f.detail()).attempts[0]!
+  await addAttemptArtifacts(
+    f.store.database,
+    tester.id,
+    scenarios.map((scenario) => ({
+      kind: 'evidence' as const,
+      title: scenario,
+      scenario,
+      scenarioResult: 'passed' as const,
+      content: 'Observed successful checkout at the tested head',
+    })),
+  )
+  const note = `  Submitting a blank basket completes successfully, and submitting it again leaves a single order.
+${'Details of the change. '.repeat(220)}
+[proof](http://factory.lan:4600/#/tickets/1)
+[proof](/api/artifacts/1)
+/Users/someone/.kipster-factory/steps
+  `
+  assert.ok(note.length > 4000)
+  writerRuns(f, [{ notes: [note] }])
+  const context = await f.publish()
+  const prompt = await readFile(
+    join(
+      f.options.home,
+      'steps',
+      String(f.ticket.id),
+      String(context.attempt.id),
+      'writer-1',
+      'prompt.md',
+    ),
+    'utf8',
+  )
+  for (const scenario of scenarios) {
+    assert.ok(prompt.includes(scenario))
+    assert.ok(!note.includes(scenario))
+  }
+  assert.deepEqual(f.bodies, [`${note}\n\n${FACTORY_MARKER}`])
+  assert.equal(f.writers(), 1)
+  assert.equal(
+    (await f.detail()).artifacts.find((a) => a.kind === 'note')!.content,
+    note,
+  )
+})
+
+test('oversized writer note fits GitHub while the full text stays on the ticket', async (t) => {
+  const f = await fixture(t)
+  const note = '🌻'.repeat(40_000)
+  writerRuns(f, [{ notes: [note] }])
+  await f.publish()
+  const body = f.bodies[0]!
+  assert.ok(body.length <= 65_536)
+  assert.equal(
+    body,
+    `${fitGitHubLimit(note, f.ticket.number)}\n\n${FACTORY_MARKER}`,
+  )
+  assert.ok(
+    body.endsWith(
+      `Full description on ticket #${f.ticket.number} in the factory\n\n${FACTORY_MARKER}`,
+    ),
+  )
+  assert.equal(
+    (await f.detail()).artifacts.find((a) => a.kind === 'note')!.content,
+    note,
+  )
+  assert.equal(
+    await getPullRequestDescription(f.store.database, f.ticket.id, f.head),
+    fitGitHubLimit(note, f.ticket.number),
+  )
+  assert.equal(f.writers(), 1)
+})
+
+for (const first of [
+  { notes: [] },
+  { notes: ['  \n\t'] },
+  { outcome: 'needs-decision', notes: ['A note with a non-done outcome'] },
 ]) {
-  test(`writer rejects local evidence links: ${suffix}`, async (t) => {
+  test(`writer retries no usable note: ${JSON.stringify(first)}`, async (t) => {
     const f = await fixture(t)
-    const execute = f.options.execute
-    f.options.execute = async (invocation) => {
-      await execute(invocation)
-      const path = join(invocation.directory, 'result.json')
-      const result = JSON.parse(await readFile(path, 'utf8'))
-      result.artifacts[0].content += `\n${suffix}`
-      await writeFile(path, JSON.stringify(result))
-    }
-    await assert.rejects(f.publish(), /description requires/)
+    const note = 'Second writer note'
+    writerRuns(f, [first, { notes: [note] }])
+    const context = await f.publish()
     assert.equal(f.writers(), 2)
-    assert.equal(f.bodies.length, 0)
+    assert.deepEqual(f.bodies, [`${note}\n\n${FACTORY_MARKER}`])
+    assert.ok(
+      await readFile(
+        join(
+          f.options.home,
+          'steps',
+          String(f.ticket.id),
+          String(context.attempt.id),
+          'writer-1',
+          'result-error.txt',
+        ),
+        'utf8',
+      ),
+    )
   })
 }
 
-test('writer contract rejects local links but allows ordinary routes and public URLs', async () => {
-  const { validDescription } = await import('../src/engine/pr-writer.ts')
-  const head = 'a'.repeat(40)
-  const body = (extra: string) =>
-    `Verified at ${head}\nEvidence on ticket #3 in the factory\nMerge danger: two-way door, small blast radius.\n${extra}`
-  for (const allowed of [
-    'Adds GET /api/users/:id',
-    'Serves GET /api/artifacts/:id',
-    'An admin opens /users/42',
-    '[source](https://github.com/o/r/blob/x/src/pages/home/index.tsx)',
-    '[docs](https://docs.typesafe.ai/api)',
+test('writer uses the first non-empty note when multiple notes exist', async (t) => {
+  const f = await fixture(t)
+  writerRuns(f, [
+    { notes: [' \n ', '  First usable note  ', 'Second usable note'] },
   ])
-    assert.ok(validDescription(body(allowed), head, 3, []), allowed)
-  for (const rejected of [
-    '[proof](http://factory.lan:4600/#/tickets/1)',
-    '[proof](/api/artifacts/1)',
-    '[shot](./shot.png)',
-    'Logs in /Users/someone/.kipster-factory/steps',
-    'Saved under `~/.kipster-factory`',
-    'http://localhost:4600',
-    'https://studio.example.ts.net/',
-  ])
-    assert.ok(!validDescription(body(rejected), head, 3, []), rejected)
+  await f.publish()
+  assert.equal(f.writers(), 1)
+  assert.deepEqual(f.bodies, [`  First usable note  \n\n${FACTORY_MARKER}`])
 })
+
+for (const reviewed of [false, true]) {
+  test(`two unusable writer runs publish and cache a factory description, reviewed: ${reviewed}`, async (t) => {
+    const f = await fixture(t, reviewed, 60, reviewed)
+    writerRuns(f, [{ missing: true }, { crash: true }])
+    const context = await f.publish()
+    assert.equal(f.writers(), 2)
+    assert.equal(f.bodies.length, 1)
+    const body = f.bodies[0]!
+    assert.match(body, /Keep ready/)
+    assert.match(body, /Commits:\n- [a-f0-9]+ ticket change/)
+    assert.ok(body.includes(`Verified at ${f.head}`))
+    assert.ok(
+      body.includes(`Evidence on ticket #${f.ticket.number} in the factory`),
+    )
+    assert.match(body, /writer did not produce a description/)
+    if (reviewed) {
+      assert.match(body, /Tester verdict: passed — Exact commit verified/)
+      assert.match(body, /Reviewer verdict: passed — Exact commit reviewed/)
+    } else {
+      assert.match(body, /no tester ran/)
+      assert.match(body, /no reviewer ran/)
+    }
+    assert.doesNotMatch(body, /https?:|\/Users\/|\/tmp\//)
+    const detail = await f.detail()
+    assert.equal(
+      detail.ticket.pullRequestUrl,
+      'https://github.com/fixture/repo/pull/1',
+    )
+    const factoryNote = detail.artifacts.find(
+      (a) => a.title === 'factory PR description',
+    )!
+    assert.equal(body, `${factoryNote.content}\n\n${FACTORY_MARKER}`)
+    assert.equal(
+      await getPullRequestDescription(f.store.database, f.ticket.id, f.head),
+      factoryNote.content,
+    )
+    const directory = join(
+      f.options.home,
+      'steps',
+      String(f.ticket.id),
+      String(context.attempt.id),
+    )
+    assert.match(
+      await readFile(join(directory, 'writer-1', 'result-error.txt'), 'utf8'),
+      /ENOENT/,
+    )
+    assert.match(
+      await readFile(join(directory, 'writer-2', 'result-error.txt'), 'utf8'),
+      /Writer session crashed/,
+    )
+  })
+}
+
+test('cached oversized description also fits GitHub without invoking a writer', async (t) => {
+  const f = await fixture(t)
+  const note = 'x'.repeat(70_000)
+  await savePullRequestDescription(f.store.database, f.ticket.id, f.head, note)
+  await f.publish()
+  assert.equal(f.writers(), 0)
+  assert.deepEqual(f.bodies, [
+    `${fitGitHubLimit(note, f.ticket.number)}\n\n${FACTORY_MARKER}`,
+  ])
+  assert.ok(f.bodies[0]!.length <= 65_536)
+})
+
+test('writer abort propagates without retry or fallback', async (t) => {
+  const f = await fixture(t)
+  const controller = new AbortController()
+  const execute = f.options.execute
+  f.options.execute = async (invocation) => {
+    await execute(invocation)
+    controller.abort(new Error('Writer cancelled'))
+    throw controller.signal.reason
+  }
+  const context = await f.next()
+  await assert.rejects(
+    runAttempt(f.options, context, controller.signal),
+    /Writer cancelled/,
+  )
+  assert.equal(f.writers(), 1)
+  assert.equal(f.bodies.length, 0)
+  assert.equal(
+    await getPullRequestDescription(f.store.database, f.ticket.id, f.head),
+    null,
+  )
+})
+
+test('writer crash after a worktree edit still stops publication', async (t) => {
+  const f = await fixture(t)
+  const execute = f.options.execute
+  f.options.execute = async (invocation) => {
+    await execute(invocation)
+    await writeFile(
+      join(f.cwd, 'unexpected.txt'),
+      'Writer changed the worktree',
+    )
+    throw new Error('Writer crashed')
+  }
+  await assert.rejects(f.publish(), /writer changed the worktree/)
+  assert.equal(f.writers(), 1)
+  assert.equal(f.bodies.length, 0)
+})
+
+test('GitHub limit preserves short text and UTF-16 pairs at the boundary', () => {
+  const suffix = `\n\n${FACTORY_MARKER}`
+  const ending = 'Full description on ticket #3 in the factory'
+  for (const note of ['  Short text  ', 'x'.repeat(65_536 - suffix.length)])
+    assert.equal(fitGitHubLimit(note, 3), note)
+  const end = 65_536 - suffix.length - `\n\n${ending}`.length
+  const note = 'x'.repeat(end - 1) + '🌻' + 'y'.repeat(200)
+  const fitted = fitGitHubLimit(note, 3)
+  assert.equal(fitted, 'x'.repeat(end - 1) + `\n\n${ending}`)
+  assert.ok(fitted.length + suffix.length <= 65_536)
+  assert.equal(fitGitHubLimit('x'.repeat(70_000), 3, 100).length, 65_436)
+})
+
+test('factory description lists exposed lead tasks and omits URLs and paths from facts', async (t) => {
+  const f = await fixture(t, true, 60, true)
+  const detail = await f.detail()
+  const body = factoryDescription(
+    {
+      ...detail,
+      ticket: {
+        ...detail.ticket,
+        title: 'Fix /Users/someone/project https://factory.lan/ticket',
+      },
+      tasks: [
+        {
+          id: 1,
+          ticketId: f.ticket.id,
+          attemptId: detail.attempts[0]!.id,
+          key: 'first',
+          title: 'First task',
+          instructions: '',
+          land: 'branch',
+          workflow: 'task',
+          agent: null,
+          status: 'merged',
+          decision: null,
+          result: null,
+          baseCommit: f.head,
+          child: null,
+          createdAt: '',
+          updatedAt: '',
+        },
+      ],
+      attempts: [
+        ...detail.attempts,
+        {
+          ...detail.attempts[0]!,
+          id: 99,
+          outcome: 'failed',
+          summary: 'New verdict http://localhost:4600/proof /tmp/evidence',
+        },
+        {
+          ...detail.attempts[0]!,
+          id: 100,
+          status: 'running',
+          outcome: null,
+          summary: null,
+        },
+      ],
+    },
+    f.head,
+    ['unused commit'],
+  )
+  assert.match(body, /Tasks:\n- First task \(merged\)/)
+  assert.doesNotMatch(body, /Commits:|unused commit|https?:|\/Users\/|\/tmp\//)
+  assert.match(body, /Tester verdict: failed — New verdict/)
+  assert.match(body, /Reviewer verdict: passed — Exact commit reviewed/)
+  const commits = factoryDescription(detail, f.head, ['abc first change'], 7)
+  assert.match(commits, /Commits:\n- abc first change\nand 7 more/)
+})
+
+test('open review findings stay short even with long finding text', () => {
+  const notice = openFindingsNotice(
+    Array.from({ length: 30 }, (_, index) => ({
+      title: `Finding ${index} ${'x'.repeat(190)}`,
+      file: 'src/app.ts',
+    })),
+  )
+  assert.match(notice, /Open review findings/)
+  assert.match(notice, /further findings/)
+  assert.ok(notice.length < 4000)
+})
+
+for (const source of ['writer', 'cached', 'fallback'] as const) {
+  for (const oversized of [false, true]) {
+    test(`${source} description gets factory notices before trimming, oversized: ${oversized}`, async (t) => {
+      const { addAttemptArtifacts } = await import('../src/store/tickets.ts')
+      const f = await fixture(t, true, 60, true)
+      const detail = await f.detail()
+      const tester = detail.attempts.find(
+        (attempt) => attempt.stepId === 'test',
+      )!
+      const reviewer = detail.attempts.find(
+        (attempt) => attempt.stepId === 'review',
+      )!
+      const scenario = 'Empty checkout succeeds'
+      await addAttemptArtifacts(f.store.database, tester.id, [
+        {
+          kind: 'evidence',
+          title: scenario,
+          scenario,
+          scenarioResult: 'passed',
+          content: 'Observed a successful checkout at the tested head',
+        },
+      ])
+      const finding = {
+        title: 'Check basket behavior',
+        file: 'src/basket.ts',
+        content: 'A correction remains open.',
+      }
+      await addAttemptArtifacts(f.store.database, reviewer.id, [
+        { kind: 'finding', ...finding },
+      ])
+      // Exercise the writer with facts from an unresolved review and a skipped proof step.
+      await f.store.database.query(
+        "UPDATE attempts SET outcome = 'changes-needed' WHERE id = $1",
+        [reviewer.id],
+      )
+      await f.store.database.query(
+        'UPDATE tickets SET skipped_steps = $1 WHERE id = $2',
+        [
+          JSON.stringify([
+            { stepId: 'unavailable-proof', missingCapabilities: ['verify'] },
+          ]),
+          f.ticket.id,
+        ],
+      )
+      const reason =
+        'Untested: no verify capability (skipped unavailable-proof)'
+      const note = `  Submitting a blank basket completes successfully. ${oversized ? '🌻'.repeat(40_000) : ''}  `
+      if (source === 'cached')
+        await savePullRequestDescription(
+          f.store.database,
+          f.ticket.id,
+          f.head,
+          note,
+        )
+      else if (source === 'writer') writerRuns(f, [{ notes: [note] }])
+      else {
+        writerRuns(f, [{ missing: true }, { crash: true }])
+        if (oversized)
+          await f.store.database.query(
+            'UPDATE tickets SET title = $1 WHERE id = $2',
+            ['x'.repeat(70_000), f.ticket.id],
+          )
+      }
+      const context = await f.next()
+      const body = await writePullRequest(
+        f.options,
+        context,
+        f.cwd,
+        f.head,
+        signal,
+      )
+      const saved = await getPullRequestDescription(
+        f.store.database,
+        f.ticket.id,
+        f.head,
+      )
+      const artifact = (await f.detail()).artifacts.find(
+        (a) =>
+          a.title ===
+          (source === 'fallback' ? 'factory PR description' : 'PR description'),
+      )
+      const full =
+        source === 'fallback'
+          ? artifact!.content!
+          : withUntestedNotice(note, [reason]) + openFindingsNotice([finding])
+      assert.ok(full.includes(reason))
+      assert.match(full, /## Open review findings/)
+      assert.match(full, /Check basket behavior \(src\/basket.ts\)/)
+      assert.equal(body, fitGitHubLimit(full, f.ticket.number))
+      assert.ok(body.length + `\n\n${FACTORY_MARKER}`.length <= 65_536)
+      assert.equal(
+        f.writers(),
+        source === 'cached' ? 0 : source === 'writer' ? 1 : 2,
+      )
+      if (source === 'cached') {
+        assert.equal(saved, full)
+        assert.equal(
+          await writePullRequest(f.options, context, f.cwd, f.head, signal),
+          body,
+        )
+        assert.equal(
+          await getPullRequestDescription(
+            f.store.database,
+            f.ticket.id,
+            f.head,
+          ),
+          full,
+        )
+      } else {
+        assert.equal(artifact!.content, full)
+        assert.equal(saved, body)
+        const prompt = await readFile(
+          join(
+            f.options.home,
+            'steps',
+            String(f.ticket.id),
+            String(context.attempt.id),
+            'writer-1',
+            'prompt.md',
+          ),
+          'utf8',
+        )
+        assert.ok(prompt.includes(scenario))
+        assert.ok(!note.includes(scenario))
+        assert.ok(prompt.includes(reason))
+        assert.match(
+          prompt,
+          /Maximum description length before the factory adds open findings:/,
+        )
+        assert.match(prompt, /Open review findings:/)
+      }
+    })
+  }
+}

@@ -54,9 +54,9 @@ test('upload a workflow file, fix its errors and start a ticket with it', async 
     page.getByRole('link', { name: /^review-only uploaded/ }),
   ).toBeVisible()
 
-  await picker.setInputFiles(file('feature.yml', reviewOnly('feature')))
+  await picker.setInputFiles(file('lead.yml', reviewOnly('lead')))
   await expect(page.getByRole('alert')).toContainText(
-    '"feature" is a workflow file in the factory',
+    '"lead" is a workflow file in the factory',
   )
 
   await page.getByRole('link', { name: 'New ticket' }).click()

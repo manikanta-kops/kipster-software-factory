@@ -1,3 +1,5 @@
+import type { TicketSummary } from '../domain/summary.ts'
+export type { TicketSummary } from '../domain/summary.ts'
 import type { GateSnapshot } from '../domain/merge-gate.ts'
 import type { ScenarioEvidence } from '../domain/evidence.ts'
 import type { DecisionRecord, DecisionStepCounts } from '../domain/decisions.ts'
@@ -67,6 +69,8 @@ export interface StepSummary {
 }
 
 export interface WorkflowSummary {
+  /** Whether people can select this workflow on New ticket. */
+  readonly selectable?: boolean
   readonly name: string
   readonly version: string
   readonly description: string
@@ -128,6 +132,8 @@ export interface ListedTicket extends Ticket {
 
 // POST /api/tickets (201, TicketResponse)
 export interface CreateTicketRequest {
+  /** Defaults on for lead and program-lead, off for other workflows. */
+  readonly lightsOut?: boolean | undefined
   /** The repository's `owner/name`. */
   readonly repository: string
   /** Other registered repositories available as read-only context. */
@@ -154,6 +160,7 @@ export interface TicketWorkflowSummary {
 
 // GET /api/tickets/:number, and the answer to every ticket action
 export interface TicketResponse {
+  readonly summary: TicketSummary | null
   readonly dependencies?: readonly Repository[]
   readonly links?: readonly TicketLink[]
   /** A lead ticket's tasks, oldest first. */
@@ -246,3 +253,16 @@ export interface SettingsResponse {
 
 // POST /api/settings takes the whole document; a 400 names each invalid field in `issues`.
 export type SettingsRequest = Settings
+
+export type { SkippedStep } from '../domain/task-testing.ts'
+
+export type { Lesson, LessonStatus } from '../domain/lessons.ts'
+export interface LessonsResponse {
+  readonly lessons: readonly import('../domain/lessons.ts').Lesson[]
+}
+export interface LessonResponse {
+  readonly lesson: import('../domain/lessons.ts').Lesson
+}
+export interface RetireLessonRequest {
+  readonly reason: string
+}

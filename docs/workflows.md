@@ -1,5 +1,11 @@
 # Workflow format
 
+New ticket offers the built-in `bug`, `lead` and `onboard-repo`, plus uploaded
+workflows. `lead` covers features and small changes, with at most 20 tasks and
+50 task reports. `task` and `task-pr` remain available for lead child tickets
+but are hidden from New ticket. Stored tickets keep their workflow definition
+and history even after its file is removed.
+
 Workflows are YAML files named `<name>.yml`. Validate a directory with
 `npm run kf -- check <dir>`.
 
@@ -9,7 +15,7 @@ file's name; uploading an existing uploaded name creates a new version. To have
 a model write one, give it `skills/kipster-workflows/SKILL.md`.
 
 ```yaml
-name: feature # lowercase, digits and hyphens; matches the file name
+name: sample # lowercase, digits and hyphens; matches the file name
 description: One line saying what the workflow is for.
 steps:
   - id: test # unique; not finish, cancel or ask
@@ -73,13 +79,13 @@ builder's `result.json` adds `otherRepository`:
     "repository": "owner/library",
     "title": "Expose the library API",
     "body": "Describe the needed change and why the original ticket needs it.",
-    "workflow": "feature"
+    "workflow": "lead"
   }
 }
 ```
 
 Repository, title and body are required and nonempty. `workflow` is optional,
-with default `feature`; it must be a loaded workflow. Only builders can report
+with default `lead`; it must be a loaded workflow. Only builders can report
 this request, and other outcomes must omit `otherRepository`. The target must be
 another registered, ready repository with the workflow's capabilities. Invalid
 results get the normal one fresh retry, then ask the owner; unregistered or
@@ -97,6 +103,14 @@ attempt survives restart and consumes no executor slot. Cancelling the original
 does not cancel linked tickets.
 
 ## Lead tasks
+
+Only child tickets running `task` or `task-pr` may skip a tester whose declared
+capabilities are missing. The catalog defines this exception; no step field
+enables it. The ticket durably records the skip as **untested**, and routes
+continue at the next step in file order. Routes targeting the skipped tester
+also continue there. Top-level tickets, other workflows and reproducers still
+require every declared capability. Untested task PRs and lead PRs containing
+merged untested tasks require owner merging.
 
 A `lead` step's `delegate` must route to a `run-tasks` step, which runs the
 tasks as child tickets and reports `reported` each time one finishes, fails,
@@ -156,3 +170,54 @@ running or waiting for a decision.
 earlier step. When the step has run `n` times and would send it back again, the
 `limit` route applies instead (default: `ask`). Forward routes are never
 limited.
+
+### Ticket lights-out setting
+
+`lightsOut` belongs to a ticket, not a workflow step. New tickets default it on
+for `lead` and `program-lead` and off for other workflow names; existing tickets
+stay off. Child tasks inherit it. On an enabled ticket, a lead's `plan-ready`
+routed to the human step `approve-plan` is recorded as system-approved and
+routes through its `approved` outcome. Keep the normal approval routes for
+other tickets. Every agent is instructed to choose defaults and emit decision
+artifacts with `kind: decision`, `title`, `chose`, `alternative` and `reason`
+(no content/path). A child `needs-decision` parks that task and reports to the
+lead while siblings continue. Parked tasks remain unfinished until resolved.
+Role prompts keep their original wording when disabled. When enabled, product
+questions choose and record defaults; necessary forbidden-path changes require
+a separate explained commit and a passing review with `ownerReview` naming the
+path and reason. Reproducers record alternative attempts before `not-reproduced`,
+which still cannot start a fix. Only irreversible actions ask; other human steps,
+limits and merge policy remain in effect.
+
+## Reviewer lists, independence and rounds
+
+Settings accepts global `agents.reviewers` (default `[]`) and optional
+`workflows.<name>.reviewers` lists of agent choices. Lists have no length limit;
+a workflow list overrides the global list, and an empty list uses the reviewer
+role setting. They are settings, not workflow fields. Lead workflows run the
+selected list in parallel, each with its own log and result directory. Other
+workflows retain a single reviewer. Use different CLI families (`claude` and
+`codex`); same-family entries produce a warning.
+
+Tester and reviewer choices must differ in CLI or model from every recorded
+builder of the change, including child builders for a lead. Effort does not
+make an agent independent. Candidates are tried in this order: workflow
+reviewer list (reviewers only), workflow role override, role setting, global
+reviewers, allowed list, default. The engine records replacements. Without a
+candidate it runs anyway, records the lack of independence, and requires the
+owner to merge that head.
+
+Review rounds use the existing step `limit`, defaulting to 5 when omitted.
+Reviewers may therefore have a `limit` route without an explicit numeric limit;
+other steps still require one. Finished runs include the current round, so
+`limit: 5` permits exactly five failing rounds before taking the limit route.
+The built-in lead routes `changes-needed` to `lead` and `limit` to `maintain-pr`:
+open findings are published in the PR description and prevent auto-merge.
+Every reviewer must pass at the current commit for the combined verdict to pass.
+Passing reviewers' `ownerReview` reasons remain visible.
+
+Lead review rounds after the first check earlier findings and problems added by
+fixes. Findings may include optional `file`, a repository-relative path. A new
+finding on a file unchanged since round one's commit becomes a note; earlier
+findings, changed files and missing-file findings remain serious. Notes do not
+route back to the lead.

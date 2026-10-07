@@ -1,3 +1,4 @@
+import { untestedReasons } from '../domain/task-testing.ts'
 import { actions } from '../domain/catalog.ts'
 import { settledCI } from '../domain/auto-merge.ts'
 import { evaluateMergeGate, type VerdictFact } from '../domain/merge-gate.ts'
@@ -76,6 +77,14 @@ export async function refreshMergeGate(
           status: attempt.status,
           outcome: attempt.outcome,
           commit: attempt.headCommit,
+          independent: !detail.artifacts.some(
+            (artifact) =>
+              artifact.attemptId === attempt.id &&
+              [
+                'Review was not independent',
+                'Testing was not independent',
+              ].includes(artifact.title),
+          ),
           ...(attempt.ownerReview ? { ownerReview: attempt.ownerReview } : {}),
         }
       : null
@@ -113,6 +122,7 @@ export async function refreshMergeGate(
         ).state
       : checks.state
   const facts = {
+    untestedReasons: untestedReasons(detail),
     observationError: pr.headRefOid ? null : 'GitHub PR head is unavailable',
     baseBranchMatches: pr.baseRefName === branch,
     head,

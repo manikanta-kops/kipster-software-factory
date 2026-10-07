@@ -95,7 +95,7 @@ test('evidence belongs to its test run, media uses the configured API, and logs 
   }, factory.url)
   await page.goto(`/#/tickets/${factory.tickets.proofPassed}`)
   const run = page.locator('.attempt-entry').filter({
-    has: page.getByRole('heading', { name: 'test tester', exact: true }),
+    has: page.getByRole('heading', { name: 'final-test tester', exact: true }),
   })
   await expect(run.locator('.attempt-meta')).toContainText('Commit aaaaaaa')
   const thumbnail = page
@@ -137,6 +137,12 @@ test('evidence belongs to its test run, media uses the configured API, and logs 
   }
   await viewer.getByRole('button', { name: 'Close image' }).click()
   await expect(thumbnail).toBeFocused()
+  await thumbnail.click()
+  await expect(viewer).toBeVisible()
+  await viewer.locator('img').click()
+  await expect(viewer).toBeVisible()
+  await page.mouse.click(8, 8)
+  await expect(viewer).toHaveCount(0)
   const video = run.locator('video')
   await expect(video).toHaveAttribute('controls', '')
   await expect(video).not.toHaveAttribute('autoplay')
@@ -189,7 +195,9 @@ test('passed and stale verdicts link their tested commit; review outcomes are no
     page.locator('.attempt-meta').filter({ hasText: 'Commit bbbbbbb' }),
   ).toHaveCount(1)
   await page.goto(`${factory.url}/#/tickets/${factory.tickets.askAfterLimit}`)
-  await expect(verdict).toHaveCount(0)
+  await expect(verdict.getByRole('heading')).toHaveText(
+    'Verification commit unknown',
+  )
 })
 
 test.describe('failed tester verdict', () => {
@@ -265,7 +273,7 @@ test('invalid kits explain disabled workflows and create an onboarding ticket in
   await page
     .getByLabel('Repository', { exact: true })
     .selectOption('kipster/invalid-kit')
-  for (const name of ['feature', 'bug']) {
+  for (const name of ['lead', 'bug']) {
     const choice = page.getByRole('radio', { name: new RegExp(`^${name} `) })
     await expect(choice).toBeDisabled()
     await expect(choice).toHaveAccessibleName(/needs a verified kit/)
@@ -303,5 +311,5 @@ test('onboarding shortcut follows repository readiness and kit capabilities', as
     await repository.selectOption(slug)
     await expect(shortcut).toHaveCount(0)
   }
-  await expect(page.getByRole('radio', { name: /^feature / })).toBeEnabled()
+  await expect(page.getByRole('radio', { name: /^lead / })).toBeEnabled()
 })

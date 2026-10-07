@@ -24,7 +24,7 @@ import {
   markRunning,
 } from '../src/store/tickets.ts'
 import {
-  builtInLibrary,
+  testLibrary,
   createTestStore,
   type TestStore,
 } from './helpers/store.ts'
@@ -43,7 +43,7 @@ before(async () => {
   home = await mkdtemp(join(tmpdir(), 'ksf-home-'))
   app = createApp({
     database,
-    library: await builtInLibrary(),
+    library: await testLibrary(),
     events,
     home,
     allowedOrigins: ['http://localhost:5173', 'tauri://localhost'],
@@ -87,7 +87,7 @@ async function newTicket(repository = 'acme/shop', title = 'Add dark mode') {
   return json<TicketResponse>(
     await post('/api/tickets', {
       repository,
-      workflow: 'quick-change',
+      workflow: 'planned-change',
       title,
       body: 'Make it **dark**.',
     }),
@@ -129,17 +129,19 @@ describe('api basics', () => {
       await app.request('/api/workflows'),
       200,
     )
-    const feature = workflows.find((workflow) => workflow.name === 'feature')
-    assert.ok(feature)
-    assert.match(feature.version, /^[0-9a-f]{12}$/)
-    const testStep = feature.steps.find((step) => step.id === 'test')
+    const tested = workflows.find(
+      (workflow) => workflow.name === 'tested-change',
+    )
+    assert.ok(tested)
+    assert.match(tested.version, /^[0-9a-f]{12}$/)
+    const testStep = tested.steps.find((step) => step.id === 'test')
     assert.deepEqual(testStep?.routes.slice(0, 2), [
       { outcome: 'passed', next: { to: 'step', stepId: 'review' } },
       { outcome: 'changes-needed', next: { to: 'step', stepId: 'build' } },
     ])
     assert.equal(testStep?.does, 'tester')
     assert.deepEqual(testStep?.needs, ['verify'])
-    assert.ok(workflows.some((workflow) => workflow.name === 'quick-change'))
+    assert.ok(workflows.some((workflow) => workflow.name === 'planned-change'))
   })
 
   test('answers unknown API paths with JSON 404', async () => {
@@ -235,13 +237,32 @@ describe('repositories', () => {
 })
 
 describe('tickets', () => {
+  test('API creation still accepts the lead-only task workflows', async () => {
+    const repository = await readyRepository('acme/lead-tasks')
+    await markRepositoryReady(database, repository.id, {
+      capabilities: ['verify'],
+    })
+    for (const name of ['task', 'task-pr']) {
+      const created = await json<TicketResponse>(
+        await post('/api/tickets', {
+          repository: repository.slug,
+          workflow: name,
+          title: `Create ${name}`,
+        }),
+        201,
+      )
+      assert.equal(created.workflow.name, name)
+      assert.equal(created.ticket.currentStep, 'build')
+    }
+  })
+
   before(() => readyRepository('acme/shop'))
 
   test('are created on the first step with the workflow and its run counts', async () => {
     const created = await newTicket()
     assert.equal(created.ticket.status, 'queued')
     assert.equal(created.ticket.body, 'Make it **dark**.')
-    assert.equal(created.workflow.name, 'quick-change')
+    assert.equal(created.workflow.name, 'planned-change')
     assert.deepEqual(
       created.workflow.steps.map((step) => [step.id, step.runs]),
       [
@@ -272,7 +293,7 @@ describe('tickets', () => {
     const missing = await json<ErrorResponse>(
       await post('/api/tickets', {
         repository: 'acme/shop',
-        workflow: 'quick-change',
+        workflow: 'planned-change',
       }),
       400,
     )
@@ -288,14 +309,14 @@ describe('tickets', () => {
           400,
         )
       ).error,
-      /No workflow "deploy"; choose one of .*quick-change/,
+      /No workflow "deploy"; choose one of .*planned-change/,
     )
     assert.match(
       (
         await json<ErrorResponse>(
           await post('/api/tickets', {
             repository: 'acme/nowhere',
-            workflow: 'quick-change',
+            workflow: 'planned-change',
             title: 'x',
           }),
           400,
@@ -306,23 +327,23 @@ describe('tickets', () => {
   })
 
   test('are rejected when the repository lacks capabilities or is not ready', async () => {
-    const feature = await json<ErrorResponse>(
+    const tested = await json<ErrorResponse>(
       await post('/api/tickets', {
         repository: 'acme/shop',
-        workflow: 'feature',
+        workflow: 'tested-change',
         title: 'x',
       }),
       400,
     )
     assert.match(
-      feature.error,
-      /Workflow "feature" needs capabilities that acme\/shop does not provide: verify \(needed by test\)/,
+      tested.error,
+      /Workflow "tested-change" needs capabilities that acme\/shop does not provide: verify \(needed by test\)/,
     )
     await post('/api/repositories', { slug: 'acme/cloning' })
     await json<ErrorResponse>(
       await post('/api/tickets', {
         repository: 'acme/cloning',
-        workflow: 'quick-change',
+        workflow: 'planned-change',
         title: 'x',
       }),
       409,
@@ -875,5 +896,42 @@ test('additive proof contract: kit status/capabilities, commit and media type in
       'content-type',
     ),
     image.mediaType,
+  )
+})
+
+test('POST tickets defaults lights-out per workflow and preserves explicit choices', async () => {
+  const repository = await readyRepository('lights/api')
+  await markRepositoryReady(database, repository.id, {
+    capabilities: ['verify'],
+  })
+  for (const [workflow, choice, expected] of [
+    ['lead', undefined, true],
+    ['lead', false, false],
+    ['bug', undefined, false],
+    ['bug', true, true],
+  ] as const) {
+    const created = await json<TicketResponse>(
+      await post('/api/tickets', {
+        repository: repository.slug,
+        workflow,
+        title: 'Lights-out default',
+        ...(choice === undefined ? {} : { lightsOut: choice }),
+      }),
+      201,
+    )
+    assert.equal(created.ticket.lightsOut, expected)
+    assert.equal(
+      (await ticket(created.ticket.number)).ticket.lightsOut,
+      expected,
+    )
+  }
+  await json<ErrorResponse>(
+    await post('/api/tickets', {
+      repository: repository.slug,
+      workflow: 'lead',
+      title: 'Invalid',
+      lightsOut: 'true',
+    }),
+    400,
   )
 })

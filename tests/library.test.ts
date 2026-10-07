@@ -33,13 +33,21 @@ describe('loadLibrary', () => {
     if (!result.ok) assert.fail(result.errors.join('\n'))
     assert.deepEqual([...result.library.keys()].sort(), [
       'bug',
-      'feature',
       'lead',
       'onboard-repo',
-      'quick-change',
       'task',
       'task-pr',
     ])
+  })
+
+  test('lead bounds twenty tasks and fifty reports', async () => {
+    const result = await loadLibrary(BUILT_IN_WORKFLOWS)
+    if (!result.ok) assert.fail(result.errors.join('\n'))
+    const step = result.library
+      .get('lead')!
+      .workflow.steps.find((candidate) => candidate.id === 'run-tasks')!
+    assert.equal(step.limit, 50)
+    assert.equal(step.kind === 'system' && step.with?.maxTasks, 20)
   })
 
   test('versions are content hashes', () => {

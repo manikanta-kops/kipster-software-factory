@@ -25,7 +25,7 @@ test('linked result evidence is copied before its ticket lock, cleaned on rollba
     artifacts: [{ kind: 'evidence', title: 'Linked evidence', path: source }],
     otherRepository: {
       repository: 'fixture/library',
-      workflow: 'feature',
+      workflow: 'lead',
       title: 'Expose API',
       body: 'Caller requires the API.',
     },
@@ -48,7 +48,7 @@ test('linked result evidence is copied before its ticket lock, cleaned on rollba
       f.database,
       context!.attempt.id,
       result,
-      f.library.get('feature')!,
+      f.library.get('lead')!,
       'a'.repeat(40),
     )
   const recording = link()

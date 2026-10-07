@@ -5,13 +5,24 @@ import { setArtifactHome } from '../src/store/database.ts'
 import { defaultHome } from '../src/config.ts'
 import { writeDemoEvidence } from './demo-evidence.ts'
 import { resolve } from 'node:path'
-// Fills a database with repositories and quick-change tickets in every state, using the
+// Fills a database with repositories and lead tickets in every state, using the
 // same store functions the engine and API use. The web app can be built against it
 // before the engine exists.
 import type { ArtifactInput } from '../src/domain/lifecycle.ts'
-import type { Library } from '../src/library/library.ts'
+import type { TaskRequest } from '../src/domain/catalog.ts'
+import {
+  parseUpload,
+  type Library,
+  type LibraryEntry,
+} from '../src/library/library.ts'
 import type { Database } from '../src/store/database.ts'
 import { acquireSchedulerLock } from '../src/store/scheduler.ts'
+import {
+  listTasks,
+  parkForTasks,
+  startTask,
+  updateTask,
+} from '../src/store/tasks.ts'
 import { migrate } from '../src/store/migrate.ts'
 import {
   createRepository,
@@ -32,6 +43,43 @@ import {
 
 export const DEMO_REPOSITORY = 'kipster/demo-shop'
 
+// Preserve the retired workflow source without making it available for new tickets.
+const RETIRED_QUICK_CHANGE = `name: quick-change
+description: Agree a plan with you, build it, have it reviewed and land it. Needs nothing from the repository's kit.
+steps:
+  - id: plan
+    kind: agent
+    role: planner
+
+  - id: approve-plan
+    kind: human
+    routes:
+      changes-needed: plan
+
+  - id: build
+    kind: agent
+    role: builder
+
+  - id: review
+    kind: agent
+    role: reviewer
+    limit: 2
+    routes:
+      changes-needed: build
+
+  - id: maintain-pr
+    kind: system
+    action: maintain-pr
+    routes:
+      conflict: build
+      ci-failed: build
+      base-moved: review
+
+  - id: merge
+    kind: system
+    action: merge
+`
+
 /** Ticket numbers of the demo tickets, by the state each one is left in. */
 export interface DemoTickets {
   readonly proofPassed: number
@@ -43,6 +91,10 @@ export interface DemoTickets {
   readonly cancelled: number
   readonly running: number
   readonly queued: number
+  readonly retiredWorkflow: number
+  readonly lightsOutLead: number
+  readonly lightsOutChild: number
+  readonly lightsOutUntestedChild: number
 }
 
 export async function seedDemo(
@@ -69,8 +121,8 @@ async function seedLocked(
   if (await getRepository(database, DEMO_REPOSITORY)) {
     throw new Error(`The database already has demo data (${DEMO_REPOSITORY})`)
   }
-  const workflow = library.get('quick-change')
-  if (!workflow) throw new Error('The library has no quick-change workflow')
+  const workflow = library.get('lead')
+  if (!workflow) throw new Error('The library has no lead workflow')
 
   const shop = await createRepository(database, { slug: DEMO_REPOSITORY })
   await markRepositoryReady(database, shop.id, {
@@ -97,11 +149,16 @@ async function seedLocked(
     'git clone failed: Repository not found.',
   )
 
-  const create = async (title: string, body: string) =>
+  const create = async (
+    title: string,
+    body: string,
+    version: LibraryEntry = workflow,
+  ) =>
     (
       await createTicket(database, {
         repository: DEMO_REPOSITORY,
-        workflow,
+        workflow: version,
+        lightsOut: false,
         title,
         body,
       })
@@ -114,6 +171,7 @@ async function seedLocked(
       outcome: string
       summary: string
       artifacts?: ArtifactInput[]
+      tasks?: TaskRequest[]
     },
     executor = 'claude-code',
     headCommit?: string,
@@ -157,7 +215,7 @@ async function seedLocked(
 
   const planAndApprove = async (number: number, plan: string) => {
     await run(number, {
-      outcome: 'done',
+      outcome: 'plan-ready',
       summary: 'Wrote the plan with acceptance scenarios.',
       artifacts: [{ kind: 'plan', title: 'Plan', content: plan }],
     })
@@ -171,7 +229,11 @@ async function seedLocked(
   const buildAndReview = async (number: number) => {
     await run(number, {
       outcome: 'done',
-      summary: 'Implemented the plan and added tests.',
+      summary: 'The lead finished coordinating the change.',
+    })
+    await run(number, {
+      outcome: 'passed',
+      summary: 'Tested the whole change.',
     })
     await run(number, {
       outcome: 'passed',
@@ -185,6 +247,7 @@ async function seedLocked(
   }
 
   // Done: every step ran and the pull request merged.
+  // Lifecycle writes seed Ready, Needs you and Blocked reports from synthetic facts.
   const done = await create(
     'Add a dark mode toggle',
     'Add a toggle in **Settings** that switches the shop to a dark theme and remembers the choice.',
@@ -206,13 +269,20 @@ async function seedLocked(
   await buildAndReview(waitingForMerge)
   await openPullRequestAndWait(waitingForMerge, 42)
 
-  // Asking you: the reviewer sent the change back until its limit of two.
+  // This synthetic historical workflow demonstrates a review limit that asks the owner.
+  const historical = parseUpload(
+    workflow.source
+      .replace('role: reviewer\n    limit: 5', 'role: reviewer\n    limit: 2')
+      .replace('limit: maintain-pr', 'limit: ask'),
+  )
+  if (!historical.ok) throw new Error(historical.errors.join('; '))
   const askAfterLimit = await create(
     'Validate email addresses on sign-up',
     'Reject malformed email addresses on the sign-up form with a clear message.',
+    historical.entry,
   )
   await run(askAfterLimit, {
-    outcome: 'done',
+    outcome: 'plan-ready',
     summary: 'Wrote the plan.',
     artifacts: [
       {
@@ -236,7 +306,11 @@ async function seedLocked(
   for (const round of [1, 2]) {
     await run(askAfterLimit, {
       outcome: 'done',
-      summary: `Implemented validation (round ${round}).`,
+      summary: `Coordinated validation (round ${round}).`,
+    })
+    await run(askAfterLimit, {
+      outcome: 'passed',
+      summary: 'Tested validation.',
     })
     await run(askAfterLimit, {
       outcome: 'changes-needed',
@@ -258,7 +332,7 @@ async function seedLocked(
     'Let shop owners download any report as CSV from the report page.',
   )
   await run(approvePlan, {
-    outcome: 'done',
+    outcome: 'plan-ready',
     summary: 'Wrote the plan with three acceptance scenarios.',
     artifacts: [
       {
@@ -275,7 +349,7 @@ async function seedLocked(
     'Move the checkout pages to a new UI framework.',
   )
   await run(cancelled, {
-    outcome: 'done',
+    outcome: 'plan-ready',
     summary: 'Wrote a migration plan.',
     artifacts: [
       {
@@ -297,7 +371,8 @@ async function seedLocked(
     const number = (
       await createTicket(database, {
         repository: DEMO_REPOSITORY,
-        workflow: library.get('feature')!,
+        workflow,
+        lightsOut: false,
         title: stale
           ? 'Cart proof needs another run'
           : 'Cart quantity changes are proven',
@@ -308,7 +383,7 @@ async function seedLocked(
     const commit = 'a'.repeat(40)
     await run(
       number,
-      { outcome: 'done', summary: 'Implemented cart quantity updates.' },
+      { outcome: 'done', summary: 'Coordinated cart quantity updates.' },
       'codex',
       commit,
     )
@@ -356,7 +431,7 @@ async function seedLocked(
         number,
         {
           outcome: 'done',
-          summary: 'Later commit changed the cart; previous verdict is stale.',
+          summary: 'Later task changed the cart; previous verdict is stale.',
         },
         'codex',
         'b'.repeat(40),
@@ -433,7 +508,137 @@ async function seedLocked(
       )
   }
 
-  // Running: the planner is working on it.
+  // Synthetic lights-out choices and a child task, available without an agent session.
+  const leadWorkflow = library.get('lead')
+  const taskWorkflow = library.get('task')
+  if (!leadWorkflow || !taskWorkflow)
+    throw new Error('The library has no lead or task workflow')
+  const lightsOutLead = (
+    await createTicket(database, {
+      repository: DEMO_REPOSITORY,
+      workflow: leadWorkflow,
+      title: 'Overnight report export (synthetic demo)',
+      body: 'Synthetic lights-out demo: inspect the Decision log and follow the child task link. No real agents ran.',
+    })
+  ).number
+  await run(lightsOutLead, {
+    outcome: 'plan-ready',
+    summary: 'Prepared the synthetic export plan for automatic approval.',
+    artifacts: [
+      { kind: 'plan', title: 'Plan', content: planFor('report export') },
+      {
+        kind: 'decision',
+        title: 'Export format (synthetic demo)',
+        chose: 'CSV',
+        alternative: 'An Excel workbook',
+        reason:
+          'CSV works with the existing report data and common spreadsheet tools.',
+      },
+    ],
+  })
+  await run(lightsOutLead, {
+    outcome: 'delegate',
+    summary: 'Delegated the synthetic export endpoint task.',
+    tasks: [
+      {
+        key: 'export-endpoint',
+        title: 'Add the report export endpoint (synthetic demo)',
+        instructions: 'Add a CSV export for the existing report data.',
+        land: 'branch',
+      },
+      {
+        key: 'export-notes',
+        title: 'Document report exports (synthetic untested demo)',
+        instructions:
+          'Document CSV exports in the repository without a verify capability.',
+        land: 'branch',
+      },
+    ],
+  })
+  const taskRun = await run(lightsOutLead, undefined, 'system')
+  await parkForTasks(database, taskRun.attempt.id)
+  const [exportTask, notesTask] = await listTasks(database, taskRun.ticket.id)
+  const child = await startTask(
+    database,
+    exportTask!.id,
+    {
+      repository: DEMO_REPOSITORY,
+      workflow: taskWorkflow,
+      title: exportTask!.title,
+      body: 'Synthetic child task with a recorded decision; no real code or verification was executed.',
+    },
+    null,
+  )
+  const lightsOutChild = child!.number
+  await run(lightsOutChild, {
+    outcome: 'needs-decision',
+    summary:
+      'Synthetic question: may the export include private customer data?',
+    artifacts: [
+      {
+        kind: 'decision',
+        title: 'CSV column order (synthetic demo)',
+        chose: 'Use the displayed report column order',
+        alternative: 'Sort columns alphabetically',
+        reason: 'Matching the report makes the export familiar to shop owners.',
+      },
+    ],
+  })
+  await updateTask(
+    database,
+    exportTask!.id,
+    'parked',
+    'Synthetic question: may the export include private customer data?',
+  )
+  const notesChild = await startTask(
+    database,
+    notesTask!.id,
+    {
+      repository: 'kipster/invalid-kit',
+      workflow: taskWorkflow,
+      title: notesTask!.title,
+      body: 'Synthetic untested task: no agents, code changes or verification ran.',
+    },
+    null,
+  )
+  const lightsOutUntestedChild = notesChild!.number
+  await run(lightsOutUntestedChild, {
+    outcome: 'done',
+    summary:
+      'Synthetic documentation task finished without a verify capability.',
+  })
+  await updateTask(
+    database,
+    notesTask!.id,
+    'merged',
+    'Synthetic merged task. Untested: no verify capability (skipped test). No real merge ran.',
+  )
+
+  const retired = parseUpload(RETIRED_QUICK_CHANGE)
+  if (!retired.ok) {
+    throw new Error(
+      `Cannot parse the historical quick-change demo workflow: ${retired.errors.join('; ')}`,
+    )
+  }
+  const retiredWorkflow = await create(
+    'Historical quick-change ticket',
+    'This ticket ran a retired quick-change workflow.',
+    retired.entry,
+  )
+  await run(retiredWorkflow, {
+    outcome: 'done',
+    summary: 'Historical plan ready.',
+    artifacts: [
+      {
+        kind: 'plan',
+        title: 'Historical plan',
+        content:
+          'Retain the old workflow history. Keep its completed plan readable after quick-change is retired from the library.',
+      },
+    ],
+  })
+
+  // Running: the lead is working on it.
   const running = await create(
     'Fix the typo on the pricing page',
     'The pricing page says "anually"; it should say "annually".',
@@ -456,6 +661,10 @@ async function seedLocked(
     cancelled,
     running,
     queued,
+    lightsOutLead,
+    lightsOutChild,
+    lightsOutUntestedChild,
+    retiredWorkflow,
   }
 }
 

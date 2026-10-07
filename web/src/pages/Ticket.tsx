@@ -1,3 +1,4 @@
+import { TicketSummaryCard } from '../components/TicketSummary.tsx'
 import { MergeGatePanel } from '../components/MergeGate.tsx'
 import { EvidenceIndex } from '../components/EvidenceIndex.tsx'
 import { DecisionReview, DecisionDetails } from '../components/Decision.tsx'
@@ -14,10 +15,14 @@ import type {
   Attempt,
   FactoryEvent,
   HumanChoice,
+  LeadTask,
   ResolveRequest,
+  TaskStatus,
   TicketResponse,
 } from '../../../src/api/contract.ts'
+import { untestedReasons } from '../../../src/domain/task-testing.ts'
 import { describeAgent } from '../../../src/domain/settings.ts'
+import { isFinalTask } from '../../../src/domain/tasks.ts'
 import { api } from '../api.ts'
 import {
   attention,
@@ -28,7 +33,7 @@ import {
 } from '../components/Shared.tsx'
 import { repositoriesQuery, ticketQuery } from '../queries.ts'
 import { ArtifactView } from '../components/ArtifactView.tsx'
-import { isMedia, MediaGallery } from '../components/Media.tsx'
+import { isMedia, MediaGallery, MediaLibrary } from '../components/Media.tsx'
 import { RepositoryTag } from '../components/Filters.tsx'
 import { Icon, stepHue, stepIcon } from '../components/Icon.tsx'
 import { agentLabel, doing, humanize, stepName } from '../words.ts'
@@ -78,6 +83,7 @@ export function TicketPage({
         </p>
         <h1>{ticket.title}</h1>
         <div className="ticket-meta">
+          {ticket.lightsOut && <span className="badge">Lights-out</span>}
           {linkedWait ? (
             <span className="ticket-doing">
               Waiting for linked ticket{' '}
@@ -92,9 +98,18 @@ export function TicketPage({
           ) : (
             <Status value={ticket.status} />
           )}
+          {untestedReasons(query.data).map((reason) => (
+            <span className="badge" key={reason}>
+              {reason}
+            </span>
+          ))}
         </div>
       </header>
-      <div className="ticket-primary">
+      {ticket.summary &&
+        ['done', 'cancelled', 'needs-you'].includes(ticket.status) && (
+          <TicketSummaryCard summary={ticket.summary} />
+        )}
+      <div className="ticket-primary" id="ticket-details" tabIndex={-1}>
         {awaitingAction ? (
           <ActionPanel key={ticket.waiting!.attemptId} detail={query.data} />
         ) : (
@@ -102,6 +117,7 @@ export function TicketPage({
         )}
         {ticket.body && <Description body={ticket.body} />}
         <Tasks detail={query.data} />
+        <AgentDecisions detail={query.data} />
         <MergeGatePanel detail={query.data} />
         <Verdict
           detail={query.data}
@@ -114,16 +130,11 @@ export function TicketPage({
           {...(evidenceId === undefined ? {} : { selected: evidenceId })}
         />
         {media.length > 0 && (
-          <section
-            className="attachments evidence-card"
-            aria-labelledby="attachments-heading"
-          >
-            <h2 className="section-title" id="attachments-heading">
-              Screenshots and recordings
-              <span className="steps-progress">{media.length}</span>
-            </h2>
-            <MediaGallery artifacts={media} ticketNumber={ticket.number} />
-          </section>
+          <MediaLibrary
+            artifacts={media}
+            attempts={query.data.attempts}
+            ticketNumber={ticket.number}
+          />
         )}
       </div>
       <aside className="ticket-side">
@@ -393,8 +404,10 @@ function RepositoryContext({ detail }: { detail: TicketResponse }) {
 function Tasks({ detail }: { detail: TicketResponse }) {
   const { tasks = [], parentTask } = detail
   if (!tasks.length && !parentTask) return null
+  const active = tasks.filter((task) => !isFinalTask(task.status))
+  const finished = tasks.filter((task) => isFinalTask(task.status))
   return (
-    <section className="steps-card" aria-label="Tasks">
+    <section className="steps-card tasks-card" aria-label="Tasks">
       {parentTask && (
         <>
           <h2 className="section-title">Lead ticket</h2>
@@ -417,44 +430,154 @@ function Tasks({ detail }: { detail: TicketResponse }) {
       )}
       {tasks.length > 0 && (
         <>
-          <h2 className="section-title">Tasks</h2>
-          <ul className="task-list">
+          <h2 className="section-title">
+            Tasks
+            <span className="steps-progress">
+              {finished.length} of {tasks.length} finished
+            </span>
+          </h2>
+          <div className="task-progress" aria-hidden="true">
             {tasks.map((task) => (
-              <li key={task.id}>
-                <div className="task-line">
-                  <span className="task-key">{task.key}</span>
-                  <span>{task.title}</span>
-                  <span className={`badge ${task.status}`}>
-                    {task.status === 'pr-ready'
-                      ? 'PR ready'
-                      : task.status.replace('-', ' ')}
-                  </span>
-                  {task.child && (
-                    <a
-                      className="text-link"
-                      href={`#/tickets/${task.child.number}`}
-                    >
-                      #{task.child.number}
-                    </a>
-                  )}
-                  <PullRequest url={task.child?.pullRequestUrl ?? null} />
-                </div>
-                <p className="muted">
-                  {task.land === 'pr' ? 'Own pull request' : 'Lead branch'}
-                  {task.agent ? ` · ${agentLabel(task.agent)}` : ''}
-                  {task.decision ? ` · lead chose ${task.decision}` : ''}
-                </p>
-                {task.result && <p>{task.result}</p>}
-              </li>
+              <i key={task.id} className={task.status} />
             ))}
-          </ul>
-          <p className="muted">
-            Cancelling this ticket cancels its unfinished tasks.
-          </p>
+          </div>
+          {active.length > 0 ? (
+            <ul className="task-list" aria-label="Tasks in progress">
+              {active.map((task) => (
+                <li key={task.id}>
+                  <div className="task-row">
+                    <div className="task-head">
+                      <span className={`task-dot ${task.status}`} />
+                      <TaskName task={task} />
+                    </div>
+                    <ChildLink task={task} />
+                  </div>
+                  <TaskFacts task={task} />
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="task-all-finished">
+              <Icon name="check" size={13} stroke={2.4} />
+              All tasks finished
+            </p>
+          )}
+          {finished.length > 0 && <FinishedTasks tasks={finished} />}
+          {active.length > 0 && (
+            <p className="muted task-note">
+              Cancelling this ticket cancels its unfinished tasks.
+            </p>
+          )}
         </>
       )}
     </section>
   )
+}
+
+const FINISHED_ORDER: readonly TaskStatus[] = [
+  'merged',
+  'left-open',
+  'conflict',
+  'failed',
+  'cancelled',
+]
+
+function FinishedTasks({ tasks }: { tasks: readonly LeadTask[] }) {
+  const [open, setOpen] = useState(false)
+  const tallies = FINISHED_ORDER.map((status) => ({
+    status,
+    count: tasks.filter((task) => task.status === status).length,
+  })).filter((tally) => tally.count > 0)
+  return (
+    <div className="finished-tasks">
+      <button
+        type="button"
+        className="finished-tasks-toggle"
+        aria-expanded={open}
+        onClick={() => setOpen(!open)}
+      >
+        <Icon name="chevronRight" size={12} stroke={2.2} />
+        <span className="finished-tasks-label">Finished</span>
+        <span className="finished-tasks-count">{tasks.length}</span>
+        <span className="finished-tasks-tallies">
+          {tallies.map((tally) => (
+            <span key={tally.status} className={`tally ${tally.status}`}>
+              {tally.count} {taskStatusLabel(tally.status).toLowerCase()}
+            </span>
+          ))}
+        </span>
+      </button>
+      {open && (
+        <ul className="task-list finished" aria-label="Finished tasks">
+          {tasks.map((task) => (
+            <FinishedTask key={task.id} task={task} />
+          ))}
+        </ul>
+      )}
+    </div>
+  )
+}
+
+function FinishedTask({ task }: { task: LeadTask }) {
+  const [open, setOpen] = useState(false)
+  return (
+    <li className={open ? 'open' : undefined}>
+      <div className="task-row">
+        <button
+          type="button"
+          className="task-head"
+          aria-expanded={open}
+          onClick={() => setOpen(!open)}
+        >
+          <Icon name="chevronRight" size={12} stroke={2.2} />
+          <TaskName task={task} />
+        </button>
+        <ChildLink task={task} />
+      </div>
+      {open && <TaskFacts task={task} />}
+    </li>
+  )
+}
+
+function TaskName({ task }: { task: LeadTask }) {
+  return (
+    <>
+      <span className="task-key">{task.key}</span>
+      <span className="task-title">{task.title}</span>
+      <span className={`badge ${task.status}`}>
+        {taskStatusLabel(task.status)}
+      </span>
+    </>
+  )
+}
+
+function ChildLink({ task }: { task: LeadTask }) {
+  if (!task.child) return <span className="task-child" />
+  return (
+    <a className="task-child text-link" href={`#/tickets/${task.child.number}`}>
+      #{task.child.number}
+    </a>
+  )
+}
+
+function TaskFacts({ task }: { task: LeadTask }) {
+  return (
+    <div className="task-facts">
+      <p className="task-meta">
+        {task.land === 'pr' ? 'Own pull request' : 'Lead branch'}
+        {task.agent ? ` · ${agentLabel(task.agent)}` : ''}
+        {task.decision ? ` · lead chose ${task.decision}` : ''}
+      </p>
+      {task.result && <p className="task-result">{task.result}</p>}
+      <PullRequest url={task.child?.pullRequestUrl ?? null} />
+    </div>
+  )
+}
+
+function taskStatusLabel(status: TaskStatus) {
+  if (status === 'pr-ready') return 'PR ready'
+  const words = status.replace('-', ' ')
+  return words[0]!.toUpperCase() + words.slice(1)
 }
 
 function CancelLinkedWait({ number }: { number: number }) {
@@ -910,6 +1033,7 @@ function AttemptEntry({
           artifacts={artifacts.filter(isMedia)}
           ticketNumber={detail.ticket.number}
           compact
+          limit={6}
         />
       )}
       <FileList
@@ -1001,5 +1125,48 @@ function EventEntry({ event }: { event: FactoryEvent }) {
         <pre>{JSON.stringify(event.data, null, 2)}</pre>
       </details>
     </li>
+  )
+}
+
+function AgentDecisions({ detail }: { detail: TicketResponse }) {
+  const decisions = detail.artifacts.filter(
+    (artifact) => artifact.kind === 'decision' && artifact.decision,
+  )
+  const children = (detail.tasks ?? []).filter((task) => task.child)
+  if (!decisions.length && !children.length) return null
+  return (
+    <section className="steps-card" aria-label="Decision log">
+      <h2 className="section-title">Decision log</h2>
+      {decisions.map((artifact) => (
+        <div key={artifact.id}>
+          <h3>{artifact.title}</h3>
+          <dl>
+            <dt>Chose</dt>
+            <dd>
+              <MarkdownBody>{artifact.decision!.chose}</MarkdownBody>
+            </dd>
+            <dt>Alternative</dt>
+            <dd>
+              <MarkdownBody>{artifact.decision!.alternative}</MarkdownBody>
+            </dd>
+            <dt>Reason</dt>
+            <dd>
+              <MarkdownBody>{artifact.decision!.reason}</MarkdownBody>
+            </dd>
+          </dl>
+        </div>
+      ))}
+      {children.length > 0 && (
+        <ul>
+          {children.map((task) => (
+            <li key={task.id}>
+              <a className="text-link" href={`#/tickets/${task.child!.number}`}>
+                Decisions from {task.title} (#{task.child!.number})
+              </a>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
   )
 }

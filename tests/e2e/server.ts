@@ -1,10 +1,18 @@
+import { insertLessonProposals } from '../../src/store/lessons.ts'
+import { transaction } from '../../src/store/database.ts'
+import { readFile } from 'node:fs/promises'
+import { parseUpload } from '../../src/library/library.ts'
 import { mergePolicy } from '../../src/domain/auto-merge.ts'
 import { getMergeGate } from '../../src/store/merge-gates.ts'
 import {
   markMergeRequested,
   markMergeResult,
 } from '../../src/store/auto-merge.ts'
-import { setAutoMerge } from '../../src/store/repositories.ts'
+import {
+  getRepository,
+  markRepositoryReady,
+  setAutoMerge,
+} from '../../src/store/repositories.ts'
 import {
   recordMergedPR,
   pendingPostMergeChecks,
@@ -36,7 +44,7 @@ import {
   addAttemptArtifacts,
 } from '../../src/store/tickets.ts'
 import { createDemoStore } from '../helpers/demo.ts'
-import { builtInLibrary, builtInWorkflow } from '../helpers/store.ts'
+import { builtInLibrary, testWorkflow } from '../helpers/store.ts'
 
 const port = Number(process.env['KSF_E2E_PORT'])
 if (!process.env['KSF_TEST_DATABASE_URL'] || !port)
@@ -69,6 +77,34 @@ const router = new Hono()
 router.post('/__test/fixtures', async (c) => {
   const fixture = await createDemoStore()
   const fixtureHome = fixture.home
+  if (c.req.query('lessons') === 'true') {
+    const ticket = (await getTicketDetail(
+      fixture.database,
+      fixture.tickets.running,
+    ))!.ticket
+    await transaction(fixture.database, (connection) =>
+      insertLessonProposals(
+        connection,
+        [
+          {
+            repositoryId: ticket.repository.id,
+            text: 'Check empty inputs before review',
+            source: 'changes-needed',
+            sourceTicketId: ticket.id,
+            key: 'demo-empty',
+          },
+          {
+            repositoryId: null,
+            text: 'Validate agent result files before reporting completion',
+            source: 'repeated-failure',
+            sourceTicketId: ticket.id,
+            key: 'demo-result',
+          },
+        ],
+        [],
+      ),
+    )
+  }
   const verdict = c.req.query('verdict')
   if (verdict === 'changes-needed' || verdict === 'unobserved') {
     const detail = await getTicketDetail(
@@ -122,12 +158,45 @@ router.post('/__test/fixtures', async (c) => {
     fixture.database,
     fixture.tickets.running,
   ))!.artifacts.find((a) => a.title === 'Live agent log')!.path!
+  let legacyTicket: number | null = null
+  if (c.req.query('legacy') === 'true') {
+    const source = (
+      await readFile(
+        new URL('../fixtures/workflows/planned-change.yml', import.meta.url),
+        'utf8',
+      )
+    ).replace('name: planned-change', 'name: quick-change')
+    const parsed = parseUpload(source)
+    if (!parsed.ok) throw new Error(parsed.errors.join('\n'))
+    const created = await createTicket(fixture.database, {
+      repository: 'kipster/demo-shop',
+      workflow: parsed.entry,
+      title: 'Historical quick-change ticket',
+    })
+    const context = (await claimAttempts(fixture.database, 100)).find(
+      (candidate) => candidate.ticket.id === created.id,
+    )!
+    await markRunning(fixture.database, context.attempt.id, 'codex')
+    await completeAttempt(fixture.database, context.attempt.id, {
+      outcome: 'done',
+      summary: 'Historical plan ready.',
+      artifacts: [
+        {
+          kind: 'plan',
+          title: 'Historical plan',
+          content: 'Retain the old workflow history.',
+        },
+      ],
+    })
+    legacyTicket = created.number
+  }
   let artifactTicketNumber: number | null = null
   if (c.req.query('artifacts') === 'true') {
     const artifactTicket = await createTicket(fixture.database, {
       repository: 'kipster/demo-shop',
-      workflow: await builtInWorkflow('quick-change'),
+      workflow: await testWorkflow('planned-change'),
       title: 'Inspect artifacts safely',
+      lightsOut: true,
       body: 'A **safe** description.',
     })
     const claimed = await claimAttempts(fixture.database, 100)
@@ -145,6 +214,13 @@ router.post('/__test/fixtures', async (c) => {
           path: 'plan.md',
         },
         { kind: 'log', title: 'Planner log', path: 'planner.log' },
+        {
+          kind: 'decision',
+          title: 'Storage choice',
+          chose: 'PostgreSQL',
+          alternative: 'A file',
+          reason: 'Keep writes transactional',
+        },
       ],
     })
     artifactTicketNumber = artifactTicket.number
@@ -177,7 +253,7 @@ router.post('/__test/fixtures', async (c) => {
   if (c.req.query('links') === 'true') {
     const original = await createTicket(fixture.database, {
       repository: 'kipster/demo-shop',
-      workflow: await builtInWorkflow('quick-change'),
+      workflow: await testWorkflow('planned-change'),
       title: 'Use the library API',
       dependencies: ['kipster/legacy-api'],
     })
@@ -212,10 +288,10 @@ router.post('/__test/fixtures', async (c) => {
           repository: 'kipster/invalid-kit',
           title: 'Expose the library API',
           body: 'The caller needs a new API.',
-          workflow: 'quick-change',
+          workflow: 'planned-change',
         },
       },
-      await builtInWorkflow('quick-change'),
+      await testWorkflow('planned-change'),
       'a'.repeat(40),
     )
     detail = (await getTicketDetail(fixture.database, link.linked.number))!
@@ -225,7 +301,7 @@ router.post('/__test/fixtures', async (c) => {
   if (c.req.query('tasks') === 'true') {
     const lead = await createTicket(fixture.database, {
       repository: 'kipster/demo-shop',
-      workflow: await builtInWorkflow('lead'),
+      workflow: await testWorkflow('lead'),
       title: 'Build the export feature',
     })
     const first = (await claimAttempts(fixture.database, 100)).find(
@@ -249,6 +325,16 @@ router.post('/__test/fixtures', async (c) => {
           instructions: 'Describe the export in the README.',
           land: 'pr',
         },
+        {
+          key: 'schema',
+          title: 'Add the export schema',
+          instructions: 'Describe the CSV columns.',
+        },
+        {
+          key: 'fixtures',
+          title: 'Seed export fixtures',
+          instructions: 'Add sample rows for the export.',
+        },
       ],
     })
     const run = (await claimAttempts(fixture.database, 100)).find(
@@ -256,24 +342,46 @@ router.post('/__test/fixtures', async (c) => {
     )!
     await markRunning(fixture.database, run.attempt.id, 'system')
     await parkForTasks(fixture.database, run.attempt.id)
-    const [api, docs] = await listTasks(fixture.database, lead.id)
+    const [api, docs, schema, seed] = await listTasks(fixture.database, lead.id)
+    await updateTask(
+      fixture.database,
+      schema!.id,
+      'merged',
+      'Merged into the lead branch at 61ccc186062039d6c465d4e2f965cc5cf61d6814.',
+    )
+    await updateTask(
+      fixture.database,
+      seed!.id,
+      'failed',
+      'Build failed: invalid or missing result.json after two runs. No work was produced.',
+    )
+    const repository = (await getRepository(
+      fixture.database,
+      'kipster/demo-shop',
+    ))!
+    await markRepositoryReady(fixture.database, repository.id, {
+      kit: { status: 'missing', error: null, capabilities: [] },
+    })
     const child = await startTask(
       fixture.database,
       api!.id,
       {
         repository: 'kipster/demo-shop',
-        workflow: await builtInWorkflow('task'),
+        workflow: await testWorkflow('task'),
         title: api!.title,
         body: api!.instructions,
       },
       null,
     )
+    await markRepositoryReady(fixture.database, repository.id, {
+      kit: repository.kit!,
+    })
     await startTask(
       fixture.database,
       docs!.id,
       {
         repository: 'kipster/demo-shop',
-        workflow: await builtInWorkflow('task-pr'),
+        workflow: await testWorkflow('task-pr'),
         title: docs!.title,
         body: docs!.instructions,
       },
@@ -287,6 +395,12 @@ router.post('/__test/fixtures', async (c) => {
     )
     taskTickets = { lead: lead.number, child: child!.number }
   }
+  // Upgraded tickets without a stored report still render the full ticket page.
+  if (legacyTicket !== null)
+    await fixture.database.query(
+      'UPDATE tickets SET summary = NULL, summary_at = NULL WHERE number = $1',
+      [legacyTicket],
+    )
   const fixtureEvents = listenForEvents(fixture.database)
   await fixtureEvents.ready
   const fixtureApp = createApp({
@@ -363,7 +477,7 @@ router.post('/__test/fixtures', async (c) => {
             },
           ],
         },
-        await builtInWorkflow('bug'),
+        await testWorkflow('bug'),
       )
     },
     gate: async (state, number = fixture.tickets.proofPassed) => {
@@ -477,6 +591,7 @@ router.post('/__test/fixtures', async (c) => {
     linkedTickets,
     taskTickets,
     artifactTicket: artifactTicketNumber,
+    legacyTicket,
     decisionTicket,
   })
 })

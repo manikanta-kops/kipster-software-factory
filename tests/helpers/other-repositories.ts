@@ -87,8 +87,8 @@ export async function otherRepositoriesFixture() {
     'name: caller\ndescription: Caller fixture\nsteps:\n  - id: build\n    kind: agent\n    role: builder\n  - id: confirm-completion\n    kind: human\n',
   )
   await writeFile(
-    join(workflows, 'feature.yml'),
-    'name: feature\ndescription: Linked fixture with plan approval\nsteps:\n  - id: plan\n    kind: agent\n    role: planner\n  - id: approve-plan\n    kind: human\n  - id: build\n    kind: agent\n    role: builder\n  - id: publish\n    kind: human\n  - id: merge\n    kind: system\n    action: merge\n',
+    join(workflows, 'lead.yml'),
+    'name: lead\ndescription: Linked fixture with plan approval\nsteps:\n  - id: plan\n    kind: agent\n    role: planner\n  - id: approve-plan\n    kind: human\n  - id: build\n    kind: agent\n    role: builder\n  - id: publish\n    kind: human\n  - id: merge\n    kind: system\n    action: merge\n',
   )
   const loaded = await loadLibrary(workflows)
   if (!loaded.ok) throw new Error(loaded.errors.join())

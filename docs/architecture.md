@@ -117,6 +117,53 @@ it, with its artifacts and events, in one transaction.
 Every write appends events. `GET /api/events` streams them with Server-Sent
 Events, and a client that reconnects with Last-Event-ID misses nothing.
 
+### End-of-ticket summary
+
+Migration 015 stores the latest fact-based ticket summary and its timestamp.
+`store/tickets.ts` writes it inside the status transaction for `done`,
+`cancelled` and `needs-you`, including repeated parks and initial human waits.
+Merge gate changes refresh a parked report under the same ticket lock.
+`ticket.summary` events invalidate the live list and detail. Existing tickets
+keep a null summary until their next park or completion.
+
+The pure `domain/summary.ts` function uses status/ask reasons, attempt times,
+retry counts, task states, tester/reviewer outcomes, typed decision counts,
+skipped steps, scenario evidence and merge gate facts. Agent summaries,
+descriptions, findings and decision explanations never enter the report.
+The API adds the summary to listed tickets and ticket detail. Ticket pages
+show it above the details; Today shows compact rows for attention and tickets
+finished in the last 24 hours. Reports hide while a ticket resumes running.
+
+### Lessons
+
+Migration 017 stores proposed, accepted, rejected and retired lessons per
+repository, or with a null repository for the engine. The lifecycle summary hook
+proposes them in the same transaction, without changing routing or waiting state.
+The pure `domain/lessons.ts` uses finding titles repeated in distinct
+`changes-needed` reviewer rounds, repeated recorded attempt errors (including
+child attempts and system-recorded task startup/integration errors), and comments on human `changes-needed` or `rejected` answers.
+It never reads agent summaries or task result prose. CLI crashes and result.json
+validation failures become engine lessons; other errors stay with the repository.
+Cross-ticket review finding aggregation is not implemented.
+
+Texts collapse whitespace and stop at 200 characters. Dedup keys use the source
+and normalised fact text, bounded to 240 characters. A unique scope/key index
+also suppresses rejected and retired lessons on later parks. `GET /api/lessons`
+filters by numeric `repository` (or `engine`) and `status`; POST endpoints under
+`/api/lessons/:id` accept, reject or retire (with a nonempty `reason`). Decisions
+emit `lesson.decided`; proposals emit `lesson.proposed`. Accepting a 31st
+repository lesson returns a conflict asking the owner to retire one first.
+A scope advisory lock serialises concurrent accepts. Engine lessons have no cap.
+
+Before each agent invocation, the shared prompt builder writes accepted
+repository lessons followed by engine lessons to the step directory's
+`lessons.md`. This includes indexed parallel reviewers, proof retries and PR
+writers. Only an absolute-path pointer goes into the prompt; no accepted lesson
+text is embedded. With no accepted lessons, the file and pointer are absent.
+Each step takes a fresh snapshot, so owner decisions affect subsequent steps.
+Today offers compact Accept/Reject controls. Repositories lists accepted lessons
+with a retirement reason form. These controls never gate ticket work.
+
 ## Repositories on disk
 
 A repository is cloned once into the factory home and kept: setup, caches and
@@ -183,7 +230,9 @@ workspace preparation and both result-file tries within the same attempt.
 Omitted agent settings use Codex. A role entry replaces the default selection;
 its optional `model` is passed to that CLI, and its optional `effort`
 (`minimal`, `low`, `medium`, `high`, `xhigh` or `max`) becomes Claude's
-`--effort` or Codex's `-c model_reasoning_effort`. `agents.allowed` lists the
+`--effort` or Codex's `-c model_reasoning_effort`. `agents.reviewers` defaults to an empty list. It selects the parallel reviewers
+for a lead final review; a workflow `reviewers` list overrides it. `cli` is the
+model family, so Settings warns when entries share a CLI. `agents.allowed` lists the
 exact `{ cli, model, effort }` choices a lead may give a task; it is empty by
 default, so tasks use the role settings. Accepted CLI names are `codex` and
 `claude`; accepted role keys come from the catalog. `allowedOrigins` retains its
@@ -194,9 +243,11 @@ step timeout and Codex for every role.
 #### Settings page
 
 The web app's Settings page (`#/settings`, `GET`/`POST /api/settings`) edits
-`concurrency`, `stepTimeoutMinutes` and `agents` (default, roles and allowed)
-while the factory runs, plus per-workflow overrides of role agents and the step
-timeout. Until the owner saves, the factory uses the `config.json` values (or
+`concurrency`, `stepTimeoutMinutes` and `agents` (default, roles, allowed and reviewers)
+while the factory runs, plus per-workflow overrides of role agents, reviewer
+lists and the step timeout. Workflow names retained by stored tickets remain available for overrides
+after their files are removed; they do not reappear on New ticket. Until the
+owner saves, the factory uses the `config.json` values (or
 the defaults) and the API reports `source: "config"`. The first save stores the
 whole document in the single-row `settings` table (migration 012); from then on
 the database owns these fields, `config.json` values for them are ignored and
@@ -215,9 +266,9 @@ only), the workflow override for the role, the global role setting, then the
 default. Testers, reproducers, reviewers and writers of a child ticket never take
 the task's agent, so review can come from another model family than the author.
 The step timeout is the workflow override, then the global value. Overrides are
-keyed by workflow name; saving rejects names that are not in the library, and
-an override for a workflow that later disappears is ignored. The step schema is
-unchanged. Each started agent attempt records the choice it ran with
+keyed by workflow name; saving accepts names in the library or retained by
+stored tickets, so retired workflows keep their agent and timeout overrides.
+The step schema is unchanged. Each started agent attempt records the choice it ran with
 (`Attempt.agent`), which the ticket page shows next to the step.
 
 Without `databaseUrl`, the factory runs a private PostgreSQL cluster in
@@ -238,8 +289,9 @@ against the release `SHA256SUMS` and unpacks it to `<home>/versions/<version>`. 
 `kf` into `~/.local/bin` and runs `kf setup --start`. `kf start` writes a
 launchd user agent that runs `kf serve` at login with the `PATH` captured at
 that moment, so agents find `gh`, `codex` and `claude`. Updates stop the
-service before replacing the version. A `v*` tag on `master` that matches
-`package.json` publishes a release (`.github/workflows/release.yml`). Pull
+service before replacing the version. A push to `master` publishes
+`v<package.json version>` as a release unless it already exists
+(`.github/workflows/release.yml`). Pull
 requests touching installation build and smoke-test both bundles without
 publishing.
 
@@ -284,7 +336,8 @@ The database records successful removal (or an already absent worktree), so
 subsequent passes and restarts skip it. The cache and step metadata are retained; recorded files are owned by the per-ticket evidence store. `maintain-pr` synchronizes branches
 with the fetched base and watches CI (Slice 3). Kit
 capabilities are refreshed from committed default-branch blobs after each cache
-fetch; workflows needing missing capabilities remain gated by the store.
+fetch; workflows needing missing capabilities remain gated by the store, except
+for the child-task tester rule below.
 
 ### Prompt and result contract
 
@@ -346,14 +399,25 @@ after the merge committed but before its outcome was recorded. Workflows without
 a tester can still publish after refreshing any prior review. A branch with no commits ahead asks the owner.
 
 Before publishing a new head, `engine/pr-writer.ts` runs the writer in a fresh
-session using the writer's configured CLI and kit instructions. Its one inline
-note explains the change and why, describes current-commit scenario evidence in the factory,
-optionally includes a small Mermaid diagram, identifies `Verified at <sha>`, and
-states `Merge danger:` with a one-way/two-way door and blast radius. Output is
-limited to 4,000 characters and names the factory ticket; it contains no local evidence links. CI is still pending at this point; the prose describes its status at
+session using the writer's configured CLI and kit instructions. The writer is guided to
+explain the change and why in an inline note, describe current-commit scenario evidence in the factory,
+optionally include a small Mermaid diagram, identify `Verified at <sha>`, and
+state `Merge danger:` with a one-way/two-way door and blast radius, aim for 150–250
+words and keep it under 4,000 characters, name the factory ticket and omit local
+evidence links. These are instructions only; the factory publishes the first
+non-empty inline note from a successful `done` result without checking its wording.
+CI is still pending at this point; the prose describes its status at
 writing and directs readers to current checks rather than making a lasting status claim.
-The factory caches the description by ticket and head, records the note and run
-log, and rejects writer worktree edits. Invalid output gets one fresh retry.
+The factory appends untested warnings and open review findings to writer notes,
+cached descriptions and fallback descriptions, and records the full annotated
+note and run log on the ticket. It caches the description by ticket and head.
+It trims last, only if the annotated description plus factory marker exceeds GitHub's
+65,536-character limit, ending with `Full description on ticket #<n> in the factory`
+and preserving the full note on the ticket. When a run produces no usable note
+(including a crash, missing or invalid result, or `needs-decision`), it retries
+once in a fresh session, then publishes a factory description from the ticket,
+tasks or commits, and latest tester and reviewer verdicts. Worktree edits still
+stop publication; aborts and infrastructure failures propagate.
 Full plans, logs and prior review rounds remain in the factory timeline.
 
 The action pushes normally, creates or updates the branch PR through `gh`, and
@@ -417,7 +481,7 @@ See the [roadmap](roadmap.md) for the acceptance scope and remaining limits.
 
 `tests/engine.test.ts` uses a scripted executable, real PostgreSQL and local bare
 Git repositories, with GitHub calls substituted behind the interface. It covers
-the quick-change approval/review loop, merge waiting, failure/retry, process-group
+a test-local approval/review loop, merge waiting, failure/retry, process-group
 timeout/cancellation, crash recovery, lock exclusion, concurrency and ownership.
 `node scripts/live-engine-check.ts [source-repository]` is an explicit opt-in
 smoke check using the real default CLI: it clones the source into a temporary
@@ -468,7 +532,7 @@ freshness from a summary or a null commit. Slice 3 checks verdict freshness agai
 publication and routes stale verdicts back to testing.
 
 `seed:demo` generates synthetic image, WebM and log files inside the selected
-home, and includes valid/invalid kits plus passed/current and stale feature
+home, and includes valid/invalid kits plus passed/current and stale lead
 verdicts without running an engine. `npm run dev` keeps the factory alive during
 source edits; explicit restart loads changes. `npm run dev -- --watch` opts into
 restarts. Web hot reload remains enabled in either mode.
@@ -698,8 +762,9 @@ role/scenario from the latest attempt, preferring the requested head. Unlabelled
 files remain in the archive. The API adds `evidenceIndex`; stable same-origin
 routes `#/tickets/<number>/evidence/<artifact-id>` open items. Older attempts,
 additional media and logs are behind the archive. No installation URL or Tailscale
-integration is required. PR descriptions state `Verified at <sha>`, scenario
-observations and `Evidence on ticket #<n> in the factory`, with no local links.
+integration is required. Writers are instructed to state `Verified at <sha>`, scenario
+observations and `Evidence on ticket #<n> in the factory`, with no local links;
+the factory does not validate their wording.
 
 `config.json` adds `evidenceRetentionDays` (positive integer, default 30).
 An hourly bounded scheduler background task prunes finished/cancelled ticket logs
@@ -714,7 +779,7 @@ fields, the comparison link, retention bookkeeping and gate snapshots.
 
 The builder catalog result adds `otherRepository` for `needs-other-repo`:
 registered `owner/name`, nonempty title and body explaining the needed change,
-and optional workflow (default `feature`). The agent proposes; the engine creates
+and optional workflow (default `lead`). The agent proposes; the engine creates
 and validates the target ticket. Missing registrations, unavailable workflows,
 capabilities and malformed requests go to the owner. The step schema is unchanged.
 
@@ -784,7 +849,7 @@ caches remain; dependency checkouts do not accumulate for done/cancelled tickets
 characters, with a JSON content type. It validates the source with the same
 `parseWorkflow` as workflow files and answers 400 with every error in `issues`.
 A name owned by a workflow file answers 409, so uploads never replace the
-built-in `feature` that linked-ticket requests default to. Otherwise one
+built-in `lead` that linked-ticket requests default to. Otherwise one
 transaction records the version in `workflow_versions` and makes it current in
 `uploaded_workflows` (migration 010). The response is 201 for a new name and
 200 for a new version of an uploaded one.
@@ -841,7 +906,96 @@ scheduler tick, `engine/tasks.ts` advances each parked lead:
 Each lead run is a fresh session. Its prompt adds the current task table,
 limits, workflows, allowed agents and the repository's auto-merge setting;
 the ticket's notes, comments and step summaries carry the history.
+Failed tasks are grouped by a pure signature of their stored result, removing
+paths, IDs, hashes, timestamps, durations and numbers. Conflicts are excluded.
+Groups of two or more appear as `repeatedFailure` (signature, count, task keys)
+in the lead context and in a Repeated failure section of the Task report.
+At runtime, delegation refuses instructions matching any task in such a group
+after whitespace normalisation, through the existing invalid-result retry path.
+In both modes the lead must classify the cause as `task`, `plan` or `factory`,
+record a typed decision artifact (`chose`, `alternative`, `reason`), and change
+the task or plan, or stop retrying that line, name it in the summary and continue
+the rest. In default mode an unworkable factory cause may use `needs-decision`.
 Cancelling a lead cancels its unfinished tasks and their child tickets in the
 same transaction. A child ticket shows its lead and task; a lead ticket shows
 each task with its child, status, result and pull request. The API adds
 `tasks` and `parentTask` to ticket responses.
+
+Child tickets using `task` or `task-pr` skip tester steps whose declared needs
+are missing. Migration 013 stores the skipped steps and missing capabilities on
+the ticket; execution removes them and routes to the next retained step, even
+after restart. Top-level tickets and other roles retain capability rejection.
+The ticket, task report, PR description and merge gate say **untested**; a lead's
+final PR also carries the warning for merged untested tasks. These warnings
+require owner merging even if the lead's final tester passes.
+
+### Lights-out and agent choices
+
+Migration 014 adds `tickets.lights_out`, default false for existing tickets.
+New tickets default it on for workflow names `lead` and `program-lead`, off
+otherwise; an explicit `lightsOut` in `POST /api/tickets` overrides the default.
+The New ticket checkbox follows the workflow until touched. Children inherit
+exactly their parent's value, and enabled tickets show a Lights-out badge.
+
+When enabled, a lead's `plan-ready` routed to a human `approve-plan` is
+approved by the system in the same lifecycle transaction. Its plan stays
+recorded, `decision.made` records the automatic approval, and the next prompt
+has `planApproved: true`. Other human steps still wait. Every agent prompt adds
+a short instruction to choose sensible defaults, record choices, and continue.
+Base role prompts render paired default/lights-out blocks without markers or
+added blank lines; disabled tickets retain their original role text. Product
+questions choose and record defaults. A necessary forbidden-path change goes in
+its own commit with the reason recorded, and an otherwise passing reviewer flags
+the path and reason in `ownerReview`. Reproducers try alternative entry points,
+inputs and conditions before returning `not-reproduced`; that outcome still
+cannot start a fix. Irreversible actions wait, and publishing remains system work.
+
+Agents emit `{ "kind": "decision", "title": "…", "chose": "…",
+"alternative": "…", "reason": "…" }`, with three nonempty choice fields
+and no content or path. The store retains structured `Artifact.decision` plus
+Markdown for the timeline. The ticket's Decision log lists its choices and links
+to child ticket decision logs. These artifacts are separate from typed workflow
+`decide` judgements and never influence the merge gate.
+
+For a lights-out lead, a child ask with reason `needs-decision` becomes a
+`parked` task. The lead hears its summary once and siblings keep running;
+parked tasks consume no parallel slot and prevent the lead reporting `done`.
+An owner retry or move resumes that child; subsequent polling restores its task
+to running and reports its eventual finish. Cancelling the lead also cancels
+parked children. With lights-out off, approval and task reporting are unchanged.
+Kit, CI and migration changes and reviewer `ownerReview` still require the owner.
+
+## Review independence and lead rounds
+
+Before an attempt starts, the engine compares its reviewer or tester agent with
+recorded builder agents on this ticket and, for leads, its child tickets. Equality
+means the same CLI and model; effort is ignored and an absent model is its own
+value. Without recorded builders it resolves the builder from settings. It uses
+the first independent candidate: workflow reviewer list (reviewers only),
+workflow role override, global role setting, global reviewers, allowed agents,
+then default. The scheduler records the selection once; execution and proof
+reuse it. Replacements appear as ticket notes in the timeline. If no candidate
+is independent, execution continues with the original and a note, and the
+commit-bound gate requires owner merging for that verdict.
+
+A lead's final review runs every configured reviewer in parallel against one
+commit, in separate indexed step directories with separate retained logs. Other
+workflows keep one reviewer. The attempt stores one combined verdict: every
+reviewer must pass at the same head. Findings and per-reviewer verdict notes name
+the agent; passing reviewers' owner-review reasons are retained. A serious
+finding routes back to the lead. The built-in review has `limit: 5` and routes
+`limit` to `maintain-pr`. Review steps without an explicit limit default to five
+finished rounds, counting the current run. Explicit limits on other workflows
+remain unchanged. The final unresolved round publishes the open findings in the
+PR description; its nonpassing verdict prevents auto-merge. Publication accepts
+that exhausted verdict only at its reviewed head; a moved base still requires
+fresh verification. The open-findings list is compacted to keep the description
+short and points to the full findings on the ticket. The 4,000-character target
+is guidance for the writer, not a factory check.
+
+From round two, lead prompts carry earlier findings and first/last reviewed
+commits. Reviewers check the earlier corrections and serious problems added by
+fixes. A new finding with a `file` unchanged between the first reviewed commit
+and the current head becomes a note. Earlier findings, changed-file findings
+and new findings without a file remain serious. Migration 016 adds the optional
+repository-relative artifact `file`; no existing migration changes.

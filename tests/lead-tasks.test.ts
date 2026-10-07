@@ -1,3 +1,10 @@
+import { readFile, writeFile } from 'node:fs/promises'
+import { join } from 'node:path'
+import { proofContext } from './fixtures/proof-agent.ts'
+import { untestedReasons } from '../src/domain/task-testing.ts'
+import { getMergeGate } from '../src/store/merge-gates.ts'
+import { writePullRequest } from '../src/engine/pr-writer.ts'
+import { withUntestedNotice } from '../src/engine/pr-writer.ts'
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { pollAutoMerge } from '../src/engine/auto-merge.ts'
@@ -9,6 +16,7 @@ import {
   deferred,
   leadFixture,
   leadState,
+  packet,
   result,
   until,
 } from './helpers/lead.ts'
@@ -131,6 +139,172 @@ test('a lead runs branch tasks in parallel, hears each finish while others run, 
   assert.equal(done.ticket.status, 'needs-you')
   assert.deepEqual(f.errors, [])
 })
+
+for (const lightsOut of [false, true])
+  test(`repeated failures reach the lead and refuse identical instructions, then accept changed instructions (lights-out ${lightsOut})`, async (t) => {
+    const f = await leadFixture()
+    t.after(() => f.close())
+    let attemptedRetry = false
+    let sawRefusal = false
+    f.setBehaviour(async (role, invocation, title) => {
+      if (role === 'lead') {
+        const { tasks, repeatedFailure } = leadState(invocation.prompt)
+        if (!tasks.length) {
+          assert.deepEqual(repeatedFailure, [])
+          return result(invocation.directory, {
+            outcome: 'delegate',
+            summary: 'Try two exports',
+            artifacts: [],
+            tasks: ['a', 'b'].map((key) => ({
+              key,
+              title: key,
+              instructions: 'Run the export',
+            })),
+          })
+        }
+        if (tasks.filter((task) => task.status === 'failed').length < 2)
+          return result(invocation.directory, {
+            outcome: 'delegate',
+            summary: 'Waiting for exports',
+            artifacts: [],
+          })
+        assert.equal(repeatedFailure.length, 1)
+        assert.equal(repeatedFailure[0]!.count, 2)
+        assert.deepEqual(repeatedFailure[0]!.tasks, ['a', 'b'])
+        assert.match(repeatedFailure[0]!.signature, /codex crashed/)
+        assert.ok(
+          packet(invocation.prompt).artifacts.some(
+            (artifact) =>
+              artifact.title === 'Task report' &&
+              /## Repeated failure\n\n- Same error 2 times: a, b\./.test(
+                artifact.content,
+              ),
+          ),
+        )
+        if (!attemptedRetry) {
+          attemptedRetry = true
+          return result(invocation.directory, {
+            outcome: 'delegate',
+            summary: 'Try the same instructions once more',
+            artifacts: [],
+            tasks: [
+              {
+                key: 'identical',
+                title: 'Identical',
+                instructions: '  Run\n the   export ',
+              },
+            ],
+          })
+        }
+        if (!tasks.some((task) => task.key === 'changed')) {
+          assert.match(invocation.prompt, /Previous result validation failed/)
+          assert.match(
+            invocation.prompt,
+            /same instructions already failed 2 times with the same error/,
+          )
+          assert.match(
+            invocation.prompt,
+            /classify the cause \(task, plan or factory\), record it as a decision artifact/,
+          )
+          sawRefusal = true
+          return result(invocation.directory, {
+            outcome: 'delegate',
+            summary: 'Use an offline export to work around the factory crash',
+            artifacts: [
+              {
+                kind: 'decision',
+                title: 'Repeated export failure',
+                chose: 'factory: use an offline export',
+                alternative: 'Retry the same Codex export',
+                reason:
+                  'Two identical Codex crashes after removing run details',
+              },
+            ],
+            tasks: [
+              {
+                key: 'changed',
+                title: 'Changed',
+                instructions: 'Write an offline export to recovered.txt',
+              },
+            ],
+          })
+        }
+        return result(invocation.directory, {
+          outcome:
+            tasks.find((task) => task.key === 'changed')!.status === 'merged'
+              ? 'done'
+              : 'delegate',
+          summary: 'Offline export completes the work',
+          artifacts: [],
+        })
+      }
+      if (role === 'builder')
+        return build(
+          invocation,
+          title === 'Changed' ? 'recovered.txt' : `${title}.txt`,
+          'export\n',
+        )
+      return result(invocation.directory, {
+        outcome: title === 'Changed' ? 'passed' : 'changes-needed',
+        summary:
+          title === 'Changed'
+            ? 'Offline export works'
+            : title === 'a'
+              ? 'Codex crashed at /tmp/export-a/run.ts:12 for attempt #123 at 2026-10-06T12:34:56Z after 1.5 seconds'
+              : 'Codex crashed at /Users/test/export-b/cli.ts:98 for attempt #456 at 2026-10-07T09:10:11Z after 250 ms',
+        artifacts: [],
+      })
+    })
+    const lead = await f.lead('Repeated failures', lightsOut)
+    await f.start()
+    const done = await until(
+      () => f.detail(lead.number),
+      (detail) =>
+        detail.ticket.currentStep === 'confirm' ||
+        detail.ticket.status === 'needs-you',
+    )
+    assert.equal(
+      done.ticket.currentStep,
+      'confirm',
+      JSON.stringify(done.attempts),
+    )
+    assert.ok(sawRefusal)
+    assert.deepEqual(
+      done.tasks.map((task) => [task.key, task.status]),
+      [
+        ['a', 'failed'],
+        ['b', 'failed'],
+        ['changed', 'merged'],
+      ],
+    )
+    assert.ok(
+      done.artifacts.some(
+        (artifact) =>
+          artifact.title === 'Task report' &&
+          /## Repeated failure\n\n- Same error 2 times: a, b\./.test(
+            artifact.content ?? '',
+          ),
+      ),
+    )
+    assert.ok(
+      done.artifacts.some(
+        (artifact) =>
+          artifact.decision?.chose === 'factory: use an offline export',
+      ),
+    )
+    const refused = f.invocations.find(
+      (invocation) =>
+        invocation.role === 'lead' &&
+        !invocation.prompt.includes('Previous result validation failed') &&
+        leadState(invocation.prompt).repeatedFailure.length > 0,
+    )!
+    assert.match(
+      await readFile(join(refused.directory, 'result-error.txt'), 'utf8'),
+      /Invalid lead result:.*same instructions already failed 2 times/,
+    )
+
+    assert.deepEqual(f.errors, [])
+  })
 
 test('failed and conflicting tasks reach the lead, and done is refused while tasks still run', async (t) => {
   const f = await leadFixture()
@@ -452,6 +626,7 @@ test('a task agent runs only the builder; workflow overrides and the allowed lis
       default: { cli: 'codex' },
       roles: { reviewer: globalReviewer },
       allowed: [opusHigh],
+      reviewers: [],
     },
     workflows: {
       'data-task': {
@@ -532,7 +707,7 @@ test('a task agent runs only the builder; workflow overrides and the allowed lis
       ?.config
   assert.deepEqual(agentOf('lead', 'Lead the change'), { cli: 'codex' })
   assert.deepEqual(agentOf('builder', 'Chosen'), opusHigh)
-  assert.deepEqual(agentOf('reviewer', 'Chosen'), opusMedium)
+  assert.deepEqual(agentOf('reviewer', 'Chosen'), globalReviewer)
   assert.deepEqual(agentOf('builder', 'Data'), sol)
   assert.deepEqual(agentOf('reviewer', 'Data'), opusMedium)
   assert.deepEqual(agentOf('builder', 'Plain'), { cli: 'codex' })
@@ -545,7 +720,207 @@ test('a task agent runs only the builder; workflow overrides and the allowed lis
     child.attempts.map((attempt) => [attempt.stepId, attempt.agent]),
     [
       ['build', opusHigh],
-      ['review', opusMedium],
+      ['review', globalReviewer],
     ],
   )
+})
+
+for (const testing of ['missing', 'verify'] as const) {
+  test(`a built-in branch task ${testing === 'missing' ? 'lands untested without verify, including after restart' : 'runs its tester when verify is present'}`, async (t) => {
+    const f = await leadFixture({}, testing)
+    t.after(() => f.close())
+    if (testing === 'verify')
+      assert.equal(
+        f.repository.kit?.status,
+        'valid',
+        f.repository.kit?.error ?? 'Expected a valid verify kit',
+      )
+    const builderWait = deferred()
+    f.setBehaviour(async (role, invocation) => {
+      if (role === 'lead') {
+        const { tasks } = leadState(invocation.prompt)
+        return result(invocation.directory, {
+          outcome: tasks.length ? 'done' : 'delegate',
+          summary: 'One task',
+          artifacts: [],
+          ...(tasks.length
+            ? {}
+            : {
+                tasks: [
+                  {
+                    key: 'change',
+                    title: 'Change',
+                    instructions: 'Write change.txt',
+                  },
+                ],
+              }),
+        })
+      }
+      if (role === 'builder') {
+        await builderWait.wait(invocation.signal)
+        return build(invocation, 'change.txt', 'changed\n')
+      }
+      assert.equal(role, 'tester')
+      const instance = proofContext(invocation.prompt).instances[0]!
+      const response = await fetch(`${instance.url}/checkout`, {
+        method: 'POST',
+        body: '{}',
+      })
+      assert.equal(response.status, 200)
+      const path = join(instance.evidenceDir, 'checkout.json')
+      await writeFile(path, await response.text())
+      return result(invocation.directory, {
+        outcome: 'passed',
+        summary: 'Checkout passed',
+        artifacts: [
+          {
+            kind: 'evidence',
+            title: 'Checkout',
+            path,
+            scenario: 'Checkout',
+            scenarioResult: 'passed',
+          },
+        ],
+      })
+    })
+    const lead = await f.lead()
+    await f.start()
+    await until(
+      async () => f.invocations.filter((item) => item.role === 'builder'),
+      (items) => items.length === 1,
+    )
+    const running = await f.detail(lead.number)
+    const childNumber = running.tasks[0]!.child!.number
+    const child = await f.detail(childNumber)
+    const expected =
+      testing === 'missing'
+        ? [{ stepId: 'test', missingCapabilities: ['verify'] }]
+        : []
+    assert.deepEqual(child.ticket.skippedSteps, expected)
+    if (testing === 'missing') {
+      await f.stop()
+      await f.start()
+      await until(
+        async () => f.invocations.filter((item) => item.role === 'builder'),
+        (items) => items.length === 2,
+      )
+      assert.deepEqual(
+        (await f.detail(childNumber)).ticket.skippedSteps,
+        expected,
+      )
+    }
+    builderWait.release()
+    const done = await until(
+      () => f.detail(lead.number),
+      (detail) => detail.ticket.currentStep === 'confirm',
+    )
+    assert.equal(done.tasks[0]!.status, 'merged')
+    assert.ok((await f.files(done.ticket.branch)).includes('change.txt'))
+    const finishedChild = await f.detail(childNumber)
+    assert.equal(finishedChild.ticket.status, 'done')
+    assert.deepEqual(finishedChild.ticket.skippedSteps, expected)
+    const testers = f.invocations.filter((item) => item.role === 'tester')
+    assert.equal(testers.length, testing === 'missing' ? 0 : 1)
+    if (testing === 'missing') {
+      assert.match(done.tasks[0]!.result!, /Landed untested/)
+      assert.ok(
+        done.artifacts.some(
+          (artifact) =>
+            artifact.title === 'Task report' &&
+            artifact.content?.includes('untested'),
+        ),
+      )
+      const warnings = untestedReasons(done)
+      assert.deepEqual(warnings, ['Untested task change: no verify capability'])
+      const signal = AbortSignal.timeout(60_000)
+      const head = await f.workspaces.head(done.ticket, signal)
+      const description = await writePullRequest(
+        f,
+        {
+          ticket: done.ticket,
+          attempt: done.attempts.at(-1)!,
+          workflow: done.workflow,
+          step: done.workflow.steps.at(-1)!,
+          repository: f.repository,
+        },
+        f.workspaces.path(done.ticket),
+        head,
+        signal,
+      )
+      assert.match(description, /Untested task change: no verify capability/)
+
+      assert.match(
+        withUntestedNotice('Lead PR', warnings),
+        /Untested task change/,
+      )
+    } else {
+      assert.equal(
+        finishedChild.attempts.find((attempt) => attempt.stepId === 'test')
+          ?.outcome,
+        'passed',
+      )
+      assert.deepEqual(untestedReasons(done), [])
+    }
+    assert.deepEqual(f.errors, [])
+  })
+}
+
+test('a task-pr without verify reaches the owner merge gate and its published description says untested', async (t) => {
+  const f = await leadFixture({}, 'missing')
+  t.after(() => f.close())
+  f.setBehaviour(async (role, invocation) => {
+    if (role === 'lead')
+      return result(invocation.directory, {
+        outcome: 'delegate',
+        summary: 'Wait for PR',
+        artifacts: [],
+        ...(leadState(invocation.prompt).tasks.length
+          ? {}
+          : {
+              tasks: [
+                {
+                  key: 'docs',
+                  title: 'Docs',
+                  instructions: 'Write docs.txt',
+                  land: 'pr',
+                },
+              ],
+            }),
+      })
+    if (role === 'builder') return build(invocation, 'docs.txt', 'docs\n')
+    assert.equal(role, 'reviewer')
+    return result(invocation.directory, {
+      outcome: 'passed',
+      summary: 'Reviewed',
+      artifacts: [],
+    })
+  })
+  const lead = await f.lead()
+  await f.start()
+  const ready = await until(
+    () => f.detail(lead.number),
+    (detail) => detail.tasks[0]?.status === 'pr-ready',
+  )
+  const child = await f.detail(ready.tasks[0]!.child!.number)
+  assert.equal(child.ticket.waiting?.for, 'pull-request-merge')
+  assert.deepEqual(child.ticket.skippedSteps, [
+    { stepId: 'test', missingCapabilities: ['verify'] },
+  ])
+  assert.ok(
+    child.artifacts.some(
+      (artifact) =>
+        artifact.title === 'Pull request description' &&
+        artifact.content?.includes('Untested: no verify capability'),
+    ),
+  )
+  assert.equal(f.invocations.filter((item) => item.role === 'tester').length, 0)
+  const snapshot = await getMergeGate(f.database, child.ticket.id)
+  assert.ok(
+    snapshot?.latest.needsOwner.includes(
+      'Untested: no verify capability (skipped test)',
+    ),
+  )
+  assert.equal(snapshot?.latest.ready, true)
+
+  assert.deepEqual(f.errors, [])
 })

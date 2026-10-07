@@ -1,7 +1,9 @@
 // The factory's records as the store returns them and the API sends them.
 // Timestamps are ISO 8601 strings so the same shapes work on both sides of the wire.
+import type { TicketSummary } from './summary.ts'
 import type { AgentChoice } from './catalog.ts'
 import type { Next } from './routing.ts'
+import type { SkippedStep } from './task-testing.ts'
 
 export const REPOSITORY_STATUSES = ['pending', 'ready', 'failed'] as const
 export type RepositoryStatus = (typeof REPOSITORY_STATUSES)[number]
@@ -58,6 +60,7 @@ export const ARTIFACT_KINDS = [
   'evidence',
   'log',
   'note',
+  'decision',
 ] as const
 export type ArtifactKind = (typeof ARTIFACT_KINDS)[number]
 
@@ -80,6 +83,9 @@ export const EVENT_KINDS = [
   'ticket.linked',
   'task.updated',
   'ticket.status',
+  'ticket.summary',
+  'lesson.proposed',
+  'lesson.decided',
   'ticket.pull-request',
   'attempt.queued',
   'attempt.claimed',
@@ -131,7 +137,15 @@ export interface Waiting {
   readonly since: string
 }
 
+export function defaultLightsOut(workflow: string): boolean {
+  return workflow === 'lead' || workflow === 'program-lead'
+}
+
 export interface Ticket {
+  readonly summary: TicketSummary | null
+  readonly summaryAt: string | null
+  readonly skippedSteps?: readonly SkippedStep[]
+  readonly lightsOut: boolean
   readonly id: number
   /** Shown to people as #number. */
   readonly number: number
@@ -181,7 +195,15 @@ export interface Attempt {
   readonly finishedAt: string | null
 }
 
+export interface AgentDecision {
+  readonly chose: string
+  readonly alternative: string
+  readonly reason: string
+}
+
 export interface Artifact {
+  readonly file?: string | null
+  readonly decision?: AgentDecision | null
   /** Factory-observed proof surface commit; agents cannot set it in result.json. */
   readonly observedCommit?: string | null
   readonly scenarioResult?:
@@ -236,6 +258,7 @@ export interface TicketLink {
 export const TASK_STATUSES = [
   'pending',
   'running',
+  'parked',
   'pr-ready',
   'merged',
   'left-open',
@@ -267,6 +290,7 @@ export interface LeadTask {
   /** The lead branch commit a branch task started from. */
   readonly baseCommit: string | null
   readonly child: {
+    readonly skippedSteps?: readonly SkippedStep[]
     readonly id: number
     readonly number: number
     readonly status: TicketStatus
