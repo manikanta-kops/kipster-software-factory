@@ -68,6 +68,12 @@ describe('demo data', () => {
       [tickets.running, 'running', null],
       [tickets.approvePlan, 'needs-you', 'human'],
       [tickets.askAfterLimit, 'needs-you', 'ask'],
+      [tickets.planToApprove, 'needs-you', 'human'],
+      [tickets.planToChange, 'needs-you', 'human'],
+      [tickets.planToReject, 'needs-you', 'human'],
+      [tickets.askToRetry, 'needs-you', 'ask'],
+      [tickets.askToMove, 'needs-you', 'ask'],
+      [tickets.askToCancel, 'needs-you', 'ask'],
       [tickets.waitingForMerge, 'needs-you', 'pull-request-merge'],
       [tickets.done, 'done', null],
       [tickets.bundleFailed, 'queued', null],
@@ -83,7 +89,7 @@ describe('demo data', () => {
       assert.equal(ticket.status, status, `#${number}`)
       assert.equal(ticket.waiting?.for ?? null, waitingFor, `#${number}`)
     }
-    assert.equal((await listTickets(demo.database)).length, 22)
+    assert.equal((await listTickets(demo.database)).length, 28)
   })
 
   test('retired quick-change keeps its stored workflow and completed plan', async () => {
@@ -346,6 +352,41 @@ describe('demo data', () => {
       artifacts.map((artifact) => artifact.kind),
       ['plan', 'comment', 'plan', 'finding', 'finding'],
     )
+  })
+
+  test('each plan and ask owner action has its own waiting ticket', async () => {
+    const { tickets } = demo
+    const plans = [
+      tickets.approvePlan,
+      tickets.planToApprove,
+      tickets.planToChange,
+      tickets.planToReject,
+    ]
+    const asks = [
+      tickets.askAfterLimit,
+      tickets.askToRetry,
+      tickets.askToMove,
+      tickets.askToCancel,
+    ]
+    assert.equal(new Set([...plans, ...asks]).size, 8)
+    for (const number of plans) {
+      const { ticket, artifacts } = await detail(number)
+      assert.equal(ticket.waiting?.stepId, 'approve-plan', `#${number}`)
+      assert.match(
+        artifacts.find((artifact) => artifact.kind === 'plan')?.content ?? '',
+        /## Acceptance scenarios/,
+      )
+    }
+    for (const number of asks.slice(1)) {
+      const { ticket, workflow, artifacts } = await detail(number)
+      assert.equal(ticket.waiting?.askReason, 'limit', `#${number}`)
+      assert.equal(ticket.currentStep, 'review')
+      assert.ok(workflow.steps.some((step) => step.id === 'lead'))
+      assert.deepEqual(
+        artifacts.map((artifact) => artifact.kind),
+        ['plan', 'finding', 'finding'],
+      )
+    }
   })
 
   test('the running and merge-waiting tickets look real', async () => {

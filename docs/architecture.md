@@ -560,6 +560,10 @@ and each lead's `done` to `final-test`. Each task's result is
 facts plus `untestedReasons` of the stored lead, so only the docs-site gate lists
 the checker's unverified item. The agent results are synthetic.
 
+Each owner action has its own waiting demo ticket: three plans (to approve,
+change and reject) and three review-limit asks (to retry, move and cancel), so
+every verification scenario runs on one seeded instance.
+
 ## Independent proof (Slice 2B)
 
 Tester and reproducer steps use `engine/proof.ts`, separate from ordinary agent

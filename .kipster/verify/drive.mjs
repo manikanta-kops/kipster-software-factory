@@ -77,10 +77,25 @@ const ticket = (title) => {
   return found.number
 }
 const openTicket = (title) => go(`/tickets/${ticket(title)}`)
-const status = page.locator('.ticket-meta .badge').first()
+// Lead tickets default to lights-out, whose badge precedes the status.
+const status = page
+  .locator('.ticket-meta .badge')
+  .filter({ hasNotText: 'Lights-out' })
+  .first()
 const proofTitle = 'Cart quantity changes are proven'
-const planTitle = 'Add CSV export to reports'
 const askTitle = 'Validate email addresses on sign-up'
+// Each owner action has its own seeded ticket, so one instance runs them all.
+const ownerActionTitles = {
+  approve: 'Add gift notes to orders (plan to approve)',
+  changes: 'Add a size guide to product pages (plan to change)',
+  reject: 'Add a loyalty points page (plan to reject)',
+  retry: 'Validate postcodes at checkout (ask to retry)',
+  move: 'Validate phone numbers on the account page (ask to move)',
+  cancel: 'Validate coupon codes in the cart (ask to cancel)',
+}
+const summaries = () => page.getByRole('region', { name: 'Ticket summaries' })
+const summaryLink = (title) =>
+  summaries().getByRole('link', { name: title, exact: true })
 const openFromToday = async (title) => {
   await go('/')
   await page
@@ -128,29 +143,50 @@ const checkedLead = async (title, taskKey, result) => {
 let result = 'failed'
 try {
   switch (scenario) {
-    case 'today':
+    case 'today': {
       await go('/')
-      await expect(heading('Needs you')).toBeVisible()
+      await expect(heading('Ticket summaries')).toBeVisible()
       await expect(heading('Moving')).toBeVisible()
       await expect(page.locator('output.status')).toHaveText('Live')
-      await expect(page.getByText('Add a dark mode toggle')).toBeHidden()
-      await page.getByText('Show finished (2)', { exact: true }).click()
-      await expect(page.getByText('Add a dark mode toggle')).toBeVisible()
+      await expect(summaryLink(askTitle)).toBeVisible()
+      await expect(
+        page
+          .getByRole('region', { name: 'Moving' })
+          .getByText('Update the README badges', { exact: true }),
+      ).toBeVisible()
+      // Counted from the API, so earlier reject or cancel runs do not matter.
+      const finished = tickets.tickets.filter((item) =>
+        ['done', 'cancelled'].includes(item.status),
+      ).length
+      const finishedList = page.locator('.finished-list')
+      await expect(finishedList).toBeHidden()
+      await page
+        .getByText(`Show finished (${finished})`, { exact: true })
+        .click()
+      await expect(
+        finishedList.getByText('Add a dark mode toggle', { exact: true }),
+      ).toBeVisible()
+      observations.push(`Show finished (${finished})`)
       break
+    }
     case 'filter': {
       await go('/')
       await page
         .getByRole('button', { name: 'everything', exact: true })
         .click()
       const filters = page.getByRole('dialog', { name: 'Filters' })
-      await filters.getByLabel('Feature', { exact: true }).check()
+      await filters.getByLabel('Task pr', { exact: true }).check()
       await page.keyboard.press('Escape')
       await expect(filters).toBeHidden()
       await expect(
-        page.getByRole('button', { name: 'feature work', exact: true }),
+        page.getByRole('button', { name: 'task pr work', exact: true }),
       ).toBeFocused()
-      await expect(heading(askTitle)).toBeHidden()
-      await expect(heading(proofTitle)).toBeVisible()
+      await expect(summaryLink(askTitle)).toBeHidden()
+      await expect(summaryLink('Optional check still running')).toBeVisible()
+      await page
+        .getByRole('button', { name: 'Show everything', exact: true })
+        .click()
+      await expect(summaryLink(askTitle)).toBeVisible()
       break
     }
     case 'repositories':
@@ -193,13 +229,18 @@ try {
         exact: true,
       })
       await expect(toggle).not.toBeChecked()
+      // The toggle is controlled by the saved policy, so click and wait for it.
       try {
-        await toggle.check()
+        await toggle.click()
+        await expect(toggle).toBeChecked()
         await page.reload()
         await expect(toggle).toBeChecked()
       } finally {
-        await toggle.uncheck()
+        await expect(toggle).toBeEnabled()
+        if (await toggle.isChecked()) await toggle.click()
       }
+      await expect(toggle).not.toBeChecked()
+      await page.reload()
       await expect(toggle).not.toBeChecked()
       break
     }
@@ -281,7 +322,7 @@ try {
       await page
         .getByLabel('Repository', { exact: true })
         .selectOption('kipster/demo-shop')
-      await page.getByRole('radio', { name: /^quick-change / }).check()
+      await page.getByRole('radio', { name: /^lead / }).check()
       await page
         .getByRole('group', { name: 'Read-only dependencies' })
         .getByRole('checkbox', { name: 'kipster/legacy-api', exact: true })
@@ -289,7 +330,7 @@ try {
       const title = `Map ticket ${Date.now()}`
       await page.getByLabel('Title', { exact: true }).fill(title)
       await page
-        .getByLabel('Description', { exact: true })
+        .getByLabel('Description Markdown supported', { exact: true })
         .fill('## Goal\n\nKeep **Unicode** filenames.')
       await page.getByText('Preview description', { exact: true }).click()
       await expect(heading('Goal')).toBeVisible()
@@ -309,10 +350,14 @@ try {
       await page
         .getByLabel('Repository', { exact: true })
         .selectOption('kipster/invalid-kit')
-      for (const name of ['feature', 'bug'])
-        await expect(
-          page.getByRole('radio', { name: new RegExp(`^${name} `) }),
-        ).toBeDisabled()
+      await expect(page.getByRole('radio', { name: /^bug / })).toBeDisabled()
+      await expect(
+        page.getByText(
+          'This repository needs a verified kit to run this workflow.',
+          { exact: true },
+        ),
+      ).toBeVisible()
+      await expect(page.getByRole('radio', { name: /^lead / })).toBeEnabled()
       await page
         .getByRole('button', { name: 'Start onboard-repo ticket', exact: true })
         .click()
@@ -324,7 +369,7 @@ try {
     case 'approve':
     case 'changes':
     case 'reject': {
-      await openTicket(planTitle)
+      await openTicket(ownerActionTitles[scenario])
       const panel = page.getByRole('region', {
         name: 'Review and approve the plan',
       })
@@ -342,7 +387,7 @@ try {
           'Add a comment to explain the changes needed.',
         )
         await page
-          .getByLabel('Comment', { exact: true })
+          .getByLabel('Comment Required for changes', { exact: true })
           .fill('Cover empty reports and Unicode filenames.')
       }
       const button =
@@ -360,7 +405,7 @@ try {
     case 'retry':
     case 'move':
     case 'cancel':
-      await openTicket(askTitle)
+      await openTicket(ownerActionTitles[scenario])
       await expect(heading('A loop reached its limit.')).toBeVisible()
       if (scenario !== 'cancel') {
         await page
@@ -376,7 +421,7 @@ try {
       if (scenario === 'move')
         await page
           .getByLabel('Move to step', { exact: true })
-          .selectOption('build')
+          .selectOption('lead')
       await page
         .getByRole('button', {
           name:
@@ -567,12 +612,10 @@ try {
       await go('/decisions')
       await expect(heading('Decisions')).toBeVisible()
       await expect(
-        page.getByText('No pending decisions in the latest 100 outcomes.', {
-          exact: true,
-        }),
-      ).toBeVisible()
-      await expect(
-        page.getByText('No decisions yet.', { exact: true }),
+        page.getByText(
+          'No decisions yet. They appear here when a step decides how a ticket moves on.',
+          { exact: true },
+        ),
       ).toBeVisible()
       break
     case 'responsive':
@@ -582,7 +625,7 @@ try {
         for (const path of [
           '/',
           '/repositories',
-          '/workflows/quick-change',
+          '/workflows/lead',
           '/tickets/new',
           '/decisions',
         ]) {

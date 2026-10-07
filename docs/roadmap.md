@@ -223,6 +223,10 @@ check failed on the pull request" is back at build with the `Bundle` link and lo
 excerpt, and "Optional check still running" is ready with `Bundle` pending and
 not required. `drive.mjs ci-failed` and `ci-pending` assert them in the browser.
 
+The `.kipster/verify` drivers and feature maps now follow the current app and
+built-in workflows. Every scenario runs once, in the guide's order, on one
+seeded instance, with a separate demo ticket for each plan and ask action.
+
 ### Lessons (implemented)
 
 Ticket completion, cancellation and owner waits now propose one-line lessons
