@@ -20,6 +20,7 @@ import { acquireSchedulerLock } from '../src/store/scheduler.ts'
 import {
   listTasks,
   parkForTasks,
+  reportTasks,
   startTask,
   updateTask,
 } from '../src/store/tasks.ts'
@@ -31,6 +32,7 @@ import {
   markRepositoryReady,
 } from '../src/store/repositories.ts'
 import {
+  cancelTicket,
   claimAttempts,
   completeAttempt,
   createTicket,
@@ -95,6 +97,9 @@ export interface DemoTickets {
   readonly lightsOutLead: number
   readonly lightsOutChild: number
   readonly lightsOutUntestedChild: number
+  readonly replacedLead: number
+  readonly replacedChild: number
+  readonly replacementChild: number
 }
 
 export async function seedDemo(
@@ -614,6 +619,85 @@ async function seedLocked(
     'Synthetic merged task. Untested: no verify capability (skipped test). No real merge ran.',
   )
 
+  // A lead whose first task was cancelled and retried under the next key, now at its merge wait.
+  const replacedLead = await create(
+    'Export order history (synthetic demo)',
+    'Synthetic demo: the first export task was cancelled and replaced by a retry. No real agents ran.',
+  )
+  await planAndApprove(replacedLead, planFor('order history export'))
+  const delegateExport = async (key: string, title: string) => {
+    await run(replacedLead, {
+      outcome: 'delegate',
+      summary: `Delegated ${key}.`,
+      tasks: [
+        {
+          key,
+          title,
+          instructions: 'Add a CSV download of the order history.',
+          land: 'branch',
+        },
+      ],
+    })
+    const tasksRun = await run(replacedLead, undefined, 'system')
+    await parkForTasks(database, tasksRun.attempt.id)
+    const task = (await listTasks(database, tasksRun.ticket.id)).find(
+      (item) => item.key === key,
+    )!
+    const started = await startTask(
+      database,
+      task.id,
+      {
+        repository: DEMO_REPOSITORY,
+        workflow: taskWorkflow,
+        title,
+        body: 'Synthetic child task; no real code or verification was executed.',
+      },
+      null,
+    )
+    return { attemptId: tasksRun.attempt.id, task, child: started!.number }
+  }
+  const first = await delegateExport(
+    'export-fix',
+    'Fix the order history export (synthetic demo)',
+  )
+  await run(first.child, {
+    outcome: 'done',
+    summary: 'Started the export on the old report query.',
+  })
+  const cancelReason = 'The export should reuse the new report query instead.'
+  await cancelTicket(database, {
+    ticketNumber: first.child,
+    reason: cancelReason,
+  })
+  await updateTask(
+    database,
+    first.task.id,
+    'failed',
+    `Child ticket #${first.child} was cancelled. Reason: ${cancelReason}`,
+  )
+  await reportTasks(database, first.attemptId)
+  const retry = await delegateExport(
+    'export-fix-2',
+    'Fix the order history export on the new query (synthetic demo)',
+  )
+  await run(retry.child, {
+    outcome: 'done',
+    summary: 'Built the export on the new report query.',
+  })
+  await run(retry.child, {
+    outcome: 'passed',
+    summary: 'Downloaded the synthetic order history as CSV.',
+  })
+  await updateTask(
+    database,
+    retry.task.id,
+    'merged',
+    'Synthetic merged task. No real merge ran.',
+  )
+  await reportTasks(database, retry.attemptId)
+  await buildAndReview(replacedLead)
+  await openPullRequestAndWait(replacedLead, 44)
+
   const retired = parseUpload(RETIRED_QUICK_CHANGE)
   if (!retired.ok) {
     throw new Error(
@@ -664,6 +748,9 @@ async function seedLocked(
     lightsOutLead,
     lightsOutChild,
     lightsOutUntestedChild,
+    replacedLead,
+    replacedChild: first.child,
+    replacementChild: retry.child,
     retiredWorkflow,
   }
 }

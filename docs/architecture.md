@@ -131,8 +131,11 @@ retry counts, task states, tester/reviewer outcomes, typed decision counts,
 skipped steps, scenario evidence and merge gate facts. Agent summaries,
 descriptions, findings and decision explanations never enter the report.
 The API adds the summary to listed tickets and ticket detail. Ticket pages
-show it above the details; Today shows compact rows for attention and tickets
-finished in the last 24 hours. Reports hide while a ticket resumes running.
+show it above the details; Today shows it on each owner ticket's row, with a
+lead's sub-tasks folded underneath. Reports hide while a ticket resumes running.
+`domain/tasks.ts` `replacements` derives which ended task a later task with the
+same key stem replaced; the summary, the listed child's `task.replacedBy` and a
+child's `parentTask.replacedBy` use it.
 
 ### Lessons
 

@@ -1,6 +1,10 @@
 import type { TicketSummary } from '../../../src/api/contract.ts'
 
-export function SummaryStatus({ summary }: { summary: TicketSummary }) {
+export function SummaryStatus({
+  summary,
+}: {
+  summary: Pick<TicketSummary, 'status' | 'needsYouCount'>
+}) {
   return (
     <span className={`summary-status ${summary.status}`}>
       {summary.status === 'ready'
@@ -12,11 +16,30 @@ export function SummaryStatus({ summary }: { summary: TicketSummary }) {
   )
 }
 
-export function TicketSummaryCard({ summary }: { summary: TicketSummary }) {
+/** A task the lead retried reads as replaced, never as blocked. */
+export function ReplacedBy({ number }: { number: number }) {
+  return (
+    <a className="summary-status replaced" href={`#/tickets/${number}`}>
+      Replaced by #{number}
+    </a>
+  )
+}
+
+export function TicketSummaryCard({
+  summary,
+  replacedBy,
+}: {
+  summary: TicketSummary
+  replacedBy?: number | null | undefined
+}) {
   return (
     <section className="ticket-summary" aria-label="Ticket summary">
       <div className="summary-top">
-        <SummaryStatus summary={summary} />
+        {replacedBy ? (
+          <ReplacedBy number={replacedBy} />
+        ) : (
+          <SummaryStatus summary={summary} />
+        )}
         <button
           className="text-link"
           onClick={() => {
