@@ -137,6 +137,12 @@ test('evidence belongs to its test run, media uses the configured API, and logs 
   }
   await viewer.getByRole('button', { name: 'Close image' }).click()
   await expect(thumbnail).toBeFocused()
+  await thumbnail.click()
+  await expect(viewer).toBeVisible()
+  await viewer.locator('img').click()
+  await expect(viewer).toBeVisible()
+  await page.mouse.click(8, 8)
+  await expect(viewer).toHaveCount(0)
   const video = run.locator('video')
   await expect(video).toHaveAttribute('controls', '')
   await expect(video).not.toHaveAttribute('autoplay')
