@@ -2,9 +2,10 @@ import { acceptedLessons } from '../store/lessons.ts'
 import type { Database } from '../store/database.ts'
 import type { DependencyCheckout } from '../workspace/dependencies.ts'
 import { readFile, realpath, stat, writeFile, rm } from 'node:fs/promises'
-import { dirname, resolve, relative, isAbsolute, sep } from 'node:path'
+import { dirname, join, resolve, relative, isAbsolute, sep } from 'node:path'
 import { roles, type RoleName } from '../domain/catalog.ts'
-import type { TicketDetail } from '../store/tickets.ts'
+import { addAttemptArtifacts, type TicketDetail } from '../store/tickets.ts'
+import { newEvidenceFile } from '../artifacts/storage.ts'
 import type { AgentStep } from '../domain/workflow.ts'
 import { parseStepResult, type StepResult } from '../domain/lifecycle.ts'
 import { CONTEXT_INDEX_PATH, type TrustedInstructions } from '../kit/kit.ts'
@@ -173,6 +174,32 @@ export function contextIndexSection(index: string): string {
   }
   return `Repository context index (${CONTEXT_INDEX_PATH} from the default branch). Open a linked document when it is relevant to this step; relative links resolve from .kipster/context/.\n\n${text}`
 }
+/**
+ * Writes the prompt for the agent, keeps a copy as evidence (the scratch directory is
+ * removed when the ticket ends) and opens the session's live log.
+ */
+export async function openSession(input: {
+  database: Database
+  home: string
+  ticketId: number
+  attemptId: number
+  directory: string
+  prompt: string
+  title: string
+}): Promise<string> {
+  const { database, home, ticketId, directory, prompt, title } = input
+  await writeFile(join(directory, 'prompt.md'), prompt)
+  const saved = await newEvidenceFile(home, ticketId, '.md')
+  await writeFile(saved, prompt)
+  const log = await newEvidenceFile(home, ticketId)
+  await writeFile(log, '')
+  await addAttemptArtifacts(database, input.attemptId, [
+    { kind: 'log', title: `${title} prompt`.slice(0, 200), path: saved },
+    { kind: 'log', title: title.slice(0, 200), path: log },
+  ])
+  return log
+}
+
 export async function readResult(
   directory: string,
   role: RoleName,

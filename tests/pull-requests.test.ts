@@ -797,9 +797,16 @@ test('writer invalid result retries in a fresh session before publication', asyn
     await readFile(join(directory, 'writer-2', 'prompt.md'), 'utf8'),
     /previous description/,
   )
-  assert.equal(
-    (await f.detail()).artifacts.filter((a) => a.kind === 'log').length,
-    2,
+  assert.deepEqual(
+    (await f.detail()).artifacts
+      .filter((a) => a.kind === 'log')
+      .map((a) => a.title),
+    [
+      'writer run 1 prompt',
+      'writer run 1',
+      'writer run 2 prompt',
+      'writer run 2',
+    ],
   )
 })
 

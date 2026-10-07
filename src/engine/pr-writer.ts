@@ -1,7 +1,6 @@
 import { openReviewFindings } from '../domain/review.ts'
 import { untestedReasons } from '../domain/task-testing.ts'
 import { dependencySession } from './dependencies.ts'
-import { newEvidenceFile } from '../artifacts/storage.ts'
 import { scenarioIndex } from '../domain/evidence.ts'
 import { FACTORY_MARKER } from '../github/feedback.ts'
 import type { ArtifactInput } from '../domain/lifecycle.ts'
@@ -10,7 +9,7 @@ import { mkdir, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { RunnerOptions } from './runner.ts'
 import { agentFor } from './tasks.ts'
-import { buildPrompt, readResult } from './prompt.ts'
+import { buildPrompt, openSession, readResult } from './prompt.ts'
 import { run } from '../executors/process.ts'
 import { loadTrustedInstructions } from '../kit/kit.ts'
 import {
@@ -113,12 +112,15 @@ Only evidence at this exact commit counts. If the workflow has no tester, state 
         `origin/${repository.defaultBranch}...HEAD`,
       ]),
     })
-    await writeFile(join(directory, 'prompt.md'), prompt)
-    const log = await newEvidenceFile(home, ticket.id)
-    await writeFile(log, '')
-    await addAttemptArtifacts(database, attempt.id, [
-      { kind: 'log', title: `writer run ${retry}`, path: log },
-    ])
+    const log = await openSession({
+      database,
+      home,
+      ticketId: ticket.id,
+      attemptId: attempt.id,
+      directory,
+      prompt,
+      title: `writer run ${retry}`,
+    })
     const config = await agentFor(options, context, 'writer')
     let failure: string | undefined
     let note: ArtifactInput | undefined
