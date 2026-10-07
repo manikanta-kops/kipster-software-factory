@@ -33,7 +33,7 @@ import {
 } from '../components/Shared.tsx'
 import { repositoriesQuery, ticketQuery } from '../queries.ts'
 import { ArtifactView } from '../components/ArtifactView.tsx'
-import { isMedia, MediaGallery } from '../components/Media.tsx'
+import { isMedia, MediaGallery, MediaLibrary } from '../components/Media.tsx'
 import { RepositoryTag } from '../components/Filters.tsx'
 import { Icon, stepHue, stepIcon } from '../components/Icon.tsx'
 import { agentLabel, doing, humanize, stepName } from '../words.ts'
@@ -130,16 +130,11 @@ export function TicketPage({
           {...(evidenceId === undefined ? {} : { selected: evidenceId })}
         />
         {media.length > 0 && (
-          <section
-            className="attachments evidence-card"
-            aria-labelledby="attachments-heading"
-          >
-            <h2 className="section-title" id="attachments-heading">
-              Screenshots and recordings
-              <span className="steps-progress">{media.length}</span>
-            </h2>
-            <MediaGallery artifacts={media} ticketNumber={ticket.number} />
-          </section>
+          <MediaLibrary
+            artifacts={media}
+            attempts={query.data.attempts}
+            ticketNumber={ticket.number}
+          />
         )}
       </div>
       <aside className="ticket-side">
@@ -1038,6 +1033,7 @@ function AttemptEntry({
           artifacts={artifacts.filter(isMedia)}
           ticketNumber={detail.ticket.number}
           compact
+          limit={6}
         />
       )}
       <FileList

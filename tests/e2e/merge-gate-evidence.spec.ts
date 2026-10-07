@@ -57,9 +57,15 @@ test('curated scenario evidence opens at a stable same-origin address; archive a
   const number = factory.tickets.proofPassed
   await page.goto(`${factory.url}/#/tickets/${number}`)
   const index = page.getByRole('region', { name: 'Scenario evidence' })
+  const row = index.getByRole('button', {
+    name: 'Cart quantity updates the total',
+  })
+  await expect(row).toHaveAttribute('aria-expanded', 'false')
   await expect(
-    index.getByRole('heading', { name: 'Cart quantity updates the total' }),
-  ).toBeVisible()
+    index.getByRole('link', { name: 'Open evidence item' }),
+  ).toHaveCount(0)
+  await row.click()
+  await expect(row).toHaveAttribute('aria-expanded', 'true')
   await expect(index).toContainText('tester: passed · Commit aaaaaaa · current')
   const detail = (await (
     await request.get(`${factory.url}/api/tickets/${number}`)
