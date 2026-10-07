@@ -173,10 +173,10 @@ try {
       break
     }
     case 'workflows': {
-      await go('/workflows/quick-change')
-      await expect(heading('quick-change')).toBeVisible()
+      await go('/workflows/bug')
+      await expect(heading('bug')).toBeVisible()
       const diagram = page.getByRole('figure', {
-        name: 'quick-change workflow',
+        name: 'bug workflow',
       })
       const step = diagram.getByRole('button', {
         name: 'review: reviewer',
@@ -396,6 +396,12 @@ try {
       await page.keyboard.press('Escape')
       await expect(page.getByRole('dialog')).toHaveCount(0)
       await index
+        .getByRole('button', {
+          name: 'Cart quantity updates the total',
+          exact: true,
+        })
+        .click()
+      await index
         .getByRole('link', { name: 'Open evidence item', exact: true })
         .click()
       await expect(
@@ -412,7 +418,10 @@ try {
         })
         .click()
       const run = page.locator('.attempt-entry').filter({
-        has: page.getByRole('heading', { name: 'test tester', exact: true }),
+        has: page.getByRole('heading', {
+          name: 'final-test tester',
+          exact: true,
+        }),
       })
       await run
         .getByText('Cart driving log (synthetic demo) log', { exact: true })

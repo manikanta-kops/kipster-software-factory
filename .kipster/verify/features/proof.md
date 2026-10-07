@@ -10,7 +10,7 @@
 
 ## How to get to it (user point of view)
 
-On Today open Cart quantity changes are proven or Cart proof needs another run. Use Open evidence item in Scenario evidence. For CI outcomes, on Today open Bundle check failed on the pull request or Optional check still running.
+On Today open Cart quantity changes are proven or Cart proof needs another run. In Scenario evidence, expand Cart quantity updates the total and use Open evidence item. For CI outcomes, on Today open Bundle check failed on the pull request or Optional check still running.
 
 ## Driving it
 
