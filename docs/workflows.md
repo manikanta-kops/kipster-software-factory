@@ -189,6 +189,28 @@ path and reason. Reproducers record alternative attempts before `not-reproduced`
 which still cannot start a fix. Only irreversible actions ask; other human steps,
 limits and merge policy remain in effect.
 
+## Concurrent testing and review
+
+A tester immediately followed by a reviewer runs alongside that reviewer when
+its `passed` route continues there (implicitly or explicitly). No step field is
+needed. The built-in lead and bug workflows use this pairing. The tester still
+proves in running disposable instances; all configured lead reviewers still
+run as separate sessions. Each step has its own attempt, directories and logs.
+The pair occupies one scheduler slot and shares its timeout. Both verdicts must
+match the pinned branch head. Both passes continue after review; a correction
+wake carries both results and findings, only after both finish.
+
+Each joined round counts one finished run for each step, even when it passes.
+Existing numeric limits and `limit` routes apply independently. When results
+route differently, asks/cancellation win over backward correction routes, then
+forward routes; the tester wins ties. A tester at its third failing round still
+asks unless configured otherwise. A lead review at its fifth failing round
+continues to `maintain-pr` when the tester passes; its unresolved findings still
+prevent auto-merge. Execution errors wait for the sibling, then ask at testing.
+Cancellation interrupts both; crash recovery retries the whole pair once.
+New branch commits invalidate both verdicts. Route `base-moved` to the tester
+so that base synchronization starts a fresh pair.
+
 ## Reviewer lists, independence and rounds
 
 Settings accepts global `agents.reviewers` (default `[]`) and optional

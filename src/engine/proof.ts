@@ -18,7 +18,6 @@ import type { ArtifactInput, StepResult } from '../domain/lifecycle.ts'
 import type { AttemptContext, TicketDetail } from '../store/tickets.ts'
 import {
   addAttemptArtifacts,
-  completeAttempt,
   recordAttemptHeadCommit,
 } from '../store/tickets.ts'
 import { run } from '../executors/process.ts'
@@ -31,6 +30,7 @@ import {
 } from '../verification/harness.ts'
 import { artifactPath, buildPrompt, readResult } from './prompt.ts'
 import type { RunnerOptions } from './runner.ts'
+import type { Verdict } from './parallel-final.ts'
 import { agentFor } from './tasks.ts'
 
 type Instance = VerificationInstance & {
@@ -50,7 +50,7 @@ export async function runProofAttempt(
   repositoryPath: string,
   diff: string,
   signal: AbortSignal,
-): Promise<void> {
+): Promise<Verdict> {
   const { database, home } = options
   const { ticket, attempt, step, repository } = context
   if (
@@ -155,8 +155,9 @@ export async function runProofAttempt(
           attempt.id,
           instance.logs.map((log) => ({
             ...log,
-            title: `${target.surface} ${target.commit}: ${log.title}`,
+            title: `${target.surface} ${target.commit.slice(0, 7)}: ${log.title}`,
           })),
+          { commit: target.commit },
         )
       }
       const proof = {
@@ -298,20 +299,18 @@ export async function runProofAttempt(
         step.role === 'tester' && result.outcome === 'passed'
           ? `${result.summary}\n\nVerified at ${headCommit}${bug ? `\nReproduction failed on base ${base} and passed on head ${head}.` : ''}`
           : result.summary
-      await completeAttempt(
-        database,
-        attempt.id,
-        { ...result, summary },
-        {
+      return {
+        result: { ...result, summary },
+        completion: {
           headCommit,
           ...(bug && reproduction
             ? { reproductionAttemptId: reproduction.id }
             : {}),
         },
-      )
-      return
+      }
     }
   }
+  throw new Error('Proof did not produce a result')
 }
 
 async function validateProof(
@@ -405,7 +404,7 @@ async function capturedEvidence(
       continue
     artifacts.push({
       kind: 'evidence',
-      title: `${instance.surface} ${instance.commit}: ${relative(instance.evidenceDir, path)}`,
+      title: `${instance.surface} ${instance.commit.slice(0, 7)}: ${relative(instance.evidenceDir, path)}`,
       path,
     })
   }
