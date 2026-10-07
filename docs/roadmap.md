@@ -44,9 +44,10 @@ PostgreSQL. These are distinct claims in the evidence and PR description.
 `maintain-pr` fetches and merges the default branch without rewriting history,
 aborts conflicts with file findings, and reports `base-moved` when the latest
 tester verdict no longer
-covers the resulting commit. A fresh writer session creates a short description
-per head with evidence links, `Verified at <sha>`, an optional Mermaid diagram,
-and a Merge danger line explaining reversibility and blast radius.
+covers the resulting commit. A fresh writer session is guided to create a short description
+per head with a factory ticket reference, `Verified at <sha>`, an optional Mermaid diagram,
+and a Merge danger line explaining reversibility and blast radius. The factory publishes
+usable prose without wording checks and falls back to facts when two runs produce no usable note.
 
 After pushing, CI is checked at the exact head. Pending checks park persistently
 without a scheduler slot. Required checks must pass; failures return log excerpts
@@ -101,8 +102,8 @@ copied before the ticket transaction and rolled-back copies are cleaned up.
 
 Hosted attachments come later: an optional configured storage target and a
 `publish-evidence` system action will upload retained items and record hosted
-URLs for the writer. Without that integration, PRs say “Evidence on ticket #<n>
-in the factory” and contain no local links. Configuration must be optional; the
+URLs for the writer. Without that integration, writers are instructed to say “Evidence on ticket #<n>
+in the factory” and omit local links. Configuration must be optional; the
 factory's local evidence workflow continues to work without storage hosting.
 
 ## Slice 5: Larger work
