@@ -429,7 +429,12 @@ for (const mode of ['failure', 'timeout', 'cancel', 'crash'] as const) {
       const scheduler = await startScheduler({
         ...f.options,
         events,
-        config: engineConfig.parse({ stepTimeoutMinutes: 0.1 }),
+        // Only the timeout mode tests the step timeout. Under parallel load a
+        // short one can expire before the agent drives the app, which cancel
+        // mode needs to reach.
+        config: engineConfig.parse(
+          mode === 'timeout' ? { stepTimeoutMinutes: 0.1 } : {},
+        ),
         fallbackMs: 20,
         onError: (error) => errors.push(error),
       })
