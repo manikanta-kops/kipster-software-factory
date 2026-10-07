@@ -257,6 +257,12 @@ for (const lightsOut of [false, true])
     })
     const lead = await f.lead('Repeated failures', lightsOut)
     await f.start()
+    await until(
+      () => f.detail(lead.number),
+      (detail) =>
+        detail.tasks.filter((task) => task.status === 'failed').length === 2,
+    )
+    await until(async () => sawRefusal, Boolean)
     const done = await until(
       () => f.detail(lead.number),
       (detail) =>
@@ -449,6 +455,21 @@ test('pull request tasks wait for the lead: merge goes through the merge step, l
   })
   const lead = await f.lead()
   await f.start()
+  for (const key of ['keep', 'park']) {
+    await until(
+      () => f.detail(lead.number),
+      (detail) =>
+        detail.tasks.some(
+          (task) =>
+            task.key === key && ['pr-ready', 'left-open'].includes(task.status),
+        ),
+    )
+    await until(
+      () => f.detail(lead.number),
+      (detail) =>
+        detail.tasks.some((task) => task.key === key && task.decision !== null),
+    )
+  }
   const decided = await until(
     () => f.detail(lead.number),
     (detail) =>
@@ -914,7 +935,10 @@ test('a task-pr without verify reaches the owner merge gate and its published de
     ),
   )
   assert.equal(f.invocations.filter((item) => item.role === 'tester').length, 0)
-  const snapshot = await getMergeGate(f.database, child.ticket.id)
+  const snapshot = await until(
+    () => getMergeGate(f.database, child.ticket.id),
+    (gate) => gate?.latest.ready === true,
+  )
   assert.ok(
     snapshot?.latest.needsOwner.includes(
       'Untested: no verify capability (skipped test)',

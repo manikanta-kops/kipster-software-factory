@@ -41,24 +41,11 @@ import {
 } from '../src/store/tickets.ts'
 import { Workspaces } from '../src/workspace/workspaces.ts'
 import { testWorkflow, createTestStore } from './helpers/store.ts'
+import { until, controlledTimer, schedulerTicks } from './helpers/timing.ts'
 
 const fixture = fileURLToPath(
   new URL('./fixtures/fake-agent.ts', import.meta.url),
 )
-async function until<T>(
-  read: () => Promise<T>,
-  predicate: (value: T) => boolean,
-  timeout = 15_000,
-): Promise<T> {
-  const end = Date.now() + timeout
-  while (true) {
-    const value = await read()
-    if (predicate(value)) return value
-    if (Date.now() > end)
-      throw new Error(`Condition timed out: ${JSON.stringify(value)}`)
-    await new Promise((resolve) => setTimeout(resolve, 20))
-  }
-}
 async function exists(path: string) {
   try {
     await access(path)
@@ -231,11 +218,23 @@ test('planned-change: approval, two builds, review loop, PR, merge wait and term
     choice: 'approved',
     comment: 'Use the plan.',
   })
+  const stages = ['build', 'review', 'build', 'review']
+  for (const [index, stage] of stages.entries()) {
+    const count = stages
+      .slice(0, index + 1)
+      .filter((step) => step === stage).length
+    await until(
+      () => f.detail(ticket.number),
+      (detail) =>
+        detail.attempts.filter(
+          (attempt) =>
+            attempt.stepId === stage && attempt.status === 'finished',
+        ).length >= count,
+    )
+  }
   const waiting = await until(
     () => f.detail(ticket.number),
     (d) => d.ticket.waiting?.for === 'pull-request-merge',
-    // Two builds, two reviews and publication share this deadline under load.
-    30_000,
   )
   assert.equal(waiting.attempts.filter((a) => a.stepId === 'build').length, 2)
   assert.equal(f.requests.length, 1)
@@ -450,7 +449,7 @@ async function assertDead(pidFile: string) {
 
 test('timeout kills agent and its child process and asks the human', async (t) => {
   const f = await setup(t, { planner: [{ wait: true, descendant: true }] })
-  // The deadline includes Git/prompt setup, which can exceed 1.8 s on CI.
+  const deadline = controlledTimer(t, 6000)
   await f.start(engineConfig.parse({ stepTimeoutMinutes: 0.1 }))
   const ticket = await f.ticket()
   await until(
@@ -460,6 +459,7 @@ test('timeout kills agent and its child process and asks the human', async (t) =
         : false,
     Boolean,
   )
+  deadline.expire()
   const detail = await until(
     () => f.detail(ticket.number),
     (d) => d.ticket.waiting?.for === 'ask',
@@ -910,7 +910,7 @@ for (const failure of [false, true]) {
     )
     await writeFile(
       join(cwd, '.kipster/kit.yml'),
-      `version: 1\nsetup: echo setup-stage\ncheck: ${failure ? 'echo broken-gate; exit 6' : 'echo check-stage'}\nverify:\n  start: ${process.execPath} app.ts {port} {databaseUrl}\n  ready: http://127.0.0.1:{port}/health\n  ports: 1\n  database: none\n  timeoutSeconds: 5\n`,
+      `version: 1\nsetup: echo setup-stage\ncheck: ${failure ? 'echo broken-gate; exit 6' : 'echo check-stage'}\nverify:\n  start: ${process.execPath} app.ts {port} {databaseUrl}\n  ready: http://127.0.0.1:{port}/health\n  ports: 1\n  database: none\n  timeoutSeconds: 60\n`,
     )
     await writeFile(
       join(cwd, '.kipster/verify/README.md'),
@@ -991,13 +991,18 @@ for (const failure of [false, true]) {
 test('saved settings reach steps that start later without a restart', async (t) => {
   const f = await setup(t, { planner: [{ wait: true }] })
   await f.start(engineConfig.parse({ concurrency: 1 }))
+  const ticks = schedulerTicks(t, f.store.database)
   const first = await f.ticket('First')
   const second = await f.ticket('Second')
   await until(
     async () => f.invocations.length,
     (value) => value === 1,
   )
-  await new Promise((resolve) => setTimeout(resolve, 400))
+  const before = ticks()
+  await until(
+    async () => ticks(),
+    (count) => count > before,
+  )
   assert.equal(f.invocations.length, 1)
   const sonnet = { cli: 'claude', model: 'claude-sonnet-5-5' } as const
   const saved = {
@@ -1027,7 +1032,13 @@ test('saved settings reach steps that start later without a restart', async (t) 
     concurrency: 4,
     stepTimeoutMinutes: 0.01,
   })
+  const thirdDeadline = controlledTimer(t, 600)
   const third = await f.ticket('Third')
+  await until(
+    async () => f.invocations.length,
+    (count) => count === 3,
+  )
+  thirdDeadline.expire()
   const timedOut = await until(
     () => f.detail(third.number),
     (d) => d.ticket.waiting?.for === 'ask',
@@ -1039,7 +1050,13 @@ test('saved settings reach steps that start later without a restart', async (t) 
     concurrency: 4,
     workflows: { 'planned-change': { stepTimeoutMinutes: 0.02 } },
   })
+  const fourthDeadline = controlledTimer(t, 1200)
   const fourth = await f.ticket('Fourth')
+  await until(
+    async () => f.invocations.length,
+    (count) => count === 4,
+  )
+  fourthDeadline.expire()
   const overridden = await until(
     () => f.detail(fourth.number),
     (d) => d.ticket.waiting?.for === 'ask',

@@ -20,6 +20,7 @@ import {
   managedCluster,
   stopCluster,
 } from '../src/store/cluster.ts'
+import { until } from './helpers/timing.ts'
 
 const cli = fileURLToPath(new URL('../src/cli.ts', import.meta.url))
 
@@ -79,7 +80,12 @@ test('setup without a database URL creates a private PostgreSQL that serve start
     { mode: 0o700 },
   )
   const env = { ...process.env, PATH: `${tools}:${process.env['PATH']}` }
-  const port = await freePort(4870)
+  const reservation = createServer()
+  await new Promise<void>((resolve) =>
+    reservation.listen(0, '127.0.0.1', resolve),
+  )
+  const port = (reservation.address() as { port: number }).port
+  await new Promise<void>((resolve) => reservation.close(() => resolve()))
 
   const setup = await command(
     [
@@ -117,6 +123,10 @@ test('setup without a database URL creates a private PostgreSQL that serve start
     serve.once('exit', resolve),
   )
   t.after(() => serve.kill('SIGKILL'))
+  await until(
+    async () => output,
+    (value) => value.includes('running at'),
+  )
   assert.ok(await waitForFactory(port, 60_000), output)
   assert.equal(isClusterRunning(cluster), true)
   serve.kill('SIGTERM')
