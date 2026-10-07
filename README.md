@@ -90,9 +90,10 @@ New `lead` and `program-lead` tickets default to Lights-out: the system approves
 lead plans, agents choose and record sensible defaults, and a child needing a
 decision parks while siblings continue. New ticket lets you change the setting;
 children inherit it, and ticket pages show the Decision log. The merge gate
-still applies. Child `task` and `task-pr` tickets without a required verification
-capability skip the tester and carry an **Untested** warning. Their PRs and lead
-PRs containing merged untested tasks require owner merging. Settings can select
+still applies. Every task and the lead's final change are checked by a tester,
+in the running app when the kit can start it and otherwise in a disposable
+checkout. What the tester could not prove shows as an **Untested** warning and
+requires owner merging. Settings can select
 parallel lead reviewers from claude and codex. Lead review has five rounds by
 default, then publishes unresolved findings for the owner. The engine replaces
 reviewers and testers whose CLI/model matches a builder when an independent
@@ -182,7 +183,11 @@ different home. The demo includes valid/invalid kits and current/stale lead
 verdicts with recorded commits. Override with `npm run dev -- --home <directory>`.
 It also includes **Overnight report export (synthetic demo)**, a lights-out lead
 with a Decision log, a parked child with a recorded choice and a merged
-untested child. **Historical quick-change ticket** retains a completed plan from
+child whose checker left an item unverified. **Document the API rate limits
+(checked without verify)** and **Show stock levels on product pages (checked
+with verify)** are lights-out leads whose task ran build then test and whose
+final test ran; the first, in `kipster/docs-site` without a verify block, shows
+the unverified item in its task result and merge gate. **Historical quick-change ticket** retains a completed plan from
 the retired workflow and waits for plan approval. These are
 synthetic choices for UI inspection; no agents or real verification ran.
 

@@ -339,8 +339,7 @@ The database records successful removal (or an already absent worktree), so
 subsequent passes and restarts skip it. The cache and step metadata are retained; recorded files are owned by the per-ticket evidence store. `maintain-pr` synchronizes branches
 with the fetched base and watches CI (Slice 3). Kit
 capabilities are refreshed from committed default-branch blobs after each cache
-fetch; workflows needing missing capabilities remain gated by the store, except
-for the child-task tester rule below.
+fetch; workflows needing missing capabilities remain gated by the store.
 
 ### Prompt and result contract
 
@@ -430,12 +429,25 @@ immediately takes one check snapshot. Pending checks are subsequently polled
 without an executor slot. The GitHub adapter queries the exact SHA via `gh api`,
 paginates checks, and checks branch protection/rulesets for required checks not
 yet reported. Required checks must pass (GitHub also accepts neutral/skipped
-runs). Without required checks, all reported checks are considered; no checks waits for `ciSettleMinutes` (default 3) after the push before treating the repository as having no CI. A changed local/remote head asks the owner rather than
+runs). Without required checks, all reported checks are considered. Only those
+checks are awaited, but any reported check that completed with a failure
+(required or not; any conclusion other than success, neutral or skipped, or a
+failure/error status) reports `ci-failed` and blocks the merge gate. A
+non-required check still pending once the awaited checks pass is not awaited. No checks waits for `ciSettleMinutes` (default 3) after the push before treating the repository as having no CI. A changed local/remote head asks the owner rather than
 accepting another commit's green CI. Failed checks report `ci-failed` with names,
 links and at most 2,000 characters of log per check. Actions logs come from
 `gh run view --job --log-failed`; other providers use their supplied summary/text,
 and unavailable logs are explicitly labelled. API errors leave the wait intact;
 the deadline still applies.
+
+The owner-merge wait refreshes the merge gate from the checks on the open pull
+request's head at every poll. If one has failed, typically a non-required check
+still running when maintain-pr reported `ready`, the waiting merge attempt
+finishes `changes-needed` with the same `CI failed: <names>` summary and
+findings (`pull-requests.ts:ciFailure`) before feedback, base movement or
+auto-merge are considered. Built-in workflows route that to the builder (or
+lead). Pending, passed or absent checks and a changed head do not route from
+this wait.
 
 CI and owner-merge waits also fetch the default branch. If it contains commits
 missing from the ticket, the lifecycle closes the obsolete wait and queues a
@@ -475,7 +487,8 @@ Superseded/dismissed change requests are ignored. Only the system merge policy d
 writer and a stub GitHub interface to cover clean/conflicting merges, stale
 verdicts, CI outcomes/timeouts, restart and executor-slot release, writer caching
 and feedback deduplication. `tests/github.test.ts` checks pagination, required
-checks, bounded log excerpts and feedback filtering. These do not prove live
+checks, non-required failures and pending checks, bounded log excerpts and
+feedback filtering. These do not prove live
 GitHub publication, CI propagation timing, provider permissions or feedback
 round trips by themselves. The live factory-floor acceptance run additionally
 exercised onboarding, real feature and base/head bug evidence, required CI waits,
@@ -540,6 +553,32 @@ verdicts without running an engine. `npm run dev` keeps the factory alive during
 source edits; explicit restart loads changes. `npm run dev -- --watch` opts into
 restarts. Web hot reload remains enabled in either mode.
 
+The demo also seeds three `task-pr` tickets whose CI outcome comes from product
+code rather than written facts: `inspectChecks` runs against fixture `gh` output
+supplied through its injected command runner, and maintain-pr's `checksResult`
+gives the outcome that `completeAttempt` routes. "Bundle check failed on the pull
+request" has a failed non-required `Bundle` check and sits back at build with the
+check's link and log excerpt; "Optional check still running" has `Bundle`
+pending and reported ready. "Bundle check failed while waiting to merge" was
+ready with `Bundle` pending, then a second snapshot has `Bundle` failed and its
+merge attempt finishes `changes-needed` with `ciFailure`'s findings, the result
+the merge wait gives, so it is back at build. Their merge gates come from
+`evaluateMergeGate` over the inspected checks. The served instance never calls
+GitHub, and the merge readiness card labels each check required or not required.
+
+Two lights-out leads show every task being checked. One is in `kipster/docs-site`,
+whose valid kit has no verify block; the other is in demo-shop. Their state comes
+from the real lifecycle: `claimAttempts` routes each task's build to its `test`
+and each lead's `done` to `final-test`. Each task's result is
+`mergedTaskResult` over `checkerVerdict` of the stored child, the same text
+`integrate` writes. Each lead's merge gate is `evaluateMergeGate` over identical
+facts plus `untestedReasons` of the stored lead, so only the docs-site gate lists
+the checker's unverified item. The agent results are synthetic.
+
+Each owner action has its own waiting demo ticket: three plans (to approve,
+change and reject) and three review-limit asks (to retry, move and cancel), so
+every verification scenario runs on one seeded instance.
+
 ## Independent proof (Slice 2B)
 
 Tester and reproducer steps use `engine/proof.ts`, separate from ordinary agent
@@ -556,13 +595,25 @@ The prompt includes the exact commit, instance URL, database URL, evidence
 directory, verification documents and the approved plan's acceptance scenarios.
 All maps are supplied so a relevant entry point cannot be lost to heuristic
 selection. The agent drives the actual user surface first; state inspection may
-only corroborate that run. Skipped entry points, wrong surfaces, stale builds,
-inconclusive results and self-reports cannot pass. The factory validates
+only corroborate that run. Wrong surfaces, stale builds and self-reports cannot
+pass. A skipped or inconclusive scenario stays unverified and is reported with
+`scenarioResult: unverified`; the tester outcome may still pass, and the merge
+gate shows the change as untested. The factory validates
 nonempty evidence files in the current instance's evidence directory, excluding
 startup logs. A `changes-needed` result requires findings naming Scenario,
 Observed, Expected and an attached Evidence filename. These checks enforce the
 shape and provenance of evidence; judging whether it proves the scenario remains
 the independent agent's job.
+
+A feature tester always runs. When the trusted kit has no verify block, or its
+setup or start fails, the factory gives the tester a disposable checkout of the
+exact commit without an app (`instances[].url` is null) and adds `app:
+{started: false, reason, suggestedCommands}` to the context. A failed start is
+recorded on the attempt as logs and a note, not a finding, and does not fail the
+step. The tester works out how to check the change itself and still attaches
+nonempty file evidence from its evidenceDir. Reproducers and bug testers still
+require a started app. A passing tester may report scenarios it could not prove
+with `scenarioResult: unverified`; a passing proof still rejects `failed`.
 
 A reproducer returns `reproduced` or `not-reproduced`, with a `Reproduction steps`
 note containing exact actions, inputs, observations and evidence. The note is
@@ -670,9 +721,9 @@ workflow version and step so different threshold configurations are not mixed.
 `domain/merge-gate.ts` evaluates facts without I/O. Readiness requires a passing
 latest independent tester at the PR head when the workflow has a tester, the current reproduction comparison
 for bug workflows, no base commits missing from that head, green required CI (or
-explicitly no checks), no unconsumed owner feedback or current change request,
+explicitly no checks) with no failed non-required check, no unconsumed owner feedback or current change request,
 no queued/running work, and an open, non-draft, conflict-free PR. Unknown facts
-and failed observations block. Untested workflows have a needs-owner reason, without a readiness blocker. Hard
+and failed observations block. Untested workflows have a needs-owner reason, without a readiness blocker, as does each item the latest tester reported unverified. Hard
 path rules are separate from readiness: the kit, CI and migrations always need
 human review. Custom migration globs only add rules and are loaded from the
 fetched default-branch kit. Rename/deletion paths are included. Missing kits use
@@ -865,8 +916,19 @@ a file with the same name, or no longer valid for the current catalog, is left
 out with a warning; its rows stay. `GET /api/workflows` adds `origin: file |
 upload`. The Workflows page uploads a chosen `.yml` file and lists the issues.
 
-There is no removal or rename yet, and the API has no authentication beyond
-binding to localhost and the CORS allow-list.
+`DELETE /api/workflows/:name` removes an upload: it deletes only the
+`uploaded_workflows` row and the in-memory library entry. `workflow_versions`
+rows stay, because tickets reference `(workflow_name, workflow_version)` and
+load their definition from there, so done and cancelled tickets keep opening
+and no migration is needed. A workflow file answers 409, an unknown name 404.
+Under a row lock on the upload, the store refuses with 409 and the sorted
+`tickets` numbers while a ticket that is not done or cancelled runs it, or an
+unfinished lead has a task naming it. A ticket created in the instant before
+removal still runs from its stored version. Per-workflow Settings overrides for
+the name are kept; if no ticket ever ran it, the next Settings save reports the
+override as an unknown workflow until it is removed. There is no rename, and
+the API has no authentication beyond binding to localhost and the CORS
+allow-list (which now allows `DELETE`).
 `skills/kipster-workflows/SKILL.md` teaches a model to write a valid file.
 
 ## Lead tickets and tasks
@@ -924,13 +986,16 @@ same transaction. A child ticket shows its lead and task; a lead ticket shows
 each task with its child, status, result and pull request. The API adds
 `tasks` and `parentTask` to ticket responses.
 
-Child tickets using `task` or `task-pr` skip tester steps whose declared needs
-are missing. Migration 013 stores the skipped steps and missing capabilities on
-the ticket; execution removes them and routes to the next retained step, even
-after restart. Top-level tickets and other roles retain capability rejection.
-The ticket, task report, PR description and merge gate say **untested**; a lead's
-final PR also carries the warning for merged untested tasks. These warnings
-require owner merging even if the lead's final tester passes.
+Every task is checked. The built-in `task`, `task-pr` and `lead` testers have no
+`needs`, so they run without a verify capability (see Independent proof).
+**Untested** means the latest tester reported unverified items:
+`domain/task-testing.ts:untestedReasons` reads them from its artifacts. The
+ticket page, PR description and merge gate list them, and they require owner
+merging. A task merged into the lead's branch, or whose pull request merged,
+records the checker's verdict (passed at a commit, or its unverified items) in
+its result, which the lead's Task report carries. Migration 013's
+`skipped_steps` is no longer written; tickets that skipped a tester before keep
+it and still show it as untested; an unfinished one now runs its tester too.
 
 ### Lights-out and agent choices
 
@@ -985,8 +1050,8 @@ A tester immediately followed by a reviewer, with success continuing to that
 reviewer, runs as one concurrent pair. This includes lead's `final-test`/`review`
 and bug's `test`/`review`. The pair uses one scheduler slot and one timeout,
 like the configured reviewer list. Sessions, attempts, step directories and logs
-remain separate; proof still uses disposable running instances. Dependency
-checkouts are prepared once and shared read-only. Both verdicts must match the
+remain separate. Testers use disposable running instances when available,
+otherwise they check the change in a disposable checkout. Dependency checkouts are prepared once and shared read-only. Both verdicts must match the
 pinned branch head, and routing waits for both sessions, even on execution errors.
 A failure asks at the tester cursor; cancellation and recovery interrupt both,
 and recovery retries the whole pair once. New commits reject stale results;

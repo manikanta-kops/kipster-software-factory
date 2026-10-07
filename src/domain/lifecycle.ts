@@ -2,11 +2,6 @@
 // open attempt closes and which attempt opens next. The store applies the answer.
 import { z } from 'zod'
 import {
-  skippableTaskSteps,
-  withoutSkippedSteps,
-  type SkippedStep,
-} from './task-testing.ts'
-import {
   decideParams,
   LIMIT,
   otherRepositoryRequestSchema,
@@ -619,18 +614,9 @@ export function checkCapabilities(
     readonly slug: string
     readonly capabilities: readonly string[]
   },
-  isLeadTask = false,
-): SkippedStep[] {
-  const skipped = skippableTaskSteps(
-    workflow,
-    repository.capabilities,
-    isLeadTask,
-  )
-  const missing = missingCapabilities(
-    withoutSkippedSteps(workflow, skipped),
-    repository.capabilities,
-  )
-  if (missing.length === 0) return skipped
+): void {
+  const missing = missingCapabilities(workflow, repository.capabilities)
+  if (missing.length === 0) return
   const details = missing
     .map(
       ({ capability, steps }) =>

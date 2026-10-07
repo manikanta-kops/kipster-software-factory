@@ -273,11 +273,10 @@ test('invalid kits explain disabled workflows and create an onboarding ticket in
   await page
     .getByLabel('Repository', { exact: true })
     .selectOption('kipster/invalid-kit')
-  for (const name of ['lead', 'bug']) {
-    const choice = page.getByRole('radio', { name: new RegExp(`^${name} `) })
-    await expect(choice).toBeDisabled()
-    await expect(choice).toHaveAccessibleName(/needs a verified kit/)
-  }
+  const bug = page.getByRole('radio', { name: /^bug / })
+  await expect(bug).toBeDisabled()
+  await expect(bug).toHaveAccessibleName(/needs a verified kit/)
+  await expect(page.getByRole('radio', { name: /^lead / })).toBeEnabled()
   await page.getByRole('button', { name: 'Start onboard-repo ticket' }).click()
   await expect(
     page.getByRole('heading', {

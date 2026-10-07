@@ -9,7 +9,7 @@ import { workflowVersion } from '../src/library/library.ts'
 import { engineConfig } from '../src/config.ts'
 import { run } from '../src/executors/process.ts'
 import type { AgentExecutor } from '../src/executors/cli.ts'
-import type { GitHub } from '../src/github/github.ts'
+import { createGitHub, type GitHub } from '../src/github/github.ts'
 import type { Checks } from '../src/github/checks.ts'
 import type { PullRequestFeedback } from '../src/github/feedback.ts'
 import {
@@ -603,6 +603,81 @@ for (const end of ['passed', 'failed', 'none', 'timeout'] as const) {
     if (end === 'timeout') assert.equal(d.ticket.waiting?.for, 'ask')
   })
 }
+
+for (const bundle of ['failed', 'pending'] as const)
+  test(`non-required check ${bundle} while required checks pass`, async (t) => {
+    const f = await fixture(t, true)
+    const url = 'https://github.com/fixture/repo/actions/runs/7/job/99'
+    // The real adapter parses GitHub's answer; only the gh process is replaced.
+    f.options.github.checks = createGitHub(async (_command, args) => {
+      if (args[0] === 'run') return 'Bundle exceeds 500 kB: dist/app.js'
+      if (args.includes('--slurp')) return '[[]]'
+      const head = args.find((a) => a.startsWith('sha='))!.slice(4)
+      return JSON.stringify({
+        data: {
+          repository: {
+            pullRequest: {
+              headRefOid: head,
+              baseRefName: 'main',
+              baseRef: {
+                branchProtectionRule: {
+                  requiredStatusCheckContexts: ['build'],
+                },
+              },
+            },
+            object: {
+              statusCheckRollup: {
+                contexts: {
+                  pageInfo: { hasNextPage: false },
+                  nodes: [
+                    {
+                      kind: 'CheckRun',
+                      name: 'build',
+                      isRequired: true,
+                      status: 'COMPLETED',
+                      conclusion: 'SUCCESS',
+                    },
+                    {
+                      kind: 'CheckRun',
+                      name: 'Bundle',
+                      isRequired: false,
+                      status: bundle === 'failed' ? 'COMPLETED' : 'QUEUED',
+                      conclusion: bundle === 'failed' ? 'FAILURE' : null,
+                      databaseId: 99,
+                      detailsUrl: url,
+                    },
+                  ],
+                },
+              },
+            },
+          },
+        },
+      })
+    }).checks
+    await f.publish()
+    const d = await f.detail()
+    const publish = d.attempts.find((a) => a.stepId === 'publish')!
+    const gate = (await getSavedMergeGate(f.store.database, f.ticket.id))!
+    if (bundle === 'failed') {
+      assert.equal(publish.outcome, 'ci-failed')
+      assert.equal(publish.summary, 'CI failed: Bundle')
+      assert.equal(
+        d.artifacts.find((a) => a.kind === 'finding')!.content,
+        `[Bundle](${url})\n\nBundle exceeds 500 kB: dist/app.js`,
+      )
+      assert.equal(gate.latest.facts.ci, 'failed')
+      assert.ok(gate.latest.blockers.includes('CI failed'))
+    } else {
+      assert.equal(publish.outcome, 'ready')
+      assert.equal(d.ticket.currentStep, 'merge')
+      assert.equal(gate.latest.facts.ci, 'passed')
+      assert.ok(!gate.latest.blockers.some((b) => b.startsWith('CI')))
+      assert.equal(
+        gate.latest.facts.checks.find((c) => c.name === 'Bundle')!.state,
+        'pending',
+      )
+    }
+  })
 
 test('CI wait survives scheduler restart and releases its only execution slot', async (t) => {
   const f = await fixture(t)

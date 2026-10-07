@@ -66,9 +66,7 @@ export async function runProofAttempt(
   // Pin the observation before any agent can edit its disposable checkout.
   await recordAttemptHeadCommit(database, attempt.id, headCommit)
   const loaded = await loadKit(repositoryPath, base, signal)
-  if (!loaded.kit?.verify)
-    throw new Error(loaded.state.error ?? 'Missing trusted verify kit')
-  const kit = loaded.kit
+  const kit = loaded.kit?.verify ? loaded.kit : null
   const paths = (
     await git(['ls-tree', '-r', '--name-only', base, '--', '.kipster'])
   ).split('\n')
@@ -113,6 +111,9 @@ export async function runProofAttempt(
     throw new Error(
       'Bug verification requires a successful reproduction and its Reproduction steps artifact',
     )
+  // Reproductions and base/head comparisons only mean something in the running app.
+  if (!kit && (step.role === 'reproducer' || bug))
+    throw new Error(loaded.state.error ?? 'Missing trusted verify kit')
   const targets: { surface: 'base' | 'head'; commit: string }[] =
     step.role === 'reproducer'
       ? [{ surface: 'base', commit: base }]
@@ -138,17 +139,47 @@ export async function runProofAttempt(
     let execution: Promise<void> | undefined
     let result: StepResult | undefined
     let retained: RetainedArtifact[] = []
+    let appUnavailable = kit
+      ? null
+      : `The repository's kit has no verify instructions${loaded.state.error ? ` (${loaded.state.error})` : ''}.`
     try {
       for (const target of targets) {
-        const instance = await startVerification({
-          home,
-          ticketId: ticket.id,
-          repository: repositoryPath,
-          commit: target.commit,
-          kit,
-          database,
-          signal: executionSignal,
-        })
+        const start = (withKit: typeof kit) =>
+          startVerification({
+            home,
+            ticketId: ticket.id,
+            repository: repositoryPath,
+            commit: target.commit,
+            kit: withKit,
+            database,
+            signal: executionSignal,
+          })
+        let instance: VerificationInstance
+        try {
+          instance = await start(appUnavailable ? null : kit)
+        } catch (error) {
+          // A checker whose app will not start still checks the change itself.
+          if (
+            !(error instanceof VerificationError) ||
+            appUnavailable ||
+            bug ||
+            step.role !== 'tester' ||
+            executionSignal.aborted
+          )
+            throw error
+          await addAttemptArtifacts(database, attempt.id, [
+            ...error.logs,
+            {
+              ...(await verificationFinding(error)),
+              kind: 'note',
+              title: 'The app did not start for the checker',
+            },
+          ])
+          if (error.evidenceDir)
+            await cleanVerificationEvidence(home, error.evidenceDir)
+          appUnavailable = `The kit's app did not start: ${error.message}`
+          instance = await start(null)
+        }
         instances.push({ ...instance, ...target })
         await addAttemptArtifacts(
           database,
@@ -166,15 +197,29 @@ export async function runProofAttempt(
         instances: instances.map((i) => ({
           surface: i.surface,
           commit: i.commit,
-          url: new URL(i.url).origin,
+          url: i.url ? new URL(i.url).origin : null,
           databaseUrl: i.databaseUrl,
           evidenceDir: i.evidenceDir,
           checkout: i.checkout,
         })),
+        ...(appUnavailable
+          ? {
+              app: {
+                started: false,
+                reason: appUnavailable,
+                suggestedCommands: {
+                  setup: loaded.kit?.setup ?? null,
+                  check: loaded.kit?.check ?? null,
+                },
+              },
+            }
+          : {}),
         requirement: bug
           ? 'Run the exact Reproduction steps on BOTH instances: the reported failure must still occur on base and must be absent on head. Attach file evidence from each. Otherwise changes-needed, never passed.'
           : step.role === 'tester'
-            ? 'Prove every approved acceptance scenario on head.'
+            ? appUnavailable
+              ? 'No app was started for you. Work out how to check the change yourself in this disposable checkout: read the diff, install dependencies, run the tests and start the app on a free loopback port if the change needs it. Save the output that proves each approved acceptance scenario in evidenceDir. Report each scenario you cannot prove with scenarioResult unverified; that alone is not changes-needed.'
+              : 'Prove every approved acceptance scenario on head. Report each scenario you cannot prove with scenarioResult unverified; that alone is not changes-needed.'
             : 'Prove the reported failure on base; record exact Reproduction steps for the builder and tester.',
       }
       const cwd = instances.at(-1)!.checkout
@@ -207,11 +252,13 @@ export async function runProofAttempt(
       })
       await Promise.race([
         execution,
-        ...instances.map((i) =>
-          i.exited.then(() => {
-            throw new Error(`${i.surface} instance stopped during proof`)
-          }),
-        ),
+        ...instances
+          .filter((i) => i.url)
+          .map((i) =>
+            i.exited.then(() => {
+              throw new Error(`${i.surface} instance stopped during proof`)
+            }),
+          ),
       ])
       signal.throwIfAborted()
       try {
@@ -320,14 +367,19 @@ async function validateProof(
   home: string,
 ) {
   if (result.outcome === 'needs-decision') return
+  // A checker reports what it could not prove; the merge gate shows it to the owner.
   if (
     ['passed', 'reproduced'].includes(result.outcome) &&
-    result.artifacts.some((a) =>
-      ['failed', 'unverified'].includes(a.scenarioResult ?? ''),
+    result.artifacts.some(
+      (a) =>
+        a.scenarioResult === 'failed' ||
+        (role === 'reproducer' && a.scenarioResult === 'unverified'),
     )
   )
     throw new Error(
-      'A passing proof cannot contain failed or unverified scenario results',
+      role === 'tester'
+        ? 'A passing proof cannot contain failed scenario results'
+        : 'A reproduction cannot contain failed or unverified scenario results',
     )
   const evidence = await Promise.all(
     result.artifacts

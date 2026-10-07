@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { writeFile } from 'node:fs/promises'
+import { access, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { test, type TestContext } from 'node:test'
 import {
@@ -34,6 +34,29 @@ const reviewers = [
 async function prove(invocation: AgentInvocation, outcome = 'passed') {
   const artifacts = []
   for (const instance of proofContext(invocation.prompt).instances) {
+    if (!instance.url) {
+      assert.equal(instance.surface, 'head')
+      assert.equal(invocation.cwd, instance.checkout)
+      const output = await run(
+        process.execPath,
+        [
+          '--input-type=module',
+          '-e',
+          "import assert from 'node:assert/strict'; import { readFile } from 'node:fs/promises'; assert.equal(await readFile('feature.txt', 'utf8'), 'feature'); console.log('Feature file passed')",
+        ],
+        { cwd: invocation.cwd, signal: invocation.signal },
+      )
+      const path = join(instance.evidenceDir, 'check.txt')
+      await writeFile(path, output)
+      artifacts.push({
+        kind: 'evidence',
+        title: 'Feature file checked',
+        path,
+        scenario: 'Feature file',
+        scenarioResult: 'passed',
+      })
+      continue
+    }
     const response = await fetch(`${instance.url}/checkout`, {
       method: 'POST',
       body: '{}',
@@ -67,7 +90,10 @@ async function prove(invocation: AgentInvocation, outcome = 'passed') {
   })
 }
 
-async function finalFixture(t: TestContext) {
+async function finalFixture(
+  t: TestContext,
+  testing: 'verify' | 'missing' = 'verify',
+) {
   const f = await leadFixture(
     {
       concurrency: 1,
@@ -77,7 +103,7 @@ async function finalFixture(t: TestContext) {
         roles: { tester: { cli: 'claude', model: 'test' } },
       },
     },
-    'verify',
+    testing,
   )
   t.after(() => f.close())
   f.library.set('lead', await builtInWorkflow('lead'))
@@ -227,38 +253,66 @@ for (const [tested, reviewed] of [
   })
 }
 
-test('both pass: publish at the joined head with current tester/reviewer gate facts', async (t) => {
-  const { f, ticket, head } = await finalFixture(t)
-  f.setBehaviour(async (role, invocation) => {
-    if (role === 'tester') return prove(invocation)
-    await result(invocation.directory, {
-      outcome: role === 'lead' ? 'done' : 'passed',
-      summary: `${role} passed`,
-      artifacts: [],
+for (const testing of ['verify', 'missing'] as const) {
+  test(`both pass with ${testing} kit: publish at the joined head with current tester/reviewer gate facts`, async (t) => {
+    const { f, ticket, cwd, head } = await finalFixture(t, testing)
+    const testerStarted = deferred()
+    const reviewerStarted = deferred()
+    f.setBehaviour(async (role, invocation) => {
+      if (role === 'tester') {
+        testerStarted.release()
+        await reviewerStarted.wait(invocation.signal)
+        await prove(invocation)
+        return
+      }
+      if (role === 'reviewer') {
+        reviewerStarted.release()
+        await testerStarted.wait(invocation.signal)
+      }
+      await result(invocation.directory, {
+        outcome: role === 'lead' ? 'done' : 'passed',
+        summary: `${role} passed`,
+        artifacts: [],
+      })
     })
+    await f.start()
+    const detail = await until(
+      () => f.detail(ticket.number),
+      (d) => d.ticket.waiting?.for === 'pull-request-merge',
+    )
+    assert.ok(detail.ticket.pullRequestUrl)
+    const tester = f.invocations.find((i) => i.role === 'tester')!
+    const instance = proofContext(tester.prompt).instances[0]!
+    assert.equal(Boolean(instance.url), testing === 'verify')
+    assert.notEqual(instance.checkout, cwd)
+    assert.equal(instance.commit, head)
+    await assert.rejects(access(instance.checkout))
+    assert.deepEqual(detail.ticket.skippedSteps, [])
+    const verdicts = detail.attempts.filter((a) =>
+      ['final-test', 'review'].includes(a.stepId),
+    )
+    assert.deepEqual(
+      verdicts.map((a) => [a.outcome, a.headCommit]),
+      [
+        ['passed', head],
+        ['passed', head],
+      ],
+    )
+    const snapshot = await until(
+      () => getMergeGate(f.database, ticket.id),
+      (gate) => gate?.latest.ready === true,
+    )
+    const gate = snapshot!.latest
+    assert.equal(gate.ready, true)
+    assert.equal(gate.facts.tester!.commit, head)
+    assert.deepEqual(
+      gate.needsOwner.filter((reason) => /Untested|Unverified/.test(reason)),
+      [],
+    )
+    assert.equal(gate.facts.reviewer!.commit, head)
+    assert.deepEqual(f.errors, [])
   })
-  await f.start()
-  const detail = await until(
-    () => f.detail(ticket.number),
-    (d) => d.ticket.waiting?.for === 'pull-request-merge',
-  )
-  assert.ok(detail.ticket.pullRequestUrl)
-  const verdicts = detail.attempts.filter((a) =>
-    ['final-test', 'review'].includes(a.stepId),
-  )
-  assert.deepEqual(
-    verdicts.map((a) => [a.outcome, a.headCommit]),
-    [
-      ['passed', head],
-      ['passed', head],
-    ],
-  )
-  const gate = (await getMergeGate(f.database, ticket.id))!.latest
-  assert.equal(gate.ready, true)
-  assert.equal(gate.facts.tester!.commit, head)
-  assert.equal(gate.facts.reviewer!.commit, head)
-  assert.deepEqual(f.errors, [])
-})
+}
 
 test('a lead correction through a child commit restarts both verdicts', async (t) => {
   const { f, ticket, head } = await finalFixture(t)
@@ -314,6 +368,27 @@ test('a lead correction through a child commit restarts both verdicts', async (t
     }
   })
   await f.start()
+  // Bound each phase's hang rather than the whole correction flow under load.
+  for (const rounds of [1, 2]) {
+    await until(
+      () => f.detail(ticket.number),
+      (d) =>
+        d.attempts.filter(
+          (a) =>
+            ['final-test', 'review'].includes(a.stepId) &&
+            a.status === 'finished',
+        ).length >=
+        rounds * 2,
+    )
+    if (rounds === 1)
+      await until(
+        () => f.detail(ticket.number),
+        (d) =>
+          d.tasks.some(
+            (task) => task.key === 'correction' && task.status === 'merged',
+          ),
+      )
+  }
   const detail = await until(
     () => f.detail(ticket.number),
     (d) => d.ticket.waiting?.for === 'pull-request-merge',

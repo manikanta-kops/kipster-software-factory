@@ -24,8 +24,8 @@ import {
 } from '../../src/store/tickets.ts'
 import { runAttempt, type RunnerOptions } from '../../src/engine/runner.ts'
 import type { Checks } from '../../src/github/checks.ts'
-import type { PullRequest } from '../../src/github/github.ts'
-import { createTestStore } from './store.ts'
+import { createGitHub, type PullRequest } from '../../src/github/github.ts'
+import { builtInWorkflow, createTestStore } from './store.ts'
 
 export async function autoMergeFixture(
   t: TestContext,
@@ -37,6 +37,10 @@ export async function autoMergeFixture(
     initialBaseMove?: boolean
     settle?: number
     maxBaseSyncs?: number
+    /** Runs the built-in task-pr workflow, starting with a finished build. */
+    taskPr?: boolean
+    /** Answers check inspection through the real adapter instead of fixed Checks. */
+    gh?: typeof run
   } = {},
 ) {
   const root = await mkdtemp(join(tmpdir(), 'ksf-auto-'))
@@ -129,11 +133,13 @@ export async function autoMergeFixture(
   const ticket = await createTicket(store.database, {
     repository: repository.slug,
     title: 'A useful change',
-    workflow: {
-      workflow,
-      source: sourceWorkflow,
-      version: workflowVersion(sourceWorkflow),
-    },
+    workflow: settings.taskPr
+      ? await builtInWorkflow('task-pr')
+      : {
+          workflow,
+          source: sourceWorkflow,
+          version: workflowVersion(sourceWorkflow),
+        },
   })
   const workspaces = new Workspaces(home)
   const operationSignal = () => AbortSignal.timeout(60_000)
@@ -202,7 +208,9 @@ export async function autoMergeFixture(
         await onInspect?.()
         return { ...pr }
       },
-      checks: async () => checks,
+      checks: settings.gh
+        ? createGitHub(settings.gh).checks
+        : async () => checks,
       feedback: async () => [],
       commitChecks: async () => postChecks,
       merge: async (_repository, _url, matchHead) => {
@@ -239,6 +247,15 @@ export async function autoMergeFixture(
           : {}),
         artifacts: [],
       },
+      { headCommit: head },
+    )
+  }
+  if (settings.taskPr) {
+    const build = await next()
+    await completeAttempt(
+      store.database,
+      build.attempt.id,
+      { outcome: 'done', summary: 'Built the change', artifacts: [] },
       { headCommit: head },
     )
   }

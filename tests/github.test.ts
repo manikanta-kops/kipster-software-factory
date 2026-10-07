@@ -134,10 +134,14 @@ test('checks use the pushed SHA, paginate, honor required checks and fetch a bou
   assert.equal(checks.state, 'failed')
   assert.deepEqual(
     checks.failures.map((f) => f.name),
-    ['build'],
+    ['optional', 'build'],
   )
-  assert.equal(checks.failures[0]!.excerpt.length, 2000)
-  assert.match(checks.failures[0]!.excerpt, /Type mismatch/)
+  assert.equal(
+    checks.failures[0]!.excerpt,
+    'No log excerpt supplied by this check provider.',
+  )
+  assert.equal(checks.failures[1]!.excerpt.length, 2000)
+  assert.match(checks.failures[1]!.excerpt, /Type mismatch/)
   assert.ok(calls.some((args) => args.includes('cursor=next')))
   assert.ok(
     calls.some((args) => args.includes('--log-failed') && args.includes('123')),
@@ -207,6 +211,92 @@ for (const state of [
     )
   })
 }
+
+for (const optional of ['pending', 'failed', 'cancelled'] as const)
+  for (const requiredState of ['SUCCESS', 'PENDING'] as const)
+    test(`non-required ${optional} check while required is ${requiredState.toLowerCase()}`, async () => {
+      const head = 'a'.repeat(40)
+      const github = createGitHub(async (_command, args) => {
+        if (args.includes('--slurp')) return '[[]]'
+        return JSON.stringify({
+          data: {
+            repository: {
+              pullRequest: {
+                headRefOid: head,
+                baseRefName: 'main',
+                baseRef: {
+                  branchProtectionRule: {
+                    requiredStatusCheckContexts: ['build'],
+                  },
+                },
+              },
+              object: {
+                statusCheckRollup: {
+                  contexts: {
+                    pageInfo: { hasNextPage: false },
+                    nodes: [
+                      {
+                        kind: 'StatusContext',
+                        context: 'build',
+                        isRequired: true,
+                        state: requiredState,
+                      },
+                      {
+                        kind: 'CheckRun',
+                        name: 'Bundle',
+                        isRequired: false,
+                        status:
+                          optional === 'pending' ? 'IN_PROGRESS' : 'COMPLETED',
+                        conclusion:
+                          optional === 'failed'
+                            ? 'FAILURE'
+                            : optional === 'cancelled'
+                              ? 'CANCELLED'
+                              : null,
+                        detailsUrl: 'https://ci.example/bundle',
+                        summary: 'Bundle exceeds 500 kB',
+                      },
+                    ],
+                  },
+                },
+              },
+            },
+          },
+        })
+      })
+      const checks = await github.checks(
+        'acme/repo',
+        'https://github.com/acme/repo/pull/1',
+        head,
+        new AbortController().signal,
+      )
+      if (optional === 'pending') {
+        // Never wait on a non-required check.
+        assert.equal(
+          checks.state,
+          requiredState === 'SUCCESS' ? 'passed' : 'pending',
+        )
+        assert.deepEqual(checks.failures, [])
+      } else {
+        assert.equal(checks.state, 'failed')
+        assert.deepEqual(checks.failures, [
+          {
+            name: 'Bundle',
+            url: 'https://ci.example/bundle',
+            excerpt: 'Bundle exceeds 500 kB',
+          },
+        ])
+      }
+      assert.deepEqual(
+        checks.checks?.find((c) => c.name === 'Bundle'),
+        {
+          name: 'Bundle',
+          required: false,
+          url: 'https://ci.example/bundle',
+          state: optional === 'pending' ? 'pending' : 'failed',
+        },
+      )
+    })
 
 test('feedback includes change requests, owner and inline comments; ignores factory, bots, outsiders and superseded reviews', async () => {
   const make = (id: number, login: string, body: string, extra = {}) => ({
