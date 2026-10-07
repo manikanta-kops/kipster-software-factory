@@ -427,7 +427,11 @@ immediately takes one check snapshot. Pending checks are subsequently polled
 without an executor slot. The GitHub adapter queries the exact SHA via `gh api`,
 paginates checks, and checks branch protection/rulesets for required checks not
 yet reported. Required checks must pass (GitHub also accepts neutral/skipped
-runs). Without required checks, all reported checks are considered; no checks waits for `ciSettleMinutes` (default 3) after the push before treating the repository as having no CI. A changed local/remote head asks the owner rather than
+runs). Without required checks, all reported checks are considered. Only those
+checks are awaited, but any reported check that completed with a failure
+(required or not; any conclusion other than success, neutral or skipped, or a
+failure/error status) reports `ci-failed` and blocks the merge gate. A
+non-required check still pending once the awaited checks pass is not awaited. No checks waits for `ciSettleMinutes` (default 3) after the push before treating the repository as having no CI. A changed local/remote head asks the owner rather than
 accepting another commit's green CI. Failed checks report `ci-failed` with names,
 links and at most 2,000 characters of log per check. Actions logs come from
 `gh run view --job --log-failed`; other providers use their supplied summary/text,
@@ -472,7 +476,8 @@ Superseded/dismissed change requests are ignored. Only the system merge policy d
 writer and a stub GitHub interface to cover clean/conflicting merges, stale
 verdicts, CI outcomes/timeouts, restart and executor-slot release, writer caching
 and feedback deduplication. `tests/github.test.ts` checks pagination, required
-checks, bounded log excerpts and feedback filtering. These do not prove live
+checks, non-required failures and pending checks, bounded log excerpts and
+feedback filtering. These do not prove live
 GitHub publication, CI propagation timing, provider permissions or feedback
 round trips by themselves. The live factory-floor acceptance run additionally
 exercised onboarding, real feature and base/head bug evidence, required CI waits,
@@ -536,6 +541,16 @@ home, and includes valid/invalid kits plus passed/current and stale lead
 verdicts without running an engine. `npm run dev` keeps the factory alive during
 source edits; explicit restart loads changes. `npm run dev -- --watch` opts into
 restarts. Web hot reload remains enabled in either mode.
+
+The demo also seeds two `task-pr` tickets whose CI outcome comes from product
+code rather than written facts: `inspectChecks` runs against fixture `gh` output
+supplied through its injected command runner, and maintain-pr's `checksResult`
+gives the outcome that `completeAttempt` routes. "Bundle check failed on the pull
+request" has a failed non-required `Bundle` check and sits back at build with the
+check's link and log excerpt; "Optional check still running" has `Bundle`
+pending and reported ready. Their merge gates come from `evaluateMergeGate` over
+the inspected checks. The served instance never calls GitHub, and the merge
+readiness card labels each check required or not required.
 
 ## Independent proof (Slice 2B)
 
@@ -667,7 +682,7 @@ workflow version and step so different threshold configurations are not mixed.
 `domain/merge-gate.ts` evaluates facts without I/O. Readiness requires a passing
 latest independent tester at the PR head when the workflow has a tester, the current reproduction comparison
 for bug workflows, no base commits missing from that head, green required CI (or
-explicitly no checks), no unconsumed owner feedback or current change request,
+explicitly no checks) with no failed non-required check, no unconsumed owner feedback or current change request,
 no queued/running work, and an open, non-draft, conflict-free PR. Unknown facts
 and failed observations block. Untested workflows have a needs-owner reason, without a readiness blocker. Hard
 path rules are separate from readiness: the kit, CI and migrations always need

@@ -24,6 +24,8 @@ const scenarios = [
   'timeline',
   'proof',
   'stale',
+  'ci-failed',
+  'ci-pending',
   'decisions',
   'responsive',
 ]
@@ -76,6 +78,22 @@ const status = page.locator('.ticket-meta .badge').first()
 const proofTitle = 'Cart quantity changes are proven'
 const planTitle = 'Add CSV export to reports'
 const askTitle = 'Validate email addresses on sign-up'
+const openFromToday = async (title) => {
+  await go('/')
+  await page
+    .locator(`a[href="#/tickets/${ticket(title)}"]`)
+    .first()
+    .click()
+  await expect(heading(title)).toBeVisible()
+}
+const ciChecks = () =>
+  page
+    .getByRole('region', { name: 'Merge gate' })
+    .getByRole('list', { name: 'Current CI checks' })
+const maintainRun = () =>
+  page.locator('.attempt-entry').filter({
+    has: page.getByRole('heading', { name: 'maintain-pr', exact: false }),
+  })
 let result = 'failed'
 try {
   switch (scenario) {
@@ -155,10 +173,10 @@ try {
       break
     }
     case 'workflows': {
-      await go('/workflows/quick-change')
-      await expect(heading('quick-change')).toBeVisible()
+      await go('/workflows/bug')
+      await expect(heading('bug')).toBeVisible()
       const diagram = page.getByRole('figure', {
-        name: 'quick-change workflow',
+        name: 'bug workflow',
       })
       const step = diagram.getByRole('button', {
         name: 'review: reviewer',
@@ -378,6 +396,12 @@ try {
       await page.keyboard.press('Escape')
       await expect(page.getByRole('dialog')).toHaveCount(0)
       await index
+        .getByRole('button', {
+          name: 'Cart quantity updates the total',
+          exact: true,
+        })
+        .click()
+      await index
         .getByRole('link', { name: 'Open evidence item', exact: true })
         .click()
       await expect(
@@ -394,7 +418,10 @@ try {
         })
         .click()
       const run = page.locator('.attempt-entry').filter({
-        has: page.getByRole('heading', { name: 'test tester', exact: true }),
+        has: page.getByRole('heading', {
+          name: 'final-test tester',
+          exact: true,
+        }),
       })
       await run
         .getByText('Cart driving log (synthetic demo) log', { exact: true })
@@ -417,6 +444,50 @@ try {
         page.getByRole('region', { name: 'Merge gate' }),
       ).toContainText('Earlier green head: aaaaaaa')
       break
+    case 'ci-failed': {
+      await openFromToday('Bundle check failed on the pull request')
+      await expect(status).toHaveText('queued')
+      const now = page.getByRole('region', { name: 'Now' })
+      await expect(now).toContainText('Step 1 of 5')
+      await expect(now).toContainText('CI failed: Bundle')
+      await expect(
+        page.getByRole('region', { name: 'Merge gate' }).getByRole('heading'),
+      ).toContainText('Blocked: CI failed')
+      await expect(ciChecks()).toContainText(
+        'Demo repository checks: passed · required',
+      )
+      await expect(ciChecks()).toContainText('Bundle: failed · not required')
+      const run = maintainRun()
+      await expect(run).toContainText('ci failed')
+      await run.getByText('CI failed: Bundle finding', { exact: true }).click()
+      await expect(
+        run.getByRole('link', { name: 'Bundle', exact: true }),
+      ).toHaveAttribute(
+        'href',
+        'https://github.com/kipster/demo-shop/actions/runs/440/job/442',
+      )
+      await expect(run).toContainText(
+        'dist/assets/index.js is 312.4 kB, over the 250 kB budget',
+      )
+      break
+    }
+    case 'ci-pending': {
+      await openFromToday('Optional check still running')
+      await expect(
+        page.getByRole('region', { name: 'Merge gate' }).getByRole('heading'),
+      ).toHaveText('Ready to merge')
+      await page
+        .getByRole('region', { name: 'Merge gate' })
+        .getByText('Live CI at', { exact: false })
+        .click()
+      await expect(ciChecks()).toContainText(
+        'Demo repository checks: passed · required',
+      )
+      await expect(ciChecks()).toContainText('Bundle: pending · not required')
+      await expect(maintainRun()).toContainText('ready')
+      await expect(maintainRun()).toContainText('CI passed.')
+      break
+    }
     case 'decisions':
       await go('/decisions')
       await expect(heading('Decisions')).toBeVisible()

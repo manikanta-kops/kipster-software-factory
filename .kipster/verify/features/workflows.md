@@ -9,7 +9,7 @@
 
 ## How to get to it (user point of view)
 
-Choose Workflows in the header, then quick-change in its workflow list. Upload workflow accepts a YAML file.
+Choose Workflows in the header, then bug in its workflow list. Upload workflow accepts a YAML file.
 
 ## Driving it
 
@@ -18,7 +18,7 @@ Every command asserts the results and saves a screenshot, trace and JSON observa
 
 | User action                                      | Exact command                                  | Observable result                                                                                                                      |
 | ------------------------------------------------ | ---------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
-| Select review and show every loop                | `node .kipster/verify/drive.mjs workflows`     | quick-change is visible; review has aria-pressed=true; Show all loops is checked.                                                      |
+| Select review and show every loop                | `node .kipster/verify/drive.mjs workflows`     | bug is visible; review has aria-pressed=true; Show all loops is checked.                                                               |
 | Upload invalid YAML, correct it and upload again | `node .kipster/verify/drive.mjs upload`        | The invalid role shows an alert; the corrected unique workflow shows its saved content-hash version.                                   |
 | Remove the seeded upload while tickets use it    | `node .kipster/verify/drive.mjs remove-in-use` | lead has no Remove; removing synthetic-review is refused, listing the running ticket, the lead and its running child; it stays listed. |
 
