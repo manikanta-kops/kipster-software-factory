@@ -1247,6 +1247,7 @@ section.quiet {
 .ticket-primary {
   grid-area: primary;
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 16px;
   min-width: 0;
 }
@@ -1874,6 +1875,7 @@ button.small {
 }
 .tasks-card .task-list {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 2px;
   margin: 0 -10px;
   padding: 0;
@@ -1974,6 +1976,7 @@ button.small {
 }
 .task-facts {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 4px;
   margin: 0 10px 0 38px;
   padding-bottom: 4px;

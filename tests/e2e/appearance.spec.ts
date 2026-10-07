@@ -298,6 +298,30 @@ for (const colorScheme of ['light', 'dark'] as const)
         await expect(page.locator('#ticket-details')).toBeFocused()
         await expect(page.locator('#ticket-details')).toBeInViewport()
       }
+      await page.goto(
+        `${factory.url}/#/tickets/${factory.tickets.replacedLead}`,
+      )
+      const tasks = page.getByRole('region', { name: 'Tasks' })
+      await tasks.getByRole('button', { name: /Finished/ }).click()
+      const finished = tasks.getByRole('list', { name: 'Finished tasks' })
+      for (const head of await finished.locator('button.task-head').all())
+        await head.click()
+      const badge = finished.getByText(/^Replaced by #\d+$/)
+      await badge.scrollIntoViewIfNeeded()
+      await expect(badge).toBeInViewport({ ratio: 1 })
+      expect(
+        await page.evaluate(
+          'document.documentElement.scrollWidth <= window.innerWidth',
+        ),
+      ).toBeTruthy()
+      const tasksPath = testInfo.outputPath(
+        `lead-tasks-${width}-${colorScheme}.png`,
+      )
+      await tasks.screenshot({ path: tasksPath })
+      await testInfo.attach('Lead finished tasks', {
+        path: tasksPath,
+        contentType: 'image/png',
+      })
     })
 
 test.describe('legacy summary compatibility', () => {
