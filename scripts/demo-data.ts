@@ -111,6 +111,12 @@ export interface DemoTickets {
   readonly waitingForMerge: number
   readonly askAfterLimit: number
   readonly approvePlan: number
+  readonly planToApprove: number
+  readonly planToChange: number
+  readonly planToReject: number
+  readonly askToRetry: number
+  readonly askToMove: number
+  readonly askToCancel: number
   readonly cancelled: number
   readonly running: number
   readonly queued: number
@@ -339,45 +345,57 @@ async function seedLocked(
     askAfterLimit,
     planFor('email validation on sign-up, including plus addresses'),
   )
-  for (const round of [1, 2]) {
-    await run(askAfterLimit, {
-      outcome: 'done',
-      summary: `Coordinated validation (round ${round}).`,
+  /** Reviews two rounds until the review limit asks the owner. */
+  const reachReviewLimit = async (
+    number: number,
+    accepted: string,
+    finding: string,
+  ) => {
+    for (const round of [1, 2]) {
+      await run(number, {
+        outcome: 'done',
+        summary: `Coordinated validation (round ${round}).`,
+      })
+      await run(number, {
+        outcome: 'passed',
+        summary: 'Tested validation.',
+      })
+      await run(number, {
+        outcome: 'changes-needed',
+        summary: `The validation still accepts ${accepted}.`,
+        artifacts: [
+          {
+            kind: 'finding',
+            title: `Review round ${round}`,
+            content: `- **Blocking:** ${accepted} passes validation; ${finding}\n- Minor: the error message is not announced to screen readers.`,
+          },
+        ],
+      })
+    }
+  }
+  await reachReviewLimit(askAfterLimit, '`a@b`', 'require a dot in the domain.')
+
+  /** Leaves a plan waiting for your approval. */
+  const waitForPlanApproval = async (
+    title: string,
+    body: string,
+    subject: string,
+  ) => {
+    const number = await create(title, body)
+    await run(number, {
+      outcome: 'plan-ready',
+      summary: 'Wrote the plan with three acceptance scenarios.',
+      artifacts: [{ kind: 'plan', title: 'Plan', content: planFor(subject) }],
     })
-    await run(askAfterLimit, {
-      outcome: 'passed',
-      summary: 'Tested validation.',
-    })
-    await run(askAfterLimit, {
-      outcome: 'changes-needed',
-      summary: 'The validation still accepts `a@b`.',
-      artifacts: [
-        {
-          kind: 'finding',
-          title: `Review round ${round}`,
-          content:
-            '- **Blocking:** `a@b` passes validation; require a dot in the domain.\n- Minor: the error message is not announced to screen readers.',
-        },
-      ],
-    })
+    return number
   }
 
   // Waiting for you to approve the plan.
-  const approvePlan = await create(
+  const approvePlan = await waitForPlanApproval(
     'Add CSV export to reports',
     'Let shop owners download any report as CSV from the report page.',
+    'CSV export of reports',
   )
-  await run(approvePlan, {
-    outcome: 'plan-ready',
-    summary: 'Wrote the plan with three acceptance scenarios.',
-    artifacts: [
-      {
-        kind: 'plan',
-        title: 'Plan',
-        content: planFor('CSV export of reports'),
-      },
-    ],
-  })
 
   // Cancelled: you rejected the plan.
   const cancelled = await create(
@@ -960,6 +978,50 @@ async function seedLocked(
   )
   await run(running)
 
+  // One plan and one ask for each owner action, so every verification scenario
+  // can run on one instance without consuming another scenario's ticket. They
+  // come before the CI tickets, whose pending build attempt run() would claim.
+  const planToApprove = await waitForPlanApproval(
+    'Add gift notes to orders (plan to approve)',
+    'Let shoppers add a short gift note at checkout.',
+    'gift notes on orders',
+  )
+  const planToChange = await waitForPlanApproval(
+    'Add a size guide to product pages (plan to change)',
+    'Show a size guide next to the size picker on clothing pages.',
+    'a size guide on product pages',
+  )
+  const planToReject = await waitForPlanApproval(
+    'Add a loyalty points page (plan to reject)',
+    'Show shoppers the loyalty points they have earned.',
+    'a loyalty points page',
+  )
+  const ask = async (title: string, subject: string, accepted: string) => {
+    const number = await create(
+      title,
+      `Reject malformed ${subject} with a clear message.`,
+      historical.entry,
+    )
+    await planAndApprove(number, planFor(`${subject} validation`))
+    await reachReviewLimit(number, accepted, 'reject it with a clear message.')
+    return number
+  }
+  const askToRetry = await ask(
+    'Validate postcodes at checkout (ask to retry)',
+    'postcodes at checkout',
+    '`ABC`',
+  )
+  const askToMove = await ask(
+    'Validate phone numbers on the account page (ask to move)',
+    'phone numbers on the account page',
+    '`12`',
+  )
+  const askToCancel = await ask(
+    'Validate coupon codes in the cart (ask to cancel)',
+    'coupon codes in the cart',
+    '`!!!`',
+  )
+
   // CI outcomes come from the real check inspection and maintain-pr result, fed fixture gh output.
   const taskPr = library.get('task-pr')
   if (!taskPr) throw new Error('The library has no task-pr workflow')
@@ -1109,6 +1171,12 @@ async function seedLocked(
     waitingForMerge,
     askAfterLimit,
     approvePlan,
+    planToApprove,
+    planToChange,
+    planToReject,
+    askToRetry,
+    askToMove,
+    askToCancel,
     cancelled,
     running,
     queued,

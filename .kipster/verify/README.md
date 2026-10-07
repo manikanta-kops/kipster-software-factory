@@ -33,8 +33,12 @@ There is no sign-in or test-user account in this app. Use the seeded local
 owner UI directly. Repository slugs and PR/commit links are fictional fixtures.
 The seed includes demo-shop (valid kit), docs-site (valid kit without verify),
 invalid-kit, website (pending) and legacy-api (failed), with tickets covering approval, asks, queued/running work,
-finished work, current/stale proof and owner merge waits. It also uploads
+finished work, current/stale proof and owner merge waits. Built-in workflows are
+bug, lead, onboard-repo, task and task-pr; tickets mostly use lead. Each owner
+action has its own waiting ticket: plans to approve, change and reject, and asks
+to retry, move and cancel, each titled with its action. It also uploads
 synthetic-review, which a running ticket and a lead's running child task use.
+One historical ticket keeps the retired quick-change workflow.
 Discover ticket IDs through the supplied API or the UI; do not assume numbers. Seeder output is in
 the factory's start log. Media and recorded verdicts are explicitly synthetic.
 
@@ -88,18 +92,26 @@ and head URLs/evidence directories the factory gives you and capture both.
 - [Decisions](features/decisions.md): integration-free ledger and the limits of its empty seed.
 - [CLI](features/cli.md): safe help, version and workflow validation commands.
 
-Run read-only cases first: today, filter, repositories, workflows, timeline,
-proof, stale, decisions and responsive. Then run register, policy, upload,
-new-ticket and gate-workflows. Policy restores its checkbox to off. Choose one
-plan mutation (approve, changes or reject) and one ask mutation (retry, move or
-cancel) per fresh instance. Run the CLI map from the checkout terminal.
+Run every scenario once on one fresh instance, one after another, read-only
+cases first:
+
+1. Read-only: today, filter, repositories, workflows, timeline, proof, stale,
+   ci-failed, ci-pending, checked-without-verify, checked-with-verify,
+   untested-gate, decisions and responsive.
+2. Mutations: register, policy, upload, remove-in-use, new-ticket,
+   gate-workflows, approve, changes, reject, retry, move and cancel.
+
+Each owner action uses its own seeded ticket, so they do not consume each
+other's. Policy restores its checkbox to off; remove-in-use changes nothing.
+Today counts finished tickets from the API, so an earlier reject or cancel does
+not break it. Run the CLI map from the checkout terminal.
 
 ## Reset and limits
 
 A fresh browser context resets navigation/filter/form state, not database state.
 The supplied instance has no reset or `/__test` endpoints. Do not reseed, directly
-edit its database, delete its home, or restart it. Request a new factory-owned
-attempt/instance for consumed plan/ask alternatives. Registration and uploads
+edit its database, delete its home, or restart it. Each plan/ask mutation can
+run once per instance; request a new factory-owned instance to repeat one. Registration and uploads
 use unique names, and new tickets remain queued with no execution. Adding demo
 records does not clone remotes or publish work with the scheduler disabled.
 
