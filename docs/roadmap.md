@@ -188,6 +188,15 @@ findings after round five and keeps the PR for the owner. Later lead rounds chec
 earlier fixes; new findings on unchanged files become notes. An unavailable
 independent candidate is recorded and always requires owner merging.
 
+### Removing uploaded workflows (implemented)
+
+The Workflows page has Remove, with a confirmation, on uploaded workflows only;
+`DELETE /api/workflows/:name` does the same. Workflow files are refused, and so
+is a workflow that unfinished tickets or an unfinished lead's tasks use, with
+their ticket numbers. Done and cancelled tickets keep their stored copy and
+still open. Real PostgreSQL and browser tests cover this; existing uploads were
+not removed.
+
 ### Lessons (implemented)
 
 Ticket completion, cancellation and owner waits now propose one-line lessons

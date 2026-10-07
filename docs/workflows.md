@@ -14,6 +14,14 @@ factory's workflow directory and restart. Uploads cannot reuse a workflow
 file's name; uploading an existing uploaded name creates a new version. To have
 a model write one, give it `skills/kipster-workflows/SKILL.md`.
 
+Remove an uploaded workflow with Remove on the Workflows page, or
+`DELETE /api/workflows/<name>`. New tickets can no longer choose it. Workflow
+files cannot be removed this way (409). While a queued, running or needs-you
+ticket runs it, or an unfinished lead has a task that names it, removal is
+refused (409) with those ticket numbers in `tickets`; finish or cancel them
+first. Done and cancelled tickets keep their stored copy and history and still
+open. Uploading the same name again adds it back.
+
 ```yaml
 name: sample # lowercase, digits and hyphens; matches the file name
 description: One line saying what the workflow is for.

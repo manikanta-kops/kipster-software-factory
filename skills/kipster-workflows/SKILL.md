@@ -572,6 +572,11 @@ past `approve-plan` explicitly.
 - **API:** `POST /api/workflows` with JSON `{ "source": "<the YAML text>" }`.
   It answers 201 for a new name, 200 for a new version of an uploaded name,
   400 with `issues` when invalid, and 409 for a name owned by a workflow file.
+- **Remove:** Remove on the Workflows page, or `DELETE /api/workflows/<name>`,
+  takes an uploaded workflow out of the library. It is refused (409) for a
+  workflow file, and while a ticket that is not done or cancelled runs it or an
+  unfinished lead has a task naming it; the refusal lists those ticket numbers.
+  Done and cancelled tickets keep their copy. Upload it again to add it back.
 - **Files:** a workflow file in the factory's workflow directory loads at
   startup. The built-in `bug`, `lead`, `onboard-repo`,
   `task` and `task-pr` are files, so uploads cannot reuse those names.

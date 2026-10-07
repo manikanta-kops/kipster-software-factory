@@ -12,6 +12,7 @@ const scenarios = [
   'policy',
   'workflows',
   'upload',
+  'remove-in-use',
   'new-ticket',
   'gate-workflows',
   'approve',
@@ -193,6 +194,37 @@ try {
         page.getByText(new RegExp(`^Saved ${name}, version [0-9a-f]{12}\\.$`)),
       ).toBeVisible()
       observations.push(`uploaded ${name}; no agent executed`)
+      break
+    }
+    case 'remove-in-use': {
+      const inUse = [
+        'Shorten the checkout labels (synthetic upload)',
+        'Tidy the cart copy (synthetic upload lead)',
+        'Tidy the cart copy (synthetic upload task)',
+      ].map(ticket)
+      await go('/workflows/lead')
+      await expect(heading('lead')).toBeVisible()
+      await expect(page.getByRole('button', { name: 'Remove' })).toHaveCount(0)
+      await go('/workflows/synthetic-review')
+      await expect(heading('synthetic-review')).toBeVisible()
+      await page.getByRole('button', { name: 'Remove', exact: true }).click()
+      const confirm = page.getByRole('group', {
+        name: 'Remove synthetic-review?',
+      })
+      await confirm.getByRole('button', { name: 'Remove workflow' }).click()
+      await expect(page.getByRole('alert')).toHaveText(
+        `"synthetic-review" is used by unfinished tickets ${inUse.map((n) => `#${n}`).join(', ')}; finish or cancel them first`,
+      )
+      const refused = await fetch(`${origin}/api/workflows/synthetic-review`, {
+        method: 'DELETE',
+      })
+      assert.equal(refused.status, 409)
+      assert.deepEqual((await refused.json()).tickets, inUse)
+      await go('/workflows')
+      await expect(
+        page.getByRole('link', { name: /^synthetic-review uploaded/ }),
+      ).toBeVisible()
+      observations.push(`refused removal for #${inUse.join(', #')}`)
       break
     }
     case 'new-ticket': {

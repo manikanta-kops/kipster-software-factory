@@ -11,6 +11,7 @@ import { getMergeGate } from '../store/merge-gates.ts'
 import { setArtifactHome } from '../store/database.ts'
 import { listDecisions, decisionCounts } from '../store/decisions.ts'
 import {
+  removeUploadedWorkflow,
   saveUploadedWorkflow,
   ticketWorkflowNames,
 } from '../store/workflows.ts'
@@ -32,7 +33,7 @@ import { cors } from 'hono/cors'
 import type { ContentfulStatusCode } from 'hono/utils/http-status'
 import { z } from 'zod'
 import { DEFAULT_ALLOWED_ORIGINS } from '../config.ts'
-import { FactoryError } from '../domain/errors.ts'
+import { FactoryError, WorkflowInUse } from '../domain/errors.ts'
 import { runsOf } from '../domain/lifecycle.ts'
 import { describeRoutes, stepLimit } from '../domain/routing.ts'
 import { type Step, stepContract, type Workflow } from '../domain/workflow.ts'
@@ -62,12 +63,14 @@ import type {
   ErrorResponse,
   DecisionsResponse,
   HealthResponse,
+  RemoveWorkflowResponse,
   RepositoriesResponse,
   RepositoryResponse,
   SettingsResponse,
   StepSummary,
   TicketResponse,
   TicketsResponse,
+  WorkflowInUseResponse,
   WorkflowResponse,
   WorkflowsResponse,
   WorkflowSummary,
@@ -129,10 +132,11 @@ export function createApp({
 
   app.onError((error, c) => {
     if (error instanceof FactoryError) {
-      return c.json<ErrorResponse>(
+      return c.json<ErrorResponse | WorkflowInUseResponse>(
         {
           error: error.message,
           ...(error instanceof InvalidRequest ? { issues: error.issues } : {}),
+          ...(error instanceof WorkflowInUse ? { tickets: error.tickets } : {}),
         },
         STATUS[error.code],
       )
@@ -145,7 +149,7 @@ export function createApp({
     '/api/*',
     cors({
       origin: [...allowedOrigins],
-      allowMethods: ['GET', 'POST'],
+      allowMethods: ['GET', 'POST', 'DELETE'],
       allowHeaders: ['Content-Type', 'Last-Event-ID'],
       maxAge: 600,
     }),
@@ -227,6 +231,20 @@ export function createApp({
       { workflow: summarizeWorkflow(entry) },
       existing ? 200 : 201,
     )
+  })
+
+  app.delete('/api/workflows/:name', async (c) => {
+    const name = c.req.param('name')
+    const existing = library.get(name)
+    if (existing && !existing.uploaded)
+      throw new FactoryError(
+        'conflict',
+        `"${name}" is a workflow file in the factory and cannot be removed; only uploaded workflows can`,
+      )
+    if (!(await removeUploadedWorkflow(database, name)))
+      throw new FactoryError('not-found', `No uploaded workflow "${name}"`)
+    library.delete(name)
+    return c.json<RemoveWorkflowResponse>({ removed: name })
   })
 
   async function settingsWorkflows() {

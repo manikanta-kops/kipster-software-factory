@@ -73,6 +73,11 @@ A task whose tester was skipped shows **Untested** near its status, including
 the missing capability and skipped step. Lead tickets also show this warning
 for merged untested tasks. These warnings persist independently of verdicts.
 
+Uploaded workflows show Remove on the Workflows page. It asks for confirmation,
+then calls `DELETE /api/workflows/:name`; a refusal shows the server's message
+with the unfinished ticket numbers. Workflow files show no Remove. A link to a
+workflow that is no longer in the library says so and shows the first workflow.
+
 New ticket offers `bug`, `lead`, `onboard-repo` and uploaded workflows; child
 workflows stay hidden. The Lights-out checkbox defaults on for `lead` and
 `program-lead`, follows workflow changes until touched, and is saved with the
