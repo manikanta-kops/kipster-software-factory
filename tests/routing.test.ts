@@ -117,6 +117,49 @@ steps:
     })
   })
 
+  test('review defaults to five finished rounds including the current run', () => {
+    const workflow = load(`
+name: lead
+description: A lead review with no explicit limit.
+steps:
+  - id: lead
+    kind: agent
+    role: lead
+    routes:
+      delegate: run
+      done: review
+  - id: run
+    kind: system
+    action: run-tasks
+    limit: 20
+    routes:
+      reported: lead
+  - id: review
+    kind: agent
+    role: reviewer
+    routes:
+      changes-needed: lead
+      limit: maintain-pr
+  - id: maintain-pr
+    kind: system
+    action: maintain-pr
+    with:
+      ciSettleMinutes: 0
+  - id: merge
+    kind: system
+    action: merge
+`)
+    for (let runs = 1; runs < 5; runs++)
+      assert.deepEqual(nextStep(workflow, 'review', 'changes-needed', runs), {
+        to: 'step',
+        stepId: 'lead',
+      })
+    assert.deepEqual(nextStep(workflow, 'review', 'changes-needed', 5), {
+      to: 'step',
+      stepId: 'maintain-pr',
+    })
+  })
+
   test('limits only count routes that send the ticket back', () => {
     const workflow = load(`
 name: forward

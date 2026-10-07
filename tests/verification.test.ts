@@ -208,16 +208,16 @@ test('harness runs exact detached commit, setup/check, isolated ports/database a
   )
 })
 
-// A crash must end the start command before the deadline, and a timeout must
-// expire after the app has logged; under parallel test load Node can take over
-// 300 ms just to start the fixture.
+// A crash must end the start command before the deadline; under parallel test
+// load Node can take over 300 ms just to start the fixture. The timeout's shell
+// logs before starting Node, so a log line exists well before its deadline.
 for (const [mode, expected, timeoutSeconds] of [
   ['timeout', 'ready', 3],
   ['crash', 'start', 30],
 ] as const) {
   test(`harness ${mode} names the stage and cleans checkout/database`, async (t) => {
     const f = await fixture(t)
-    f.kit.verify!.start = `${process.execPath} app.ts {port} {databaseUrl} ${mode}`
+    f.kit.verify!.start = `${mode === 'timeout' ? 'echo fixture start; exec ' : ''}${process.execPath} app.ts {port} {databaseUrl} ${mode}`
     f.kit.verify!.timeoutSeconds = timeoutSeconds
     let failure: VerificationError | undefined
     try {
@@ -261,10 +261,11 @@ function asyncError(stage: string) {
 test('none database, simultaneous instances, cancellation and post-ready crash', async (t) => {
   const f = await fixture(t)
   f.kit.verify!.database = 'none'
-  f.kit.verify!.start = `${process.execPath} app.ts {port} {databaseUrl} later-crash`
+  f.kit.verify!.start = `${process.execPath} app.ts {port} {databaseUrl}`
   const first = await startVerification(f)
   t.after(() => first.stop())
   assert.equal(first.databaseUrl, null)
+  const { pid } = (await (await fetch(first.url)).json()) as { pid: number }
   const controller = new AbortController()
   const second = await startVerification({ ...f, signal: controller.signal })
   t.after(() => second.stop())
@@ -272,6 +273,7 @@ test('none database, simultaneous instances, cancellation and post-ready crash',
   controller.abort()
   await second.stop()
   await assert.rejects(access(second.checkout))
+  process.kill(pid, 'SIGKILL')
   await assert.rejects(first.exited, /start.*failed/)
 })
 

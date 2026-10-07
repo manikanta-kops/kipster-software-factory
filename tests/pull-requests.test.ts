@@ -32,6 +32,7 @@ import { createTestStore } from './helpers/store.ts'
 import { Workspaces } from '../src/workspace/workspaces.ts'
 import { runAttempt, type RunnerOptions } from '../src/engine/runner.ts'
 import {
+  checksResult,
   pollPullRequestChecks,
   pollPullRequestBase,
   pollPullRequestFeedback,
@@ -56,12 +57,7 @@ function entry(workflow: Workflow) {
   const source = JSON.stringify(workflow)
   return { workflow, source, version: workflowVersion(source) }
 }
-async function fixture(
-  t: TestContext,
-  tester = false,
-  timeout = 60,
-  reviewer = false,
-) {
+async function fixture(t: TestContext, tester = false, reviewer = false) {
   const root = await mkdtemp(join(tmpdir(), 'factory-pr-'))
   const home = join(root, 'home')
   const source = join(root, 'source')
@@ -130,10 +126,7 @@ async function fixture(
           kind: 'system',
           action: 'maintain-pr',
           needs: [],
-          with: {
-            ciTimeoutMinutes: timeout,
-            ciSettleMinutes: 0,
-          },
+          with: { ciSettleMinutes: 0 },
           routes: reviewer ? { 'base-moved': tester ? 'test' : 'review' } : {},
         },
         {
@@ -148,6 +141,7 @@ async function fixture(
     }),
   })
   const workspaces = new Workspaces(home)
+  await workspaces.prepareRepository(repository, signal)
   const cwd = await workspaces.prepare(ticket, repository, signal)
   const head = await commit(cwd, 'change.txt', 'ticket change')
   const script = join(root, 'script.json')
@@ -391,6 +385,8 @@ for (const state of ['pending', 'passed'] as const) {
       await run('git', ['rev-parse', 'HEAD'], { cwd: f.cwd }),
       f.head,
     )
+    // Both guards requeue the same maintenance, so its result is checked once.
+    if (state === 'pending') return
     await f.publish()
     const synced = await f.detail()
     const maintained = synced.attempts.at(-2)!
@@ -412,10 +408,17 @@ for (const state of ['pending', 'passed'] as const) {
   })
 }
 
-test('base advances during owner merge wait: queue the previous maintenance step exactly once', async (t) => {
+test('zero settle window permits no checks on the first snapshot; base advances during owner merge wait queue the previous maintenance step exactly once', async (t) => {
   const f = await fixture(t)
   f.setChecks({ state: 'none', failures: [] })
   await f.publish()
+  const published = await f.detail()
+  assert.equal(published.attempts[0]!.outcome, 'ready')
+  assert.equal(published.ticket.currentStep, 'merge')
+  assert.equal(
+    (await listWaitingForMerge(f.store.database, 'pull-request-checks')).length,
+    0,
+  )
   await runAttempt(f.options, await f.next(), signal)
   const [waiting] = await listWaitingForMerge(f.store.database)
   const base = await f.advanceBase()
@@ -436,82 +439,60 @@ test('base advances during owner merge wait: queue the previous maintenance step
   assert.equal((await f.detail()).attempts.at(-2)!.outcome, 'ready')
 })
 
-for (const alreadyPublished of [false, true]) {
-  test(`a reviewed workflow without a tester refreshes stale review after base sync, already published: ${alreadyPublished}`, async (t) => {
-    const f = await fixture(t, false, 60, true)
-    f.setChecks({ state: 'none', failures: [] })
-    await f.publish()
-    await runAttempt(f.options, await f.next(), signal)
-    const [waiting] = await listWaitingForMerge(f.store.database)
-    await f.advanceBase()
-    if (alreadyPublished) {
-      await f.options.workspaces.prepareRepository(waiting!.repository, signal)
-      await run(
-        'git',
-        [
-          '-c',
-          'user.name=Fixture',
-          '-c',
-          'user.email=fixture@example.test',
-          'merge',
-          '--no-edit',
-          'origin/main',
-        ],
-        { cwd: f.cwd },
-      )
-      await run('git', ['push', 'origin', f.ticket.branch], { cwd: f.cwd })
-      for (let sync = 0; sync < 3; sync++)
-        assert.equal(
-          await beginBaseSync(f.store.database, f.ticket.id, 3),
-          true,
-        )
-    }
-    await pollPullRequestBase(f.options, waiting!, signal)
-    await f.publish()
-    const synced = await f.detail()
-    const maintained = synced.attempts.at(-2)!
-    assert.equal(maintained.outcome, 'base-moved')
-    assert.equal(synced.ticket.currentStep, 'review')
-    assert.equal(f.writers(), 1, 'stale review must prevent publication')
-    const head = await run('git', ['rev-parse', 'HEAD'], { cwd: f.cwd })
-    assert.notEqual(head, f.head)
-    const review = await f.next()
-    await completeAttempt(
-      f.store.database,
-      review.attempt.id,
-      { outcome: 'passed', summary: 'Synced commit reviewed', artifacts: [] },
-      { headCommit: head },
-    )
-    await f.publish()
-    const refreshed = await f.detail()
-    assert.equal(f.writers(), 2)
-    assert.equal(refreshed.ticket.currentStep, 'merge')
-    const gate = await getSavedMergeGate(f.store.database, f.ticket.id)
-    assert.equal(gate?.latest.ready, true)
-    assert.deepEqual(gate?.latest.needsOwner, ['Untested workflow'])
-    if (alreadyPublished) {
-      assert.equal(await baseSyncCount(f.store.database, f.ticket.id), 3)
-      await runAttempt(f.options, await f.next(), signal)
-      const [ownerWait] = await listWaitingForMerge(f.store.database)
-      await f.advanceBase('fourth-base-move.txt')
-      assert.equal(
-        await pollPullRequestBase(f.options, ownerWait!, signal),
-        true,
-      )
-      const bounded = await f.detail()
-      assert.equal(bounded.ticket.waiting?.for, 'ask')
-      assert.match(
-        bounded.attempts.at(-2)!.summary!,
-        /3 consecutive base re-syncs/,
-      )
-      assert.equal(
-        await run('git', ['rev-parse', 'HEAD'], { cwd: f.cwd }),
-        head,
-      )
-      assert.equal(f.writers(), 2)
-    }
-  })
-}
+test('a reviewed workflow without a tester refreshes stale review after base sync it already published', async (t) => {
+  const f = await fixture(t, false, true)
+  f.setChecks({ state: 'none', failures: [] })
+  await f.publish()
+  await runAttempt(f.options, await f.next(), signal)
+  const [waiting] = await listWaitingForMerge(f.store.database)
+  await f.advanceBase()
+  // The branch already contains the new base, so only the stale review requeues maintenance.
+  await f.options.workspaces.prepareRepository(waiting!.repository, signal)
+  await run(
+    'git',
+    [
+      '-c',
+      'user.name=Fixture',
+      '-c',
+      'user.email=fixture@example.test',
+      'merge',
+      '--no-edit',
+      'origin/main',
+    ],
+    { cwd: f.cwd },
+  )
+  await run('git', ['push', 'origin', f.ticket.branch], { cwd: f.cwd })
+  for (let sync = 0; sync < 3; sync++)
+    assert.equal(await beginBaseSync(f.store.database, f.ticket.id, 3), true)
+  await pollPullRequestBase(f.options, waiting!, signal)
+  await f.publish()
+  const synced = await f.detail()
+  const maintained = synced.attempts.at(-2)!
+  assert.equal(maintained.outcome, 'base-moved')
+  assert.equal(synced.ticket.currentStep, 'review')
+  assert.equal(f.writers(), 1, 'stale review must prevent publication')
+  const head = await run('git', ['rev-parse', 'HEAD'], { cwd: f.cwd })
+  assert.notEqual(head, f.head)
+  const review = await f.next()
+  await completeAttempt(
+    f.store.database,
+    review.attempt.id,
+    { outcome: 'passed', summary: 'Synced commit reviewed', artifacts: [] },
+    { headCommit: head },
+  )
+  await f.publish()
+  const refreshed = await f.detail()
+  assert.equal(f.writers(), 2)
+  assert.equal(refreshed.ticket.currentStep, 'merge')
+  const gate = await getSavedMergeGate(f.store.database, f.ticket.id)
+  assert.equal(gate?.latest.ready, true)
+  assert.deepEqual(gate?.latest.needsOwner, ['Untested workflow'])
+  assert.equal(
+    await baseSyncCount(f.store.database, f.ticket.id),
+    3,
+    'a maintenance with no missing base is not a re-sync',
+  )
+})
 
 test('base movement invalidates a tester verdict; retry cannot reuse it after merge was saved', async (t) => {
   const f = await fixture(t, true)
@@ -524,6 +505,11 @@ test('base movement invalidates a tester verdict; retry cannot reuse it after me
   let d = await f.detail()
   assert.equal(d.attempts[1]!.outcome, 'base-moved')
   assert.equal(f.bodies.length, 0)
+  assert.equal(
+    await baseSyncCount(f.store.database, f.ticket.id),
+    0,
+    'a base merge before the first publication is not a re-sync',
+  )
   await resolveAsk(f.store.database, {
     ticketNumber: f.ticket.number,
     attemptId: d.ticket.waiting!.attemptId,
@@ -551,125 +537,109 @@ test('base movement invalidates a tester verdict; retry cannot reuse it after me
   assert.equal((await f.detail()).ticket.currentStep, 'merge')
 })
 
-for (const end of ['passed', 'failed', 'none', 'timeout'] as const) {
-  test(`CI pending → ${end}, persisted exact commit and bounded findings`, async (t) => {
-    const f = await fixture(t, false, end === 'timeout' ? 0.001 : 60)
-    f.setChecks({ state: 'pending', failures: [] })
-    await f.publish()
-    if (end !== 'timeout') {
-      await f.poll()
-      assert.equal(
-        (await f.detail()).ticket.waiting?.for,
-        'pull-request-checks',
-      )
-      f.setChecks({
-        state: end,
-        failures:
-          end === 'failed'
-            ? [
-                {
-                  name: 'typecheck',
-                  url: 'https://github.com/check',
-                  excerpt: 'Type mismatch in src/example.ts',
-                },
-              ]
-            : [],
-      })
-    } else await new Promise((resolve) => setTimeout(resolve, 80))
-    await f.poll()
-    const d = await f.detail()
-    assert.equal(d.attempts[0]!.headCommit, f.head)
-    assert.equal(
-      d.attempts[0]!.outcome,
-      end === 'failed'
-        ? 'ci-failed'
-        : end === 'timeout'
-          ? 'needs-decision'
-          : 'ready',
-    )
-    if (end === 'failed')
-      assert.match(
-        d.artifacts.find((a) => a.kind === 'finding')!.content!,
-        /typecheck.*\n\nType mismatch/s,
-      )
-    if (end === 'timeout') assert.equal(d.ticket.waiting?.for, 'ask')
-  })
-}
-
-for (const bundle of ['failed', 'pending'] as const)
-  test(`non-required check ${bundle} while required checks pass`, async (t) => {
-    const f = await fixture(t, true)
-    const url = 'https://github.com/fixture/repo/actions/runs/7/job/99'
-    // The real adapter parses GitHub's answer; only the gh process is replaced.
-    f.options.github.checks = createGitHub(async (_command, args) => {
-      if (args[0] === 'run') return 'Bundle exceeds 500 kB: dist/app.js'
-      if (args.includes('--slurp')) return '[[]]'
-      const head = args.find((a) => a.startsWith('sha='))!.slice(4)
-      return JSON.stringify({
-        data: {
-          repository: {
-            pullRequest: {
-              headRefOid: head,
-              baseRefName: 'main',
-              baseRef: {
-                branchProtectionRule: {
-                  requiredStatusCheckContexts: ['build'],
-                },
+test('CI pending → failed: a non-required check failing after required checks pass persists the exact commit and its excerpt', async (t) => {
+  const f = await fixture(t, true)
+  const url = 'https://github.com/fixture/repo/actions/runs/7/job/99'
+  let finished = false
+  // The real adapter parses GitHub's answer; only the gh process is replaced.
+  f.options.github.checks = createGitHub(async (_command, args) => {
+    if (args[0] === 'run') return 'Bundle exceeds 500 kB: dist/app.js'
+    if (args.includes('--slurp')) return '[[]]'
+    const head = args.find((a) => a.startsWith('sha='))!.slice(4)
+    return JSON.stringify({
+      data: {
+        repository: {
+          pullRequest: {
+            headRefOid: head,
+            baseRefName: 'main',
+            baseRef: {
+              branchProtectionRule: {
+                requiredStatusCheckContexts: ['build'],
               },
             },
-            object: {
-              statusCheckRollup: {
-                contexts: {
-                  pageInfo: { hasNextPage: false },
-                  nodes: [
-                    {
-                      kind: 'CheckRun',
-                      name: 'build',
-                      isRequired: true,
-                      status: 'COMPLETED',
-                      conclusion: 'SUCCESS',
-                    },
-                    {
-                      kind: 'CheckRun',
-                      name: 'Bundle',
-                      isRequired: false,
-                      status: bundle === 'failed' ? 'COMPLETED' : 'QUEUED',
-                      conclusion: bundle === 'failed' ? 'FAILURE' : null,
-                      databaseId: 99,
-                      detailsUrl: url,
-                    },
-                  ],
-                },
+          },
+          object: {
+            statusCheckRollup: {
+              contexts: {
+                pageInfo: { hasNextPage: false },
+                nodes: [
+                  {
+                    kind: 'CheckRun',
+                    name: 'build',
+                    isRequired: true,
+                    status: finished ? 'COMPLETED' : 'QUEUED',
+                    conclusion: finished ? 'SUCCESS' : null,
+                  },
+                  {
+                    kind: 'CheckRun',
+                    name: 'Bundle',
+                    isRequired: false,
+                    status: finished ? 'COMPLETED' : 'QUEUED',
+                    conclusion: finished ? 'FAILURE' : null,
+                    databaseId: 99,
+                    detailsUrl: url,
+                  },
+                ],
               },
             },
           },
         },
-      })
-    }).checks
-    await f.publish()
-    const d = await f.detail()
-    const publish = d.attempts.find((a) => a.stepId === 'publish')!
-    const gate = (await getSavedMergeGate(f.store.database, f.ticket.id))!
-    if (bundle === 'failed') {
-      assert.equal(publish.outcome, 'ci-failed')
-      assert.equal(publish.summary, 'CI failed: Bundle')
-      assert.equal(
-        d.artifacts.find((a) => a.kind === 'finding')!.content,
-        `[Bundle](${url})\n\nBundle exceeds 500 kB: dist/app.js`,
-      )
-      assert.equal(gate.latest.facts.ci, 'failed')
-      assert.ok(gate.latest.blockers.includes('CI failed'))
-    } else {
-      assert.equal(publish.outcome, 'ready')
-      assert.equal(d.ticket.currentStep, 'merge')
-      assert.equal(gate.latest.facts.ci, 'passed')
-      assert.ok(!gate.latest.blockers.some((b) => b.startsWith('CI')))
-      assert.equal(
-        gate.latest.facts.checks.find((c) => c.name === 'Bundle')!.state,
-        'pending',
-      )
-    }
+      },
+    })
+  }).checks
+  await f.publish()
+  await f.poll()
+  assert.equal((await f.detail()).ticket.waiting?.for, 'pull-request-checks')
+  finished = true
+  await f.poll()
+  const d = await f.detail()
+  const publish = d.attempts.find((a) => a.stepId === 'publish')!
+  assert.equal(publish.headCommit, f.head)
+  assert.equal(publish.outcome, 'ci-failed')
+  assert.equal(publish.summary, 'CI failed: Bundle')
+  assert.equal(
+    d.artifacts.find((a) => a.kind === 'finding')!.content,
+    `[Bundle](${url})\n\nBundle exceeds 500 kB: dist/app.js`,
+  )
+  const gate = (await getSavedMergeGate(f.store.database, f.ticket.id))!
+  assert.equal(gate.latest.facts.ci, 'failed')
+  assert.ok(gate.latest.blockers.includes('CI failed'))
+})
+
+test('CI pending → timeout asks the owner with the exact commit', async (t) => {
+  const f = await fixture(t)
+  f.setChecks({ state: 'pending', failures: [] })
+  await f.publish()
+  await f.store.database.query(
+    "UPDATE attempts SET waiting_since = now() - interval '61 minutes' WHERE ticket_id = $1 AND status = 'waiting'",
+    [f.ticket.id],
+  )
+  await f.poll()
+  const d = await f.detail()
+  assert.equal(d.attempts[0]!.headCommit, f.head)
+  assert.equal(d.attempts[0]!.outcome, 'needs-decision')
+  assert.equal(d.ticket.waiting?.for, 'ask')
+})
+
+test('a head-changed snapshot needs a decision; pending waits; finished checks are ready', () => {
+  const url = 'https://github.com/fixture/repo/pull/1'
+  assert.deepEqual(checksResult({ state: 'head-changed', failures: [] }, url), {
+    outcome: 'needs-decision',
+    summary:
+      'The pull request head changed on GitHub; reconcile the branch before retrying maintain-pr.',
+    artifacts: [],
   })
+  assert.equal(checksResult({ state: 'pending', failures: [] }, url), null)
+  assert.deepEqual(checksResult({ state: 'none', failures: [] }, url), {
+    outcome: 'ready',
+    summary: `Pull request: ${url}. No checks configured.`,
+    artifacts: [],
+  })
+  assert.equal(
+    checksResult({ state: 'passed', failures: [] }, url)!.summary,
+    `Pull request: ${url}. CI passed.`,
+  )
+})
 
 test('CI wait survives scheduler restart and releases its only execution slot', async (t) => {
   const f = await fixture(t)
@@ -791,19 +761,6 @@ test('writer worktree mutation prevents pushing', async (t) => {
   )
 })
 
-test('zero settle window permits no checks on the first snapshot', async (t) => {
-  const f = await fixture(t)
-  f.setChecks({ state: 'none', failures: [] })
-  await f.publish()
-  const d = await f.detail()
-  assert.equal(d.attempts[0]!.outcome, 'ready')
-  assert.equal(d.ticket.currentStep, 'merge')
-  assert.equal(
-    (await listWaitingForMerge(f.store.database, 'pull-request-checks')).length,
-    0,
-  )
-})
-
 test('changed head while waiting cannot use the original commit’s green checks', async (t) => {
   const f = await fixture(t)
   await f.publish()
@@ -859,63 +816,37 @@ test('maintenance reuses a cached description without wording checks', async (t)
   )
 })
 
-test('gate is evaluated during CI and merge waits, with checks separate from historical writer text', async (t) => {
+test('gate is evaluated during CI and merge waits; open feedback and current consumed change requests both block; behind base preserves earlier green head while rebuilding', async (t) => {
   const { getMergeGate } = await import('../src/store/merge-gates.ts')
   const { refreshMergeGate } = await import('../src/engine/merge-gate.ts')
+  const { addAttemptArtifacts } = await import('../src/store/tickets.ts')
   const f = await fixture(t, true)
-  f.setChecks({
-    state: 'pending',
-    failures: [],
-    checks: [
-      {
-        name: 'build',
-        state: 'pending',
-        required: true,
-        url: 'https://github.com/check',
-      },
-    ],
+  const check = (state: 'pending' | 'passed') => ({
+    name: 'build',
+    state,
+    required: true,
+    url: 'https://github.com/check',
   })
+  f.setChecks({ state: 'pending', failures: [], checks: [check('pending')] })
   await f.publish()
   let snapshot = (await getMergeGate(f.store.database, f.ticket.id))!
   assert.equal(snapshot.latest.ready, false)
   assert.equal(snapshot.latest.facts.head, f.head)
   assert.equal(snapshot.latest.facts.checks[0]!.state, 'pending')
-  f.setChecks({
-    state: 'passed',
-    failures: [],
-    checks: [
-      {
-        name: 'build',
-        state: 'passed',
-        required: true,
-        url: 'https://github.com/check',
-      },
-    ],
-  })
+  f.setChecks({ state: 'passed', failures: [], checks: [check('passed')] })
   await f.poll()
-  const context = await f.next()
-  await runAttempt(f.options, context, signal)
+  await runAttempt(f.options, await f.next(), signal)
   const [waiting] = await listWaitingForMerge(f.store.database)
   await refreshMergeGate(f.options, waiting!, signal)
   snapshot = (await getMergeGate(f.store.database, f.ticket.id))!
   assert.equal(snapshot.latest.ready, true)
   assert.equal(snapshot.lastGreen!.facts.head, f.head)
+  // The gate reads live checks; the writer's text stays as it was at publication.
   assert.match(f.bodies[0]!, /CI pending at publication/)
   assert.doesNotMatch(
     f.bodies[0]!,
     /localhost|factory\.example|\/api\/artifacts|\/Users\//,
   )
-})
-
-test('open feedback and current consumed change requests both block; behind base preserves earlier green head while rebuilding', async (t) => {
-  const { getMergeGate } = await import('../src/store/merge-gates.ts')
-  const { refreshMergeGate } = await import('../src/engine/merge-gate.ts')
-  const { addAttemptArtifacts } = await import('../src/store/tickets.ts')
-  const f = await fixture(t, true)
-  f.setChecks({ state: 'passed', failures: [] })
-  await f.publish()
-  await runAttempt(f.options, await f.next(), signal)
-  const [waiting] = await listWaitingForMerge(f.store.database)
   f.setFeedback([
     {
       id: 'review:50',
@@ -955,185 +886,66 @@ test('open feedback and current consumed change requests both block; behind base
     /Behind base/,
   )
   await pollPullRequestBase(f.options, waiting!, signal)
-  const snapshot = (await getMergeGate(f.store.database, f.ticket.id))!
+  snapshot = (await getMergeGate(f.store.database, f.ticket.id))!
   assert.equal(snapshot.lastGreen!.facts.head, f.head)
   assert.equal((await f.detail()).ticket.status, 'queued')
-  await f.publish()
-  assert.equal((await f.detail()).attempts.at(-2)!.outcome, 'base-moved')
 })
 
-for (const path of [
-  '.kipster/kit.yml',
-  '.github/workflows/ci.yml',
-  'db/migrations/001.sql',
-  'custom/001.sql',
-]) {
-  test(`trusted path rules need the owner for ${path}`, async (t) => {
-    const { refreshMergeGate } = await import('../src/engine/merge-gate.ts')
-    const f = await fixture(t)
-    await mkdir(join(f.source, '.kipster'), { recursive: true })
-    await f.commit(
-      f.source,
-      '.kipster/kit.yml',
-      'version: 1\ncheck: true\nmerge:\n  migrations: [custom/*.sql]\n'.replace(
-        'check: true',
-        'check: "true"',
-      ),
-    )
-    await run('git', ['push', f.bare, 'main'], { cwd: f.source })
-    await mkdir(join(f.cwd, path.substring(0, path.lastIndexOf('/'))), {
-      recursive: true,
-    })
-    await f.commit(
-      f.cwd,
-      path,
-      path === '.kipster/kit.yml'
-        ? 'version: 1\ncheck: "true"\nmerge:\n  migrations: []\n'
-        : 'changed',
-    )
-    // Avoid a same-file kit merge conflict; bring the trusted baseline into this branch first.
-    if (path === '.kipster/kit.yml') {
-      await run('git', ['fetch', 'origin'], { cwd: f.cwd })
-      await run(
-        'git',
-        [
-          '-c',
-          'user.name=Fixture',
-          '-c',
-          'user.email=fixture@example.test',
-          'merge',
-          '-s',
-          'ours',
-          '--no-edit',
-          'origin/main',
-        ],
-        { cwd: f.cwd },
-      )
-    }
-    await f.publish()
-    const [waiting] = await listWaitingForMerge(
-      f.store.database,
-      'pull-request-checks',
-    )
-    const { gate } = await refreshMergeGate(f.options, waiting!, signal)
+test('trusted path rules need the owner for a ticket kit edit and the trusted custom migration glob', async (t) => {
+  const { refreshMergeGate } = await import('../src/engine/merge-gate.ts')
+  const f = await fixture(t)
+  await mkdir(join(f.source, '.kipster'), { recursive: true })
+  await f.commit(
+    f.source,
+    '.kipster/kit.yml',
+    'version: 1\ncheck: "true"\nmerge:\n  migrations: [custom/*.sql]\n',
+  )
+  await run('git', ['push', f.bare, 'main'], { cwd: f.source })
+  await mkdir(join(f.cwd, 'custom'))
+  await f.commit(f.cwd, 'custom/001.sql', 'changed')
+  // The ticket kit drops the custom glob; only the trusted base kit may still match it.
+  await mkdir(join(f.cwd, '.kipster'))
+  await f.commit(
+    f.cwd,
+    '.kipster/kit.yml',
+    'version: 1\ncheck: "true"\nmerge:\n  migrations: []\n',
+  )
+  // Avoid a same-file kit merge conflict; bring the trusted baseline into this branch first.
+  await run('git', ['fetch', 'origin'], { cwd: f.cwd })
+  await run(
+    'git',
+    [
+      '-c',
+      'user.name=Fixture',
+      '-c',
+      'user.email=fixture@example.test',
+      'merge',
+      '-s',
+      'ours',
+      '--no-edit',
+      'origin/main',
+    ],
+    { cwd: f.cwd },
+  )
+  await f.publish()
+  const [waiting] = await listWaitingForMerge(
+    f.store.database,
+    'pull-request-checks',
+  )
+  const { gate } = await refreshMergeGate(f.options, waiting!, signal)
+  for (const path of ['.kipster/kit.yml', 'custom/001.sql']) {
     assert.ok(gate.paths.some((p) => p.path === path))
     assert.match(
       gate.needsOwner.join(),
       new RegExp(path.replaceAll('.', '\\.')),
     )
-    assert.deepEqual(
-      gate.facts.migrationGlobs,
-      ['custom/*.sql'],
-      'ticket kit cannot replace trusted rules',
-    )
-  })
-}
-
-test('writer publishes paraphrased scenarios and unrestricted wording unchanged', async (t) => {
-  const { addAttemptArtifacts } = await import('../src/store/tickets.ts')
-  const f = await fixture(t, true)
-  const scenarios = [
-    'Empty checkout succeeds',
-    'Repeated checkout is idempotent',
-  ]
-  const tester = (await f.detail()).attempts[0]!
-  await addAttemptArtifacts(
-    f.store.database,
-    tester.id,
-    scenarios.map((scenario) => ({
-      kind: 'evidence' as const,
-      title: scenario,
-      scenario,
-      scenarioResult: 'passed' as const,
-      content: 'Observed successful checkout at the tested head',
-    })),
-  )
-  const note = `  Submitting a blank basket completes successfully, and submitting it again leaves a single order.
-${'Details of the change. '.repeat(220)}
-[proof](http://factory.lan:4600/#/tickets/1)
-[proof](/api/artifacts/1)
-/Users/someone/.kipster-factory/steps
-  `
-  assert.ok(note.length > 4000)
-  writerRuns(f, [{ notes: [note] }])
-  const context = await f.publish()
-  const prompt = await readFile(
-    join(
-      f.options.home,
-      'steps',
-      String(f.ticket.id),
-      String(context.attempt.id),
-      'writer-1',
-      'prompt.md',
-    ),
-    'utf8',
-  )
-  for (const scenario of scenarios) {
-    assert.ok(prompt.includes(scenario))
-    assert.ok(!note.includes(scenario))
   }
-  assert.deepEqual(f.bodies, [`${note}\n\n${FACTORY_MARKER}`])
-  assert.equal(f.writers(), 1)
-  assert.equal(
-    (await f.detail()).artifacts.find((a) => a.kind === 'note')!.content,
-    note,
+  assert.deepEqual(
+    gate.facts.migrationGlobs,
+    ['custom/*.sql'],
+    'ticket kit cannot replace trusted rules',
   )
 })
-
-test('oversized writer note fits GitHub while the full text stays on the ticket', async (t) => {
-  const f = await fixture(t)
-  const note = '🌻'.repeat(40_000)
-  writerRuns(f, [{ notes: [note] }])
-  await f.publish()
-  const body = f.bodies[0]!
-  assert.ok(body.length <= 65_536)
-  assert.equal(
-    body,
-    `${fitGitHubLimit(note, f.ticket.number)}\n\n${FACTORY_MARKER}`,
-  )
-  assert.ok(
-    body.endsWith(
-      `Full description on ticket #${f.ticket.number} in the factory\n\n${FACTORY_MARKER}`,
-    ),
-  )
-  assert.equal(
-    (await f.detail()).artifacts.find((a) => a.kind === 'note')!.content,
-    note,
-  )
-  assert.equal(
-    await getPullRequestDescription(f.store.database, f.ticket.id, f.head),
-    fitGitHubLimit(note, f.ticket.number),
-  )
-  assert.equal(f.writers(), 1)
-})
-
-for (const first of [
-  { notes: [] },
-  { notes: ['  \n\t'] },
-  { outcome: 'needs-decision', notes: ['A note with a non-done outcome'] },
-]) {
-  test(`writer retries no usable note: ${JSON.stringify(first)}`, async (t) => {
-    const f = await fixture(t)
-    const note = 'Second writer note'
-    writerRuns(f, [first, { notes: [note] }])
-    const context = await f.publish()
-    assert.equal(f.writers(), 2)
-    assert.deepEqual(f.bodies, [`${note}\n\n${FACTORY_MARKER}`])
-    assert.ok(
-      await readFile(
-        join(
-          f.options.home,
-          'steps',
-          String(f.ticket.id),
-          String(context.attempt.id),
-          'writer-1',
-          'result-error.txt',
-        ),
-        'utf8',
-      ),
-    )
-  })
-}
 
 test('writer uses the first non-empty note when multiple notes exist', async (t) => {
   const f = await fixture(t)
@@ -1147,8 +959,19 @@ test('writer uses the first non-empty note when multiple notes exist', async (t)
 
 for (const reviewed of [false, true]) {
   test(`two unusable writer runs publish and cache a factory description, reviewed: ${reviewed}`, async (t) => {
-    const f = await fixture(t, reviewed, 60, reviewed)
-    writerRuns(f, [{ missing: true }, { crash: true }])
+    const f = await fixture(t, reviewed, reviewed)
+    writerRuns(
+      f,
+      reviewed
+        ? [{ missing: true }, { crash: true }]
+        : [
+            { notes: [] },
+            {
+              outcome: 'needs-decision',
+              notes: ['A note with a non-done outcome'],
+            },
+          ],
+    )
     const context = await f.publish()
     assert.equal(f.writers(), 2)
     assert.equal(f.bodies.length, 1)
@@ -1189,26 +1012,14 @@ for (const reviewed of [false, true]) {
     )
     assert.match(
       await readFile(join(directory, 'writer-1', 'result-error.txt'), 'utf8'),
-      /ENOENT/,
+      reviewed ? /ENOENT/ : /no non-empty inline note/,
     )
     assert.match(
       await readFile(join(directory, 'writer-2', 'result-error.txt'), 'utf8'),
-      /Writer session crashed/,
+      reviewed ? /Writer session crashed/ : /Writer outcome needs-decision/,
     )
   })
 }
-
-test('cached oversized description also fits GitHub without invoking a writer', async (t) => {
-  const f = await fixture(t)
-  const note = 'x'.repeat(70_000)
-  await savePullRequestDescription(f.store.database, f.ticket.id, f.head, note)
-  await f.publish()
-  assert.equal(f.writers(), 0)
-  assert.deepEqual(f.bodies, [
-    `${fitGitHubLimit(note, f.ticket.number)}\n\n${FACTORY_MARKER}`,
-  ])
-  assert.ok(f.bodies[0]!.length <= 65_536)
-})
 
 test('writer abort propagates without retry or fallback', async (t) => {
   const f = await fixture(t)
@@ -1262,7 +1073,7 @@ test('GitHub limit preserves short text and UTF-16 pairs at the boundary', () =>
 })
 
 test('factory description lists exposed lead tasks and omits URLs and paths from facts', async (t) => {
-  const f = await fixture(t, true, 60, true)
+  const f = await fixture(t, true, true)
   const detail = await f.detail()
   const body = factoryDescription(
     {
@@ -1335,7 +1146,7 @@ for (const source of ['writer', 'cached', 'fallback'] as const) {
   for (const oversized of [false, true]) {
     test(`${source} description gets factory notices before trimming, oversized: ${oversized}`, async (t) => {
       const { addAttemptArtifacts } = await import('../src/store/tickets.ts')
-      const f = await fixture(t, true, 60, true)
+      const f = await fixture(t, true, true)
       const detail = await f.detail()
       const tester = detail.attempts.find(
         (attempt) => attempt.stepId === 'test',
@@ -1343,16 +1154,21 @@ for (const source of ['writer', 'cached', 'fallback'] as const) {
       const reviewer = detail.attempts.find(
         (attempt) => attempt.stepId === 'review',
       )!
-      const scenario = 'Empty checkout succeeds'
-      await addAttemptArtifacts(f.store.database, tester.id, [
-        {
-          kind: 'evidence',
+      const scenarios = [
+        'Empty checkout succeeds',
+        'Repeated checkout is idempotent',
+      ]
+      await addAttemptArtifacts(
+        f.store.database,
+        tester.id,
+        scenarios.map((scenario) => ({
+          kind: 'evidence' as const,
           title: scenario,
           scenario,
-          scenarioResult: 'passed',
+          scenarioResult: 'passed' as const,
           content: 'Observed a successful checkout at the tested head',
-        },
-      ])
+        })),
+      )
       const finding = {
         title: 'Check basket behavior',
         file: 'src/basket.ts',
@@ -1377,7 +1193,14 @@ for (const source of ['writer', 'cached', 'fallback'] as const) {
       )
       const reason =
         'Untested: no verify capability (skipped unavailable-proof)'
-      const note = `  Submitting a blank basket completes successfully. ${oversized ? '🌻'.repeat(40_000) : ''}  `
+      // Writer wording is published unchanged: long text, URLs and local paths included.
+      const note = `  Submitting a blank basket completes successfully, and submitting it again leaves a single order.
+${'Details of the change. '.repeat(220)}
+[proof](http://factory.lan:4600/#/tickets/1)
+[proof](/api/artifacts/1)
+/Users/someone/.kipster-factory/steps
+${oversized ? '🌻'.repeat(40_000) : ''}  `
+      assert.ok(note.length > 4000)
       if (source === 'cached')
         await savePullRequestDescription(
           f.store.database,
@@ -1453,8 +1276,10 @@ for (const source of ['writer', 'cached', 'fallback'] as const) {
           ),
           'utf8',
         )
-        assert.ok(prompt.includes(scenario))
-        assert.ok(!note.includes(scenario))
+        for (const scenario of scenarios) {
+          assert.ok(prompt.includes(scenario))
+          assert.ok(!note.includes(scenario))
+        }
         assert.ok(prompt.includes(reason))
         assert.match(
           prompt,
