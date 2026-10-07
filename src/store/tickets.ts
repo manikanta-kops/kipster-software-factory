@@ -6,10 +6,7 @@ import {
   withPreparedArtifacts,
   type PreparedArtifact,
 } from './artifact-preparation.ts'
-import {
-  withoutSkippedSteps,
-  type SkippedStep,
-} from '../domain/task-testing.ts'
+import type { SkippedStep } from '../domain/task-testing.ts'
 import { listTicketLinks, listDependencies } from './ticket-links.ts'
 import { getTaskOfChild, listTasks, taskEvent } from './task-records.ts'
 import { type AgentChoice, runTasksParams } from '../domain/catalog.ts'
@@ -186,7 +183,7 @@ export async function getTicketDetail(
   ])
   return {
     ticket,
-    workflow: withoutSkippedSteps(workflow, ticket.skippedSteps ?? []),
+    workflow,
     attempts,
     artifacts,
     events,
@@ -264,7 +261,6 @@ export async function createTicketInTransaction(
   connection: Connection,
   input: NewTicket,
   requireCapabilities = true,
-  isLeadTask = false,
 ): Promise<Ticket> {
   const { workflow, version, source } = input.workflow
   const title = input.title.trim()
@@ -283,9 +279,7 @@ export async function createTicketInTransaction(
       `${repository.slug} is ${repository.status}${repository.lastError ? ` (${repository.lastError})` : ''}; tickets can start once it is ready`,
     )
   }
-  const skippedSteps = requireCapabilities
-    ? checkCapabilities(workflow, repository, isLeadTask)
-    : []
+  if (requireCapabilities) checkCapabilities(workflow, repository)
   const dependencies: Repository[] = []
   for (const slug of input.dependencies ?? []) {
     const dependency = await getRepository(connection, slug)
@@ -313,12 +307,12 @@ export async function createTicketInTransaction(
     "SELECT nextval('ticket_numbers')::integer AS number",
   )
   const number = (rows[0] as { number: number }).number
-  const opening = startTicket(withoutSkippedSteps(workflow, skippedSteps))
+  const opening = startTicket(workflow)
   const status = ticketStatus({ status: opening.status, next: null })
   const inserted = await connection.query<{ id: number }>(
     `INSERT INTO tickets (number, repository_id, workflow_name, workflow_version,
-                            title, body, branch, current_step, status, skipped_steps, lights_out)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+                            title, body, branch, current_step, status, lights_out)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
        RETURNING id`,
     [
       number,
@@ -330,7 +324,6 @@ export async function createTicketInTransaction(
       branchName(number, title),
       opening.stepId,
       status,
-      JSON.stringify(skippedSteps),
       input.lightsOut ?? defaultLightsOut(workflow.name),
     ],
   )
@@ -1187,9 +1180,8 @@ export async function lockTicket(
     number: number
     status: TicketStatus
     definition: Workflow
-    skipped_steps: SkippedStep[]
   }>(
-    `SELECT t.id, t.number, t.status, t.skipped_steps, v.definition
+    `SELECT t.id, t.number, t.status, v.definition
      FROM tickets t
      JOIN workflow_versions v
        ON v.name = t.workflow_name AND v.version = t.workflow_version
@@ -1208,7 +1200,7 @@ export async function lockTicket(
     id: row.id,
     number: row.number,
     status: row.status,
-    workflow: withoutSkippedSteps(row.definition, row.skipped_steps),
+    workflow: row.definition,
     attempts: await listAttempts(connection, row.id),
   }
 }
@@ -1567,9 +1559,10 @@ async function loadContext(
     database,
     ticket.repository.id,
   )) as Repository
-  const workflow = withoutSkippedSteps(
-    await loadWorkflow(database, ticket.workflow.name, ticket.workflow.version),
-    ticket.skippedSteps ?? [],
+  const workflow = await loadWorkflow(
+    database,
+    ticket.workflow.name,
+    ticket.workflow.version,
   )
   return {
     attempt,

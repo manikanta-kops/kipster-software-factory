@@ -24,7 +24,8 @@ verify:
 ```
 
 `version` and nonempty `check` are required. `setup` and `verify` are optional;
-omitting verify describes a repository that cannot yet run tester workflows.
+omitting verify means testers check the change in a disposable checkout without
+a started app, and bug workflows (which need `verify`) cannot start.
 Unknown keys are rejected by Zod. All commands run with `/bin/sh -c` at the fresh
 checkout root. Setup installs dependencies in every fresh checkout. Check is the
 repository's deterministic gate. Neither command may launch persistent services.
@@ -173,7 +174,9 @@ that a stored latest commit is a live Git ref.
 Tester and reproducer execution loads the trusted default-branch kit and its
 verification documents. The tester uses the exact ticket HEAD; the reproducer
 uses the base HEAD. Bug testers receive separate base and head instances and
-must attach evidence from both. The runner races agents against instance exits,
+must attach evidence from both. Without a verify block, or when a feature
+tester's app fails to set up or start, the tester gets only a disposable checkout
+and the reason, and checks the change itself. The runner races agents against instance exits,
 retains evidence, discards checkout edits and awaits stop in finally. Proof
 attempts pin headCommit before execution; successful tester summaries include
 `Verified at <sha>`. `isLatestTesterVerdictCurrent(database, ticketId, sha)` in

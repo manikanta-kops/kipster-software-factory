@@ -141,7 +141,7 @@ export function NewTicket() {
                     repository,
                     workflow: 'onboard-repo',
                     title: `Verify the kit for ${repository}`,
-                    body: 'Prepare a repository kit and verify it so lead and bug workflows can run.',
+                    body: 'Prepare a repository kit and verify it so testers get a running app and bug workflows can run.',
                   })
                 }
               >

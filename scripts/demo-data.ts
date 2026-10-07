@@ -573,7 +573,7 @@ async function seedLocked(
       },
       {
         key: 'export-notes',
-        title: 'Document report exports (synthetic untested demo)',
+        title: 'Document report exports (synthetic unverified demo)',
         instructions:
           'Document CSV exports in the repository without a verify capability.',
         land: 'branch',
@@ -622,7 +622,7 @@ async function seedLocked(
       repository: 'kipster/invalid-kit',
       workflow: taskWorkflow,
       title: notesTask!.title,
-      body: 'Synthetic untested task: no agents, code changes or verification ran.',
+      body: 'Synthetic task with an unverified item: no agents, code changes or verification ran.',
     },
     null,
   )
@@ -632,11 +632,25 @@ async function seedLocked(
     summary:
       'Synthetic documentation task finished without a verify capability.',
   })
+  await run(lightsOutUntestedChild, {
+    outcome: 'passed',
+    summary:
+      'Synthetic checker: read the change without an app; one item stays unverified.',
+    artifacts: [
+      {
+        kind: 'evidence',
+        title: 'Export docs not viewed in a browser (synthetic demo)',
+        content: 'Synthetic: no app was started and nothing ran.',
+        scenario: 'Read the export docs',
+        scenarioResult: 'unverified',
+      },
+    ],
+  })
   await updateTask(
     database,
     notesTask!.id,
     'merged',
-    'Synthetic merged task. Untested: no verify capability (skipped test). No real merge ran.',
+    'Synthetic merged task. Checker test passed with unverified items. Unverified by test: Read the export docs. No real merge ran.',
   )
 
   const retired = parseUpload(RETIRED_QUICK_CHANGE)

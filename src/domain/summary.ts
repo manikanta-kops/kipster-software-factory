@@ -1,7 +1,7 @@
 import type { Artifact, Attempt, LeadTask, Ticket } from './records.ts'
 import { evaluateMergeGate, type MergeGate } from './merge-gate.ts'
 import { scenarioIndex } from './evidence.ts'
-import { untestedReasons } from './task-testing.ts'
+import { skippedReasons, uncheckedItems } from './task-testing.ts'
 import type { Workflow } from './workflow.ts'
 
 export interface TicketSummary {
@@ -52,7 +52,12 @@ export function summarizeTicket(facts: {
   const href = `#/tickets/${ticket.number}`
   const actions: { label: string; href: string }[] = []
   const issues: string[] = []
-  const unverified = untestedReasons(facts)
+  const unverified = skippedReasons(ticket)
+  const unchecked = uncheckedItems(facts).length
+  if (unchecked)
+    unverified.push(
+      `${unchecked} item${unchecked === 1 ? '' : 's'} the checker could not verify`,
+    )
   const waiting = ticket.waiting
   const brokenAsk =
     waiting?.for === 'ask' &&

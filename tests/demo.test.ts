@@ -9,6 +9,7 @@ import { fileURLToPath } from 'node:url'
 import { promisify } from 'node:util'
 import { after, before, describe, test } from 'node:test'
 import { seedDemo } from '../scripts/demo-data.ts'
+import { untestedReasons } from '../src/domain/task-testing.ts'
 import {
   createRepository,
   listRepositories,
@@ -187,14 +188,12 @@ describe('demo data', () => {
     const untested = await detail(demo.tickets.lightsOutUntestedChild)
     assert.equal(untested.ticket.lightsOut, true)
     assert.equal(untested.ticket.status, 'done')
-    assert.deepEqual(untested.ticket.skippedSteps, [
-      { stepId: 'test', missingCapabilities: ['verify'] },
+    assert.deepEqual(untested.ticket.skippedSteps, [])
+    assert.deepEqual(untestedReasons(untested), [
+      'Unverified by test: Read the export docs',
     ])
     assert.equal(lead.tasks[1]?.status, 'merged')
-    assert.deepEqual(
-      lead.tasks[1]?.child?.skippedSteps,
-      untested.ticket.skippedSteps,
-    )
+    assert.match(lead.tasks[1]?.result ?? '', /Unverified by test/)
   })
 
   test('the plan waiting for approval is a markdown artifact', async () => {
