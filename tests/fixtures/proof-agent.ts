@@ -6,11 +6,17 @@ export interface ProofContext {
   instances: {
     surface: string
     commit: string
-    url: string
+    /** Null when no app was started for the checker. */
+    url: string | null
     evidenceDir: string
     checkout: string
     databaseUrl: string | null
   }[]
+  app?: {
+    started: false
+    reason: string
+    suggestedCommands: { setup: string | null; check: string | null }
+  }
 }
 export function proofContext(prompt: string): ProofContext {
   const marker =

@@ -55,7 +55,8 @@ export interface VerificationOptions {
   /** Local repository cache containing the exact commit, including ticket commits. */
   readonly repository: string
   readonly commit: string
-  readonly kit: Kit
+  /** Null gives only the disposable checkout, for a checker that works out its own commands. */
+  readonly kit: Kit | null
   readonly database: Database
   readonly signal?: AbortSignal
   /** verify-kit runs the deterministic gate after setup, before provisioning/start. */
@@ -184,8 +185,8 @@ export async function startVerification(
       await run('/bin/sh', ['-c', value], { cwd: checkout, log: path, signal })
   }
   try {
-    const kit = kitSchema.parse(options.kit)
-    if (!kit.verify && !options.checkOnly)
+    const kit = options.kit && kitSchema.parse(options.kit)
+    if (kit && !kit.verify && !options.checkOnly)
       throw new Error('Kit has no verify block')
     if (!/^[0-9a-f]{40}([0-9a-f]{24})?$/.test(options.commit))
       throw new Error('commit must be a full object ID')
@@ -235,9 +236,9 @@ export async function startVerification(
         input: `${updates.join('\n')}\n`,
         signal,
       })
-    await command('setup', kit.setup)
-    if (options.check) await command('check', kit.check)
-    if (options.checkOnly)
+    if (kit) await command('setup', kit.setup)
+    if (kit && options.check) await command('check', kit.check)
+    if (!kit || options.checkOnly)
       return {
         url: '',
         ports: [],

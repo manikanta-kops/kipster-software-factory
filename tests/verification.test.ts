@@ -208,14 +208,17 @@ test('harness runs exact detached commit, setup/check, isolated ports/database a
   )
 })
 
-for (const [mode, expected] of [
-  ['timeout', 'ready'],
-  ['crash', 'start'],
+// A crash must end the start command before the deadline, and a timeout must
+// expire after the app has logged; under parallel test load Node can take over
+// 300 ms just to start the fixture.
+for (const [mode, expected, timeoutSeconds] of [
+  ['timeout', 'ready', 3],
+  ['crash', 'start', 30],
 ] as const) {
   test(`harness ${mode} names the stage and cleans checkout/database`, async (t) => {
     const f = await fixture(t)
     f.kit.verify!.start = `${process.execPath} app.ts {port} {databaseUrl} ${mode}`
-    f.kit.verify!.timeoutSeconds = 0.3
+    f.kit.verify!.timeoutSeconds = timeoutSeconds
     let failure: VerificationError | undefined
     try {
       await startVerification(f)

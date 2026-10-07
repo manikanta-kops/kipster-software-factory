@@ -1,6 +1,7 @@
 import { refreshMergeGate } from './merge-gate.ts'
 import { pollAutoMerge } from './auto-merge.ts'
 import {
+  ciFailure,
   pollPullRequestBase,
   pollPullRequestFeedback,
 } from './pull-requests.ts'
@@ -22,7 +23,20 @@ export async function pollMergeWait(
     signal,
   )
   if (pr.state === 'OPEN') {
-    await refreshMergeGate(options, context, signal, { pr })
+    const { gate, checks } = await refreshMergeGate(options, context, signal, {
+      pr,
+    })
+    // Optional checks are not awaited, but one that fails after maintain-pr reported ready still needs the builder.
+    if (checks.state === 'failed') {
+      signal.throwIfAborted()
+      await completeAttempt(
+        options.database,
+        context.attempt.id,
+        { outcome: 'changes-needed', ...ciFailure(checks.failures) },
+        { headCommit: gate.facts.head },
+      )
+      return
+    }
     if (
       !(await pollPullRequestFeedback(options, context, signal)) &&
       !(await pollPullRequestBase(options, context, signal))

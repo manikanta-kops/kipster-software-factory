@@ -36,6 +36,51 @@ test('live CI transitions pending → failed → ready, while path rules and beh
   await expect(gate).toContainText('Earlier green head: aaaaaaa')
 })
 
+test('a failed non-required check is back at build with its link and log; a pending one is not awaited', async ({
+  page,
+  factory,
+}) => {
+  await page.goto(`${factory.url}/#/tickets/${factory.tickets.bundleFailed}`)
+  const now = page.getByRole('region', { name: 'Now' })
+  await expect(now).toContainText('Step 1 of 5')
+  await expect(now).toContainText('CI failed: Bundle')
+  const gate = page.getByRole('region', { name: 'Merge gate' })
+  await expect(gate.getByRole('heading')).toContainText('Blocked: CI failed')
+  const checks = gate.getByRole('list', { name: 'Current CI checks' })
+  await expect(checks).toContainText(
+    'Demo repository checks: passed · required',
+  )
+  await expect(checks).toContainText('Bundle: failed · not required')
+  const maintain = page.locator('.attempt-entry').filter({
+    has: page.getByRole('heading', { name: 'maintain-pr', exact: false }),
+  })
+  await expect(maintain).toContainText('ci failed')
+  await expect(maintain).toContainText('CI failed: Bundle')
+  await maintain.getByText('CI failed: Bundle finding', { exact: true }).click()
+  await expect(
+    maintain.getByRole('link', { name: 'Bundle', exact: true }),
+  ).toHaveAttribute(
+    'href',
+    'https://github.com/kipster/demo-shop/actions/runs/440/job/442',
+  )
+  await expect(maintain).toContainText(
+    'dist/assets/index.js is 312.4 kB, over the 250 kB budget',
+  )
+
+  await page.goto(`${factory.url}/#/tickets/${factory.tickets.bundlePending}`)
+  await expect(gate.getByRole('heading')).toHaveText('Ready to merge')
+  await gate.getByText('Live CI at', { exact: false }).click()
+  await expect(checks).toContainText(
+    'Demo repository checks: passed · required',
+  )
+  await expect(checks).toContainText('Bundle: pending · not required')
+  await expect(
+    page.locator('.attempt-entry').filter({
+      has: page.getByRole('heading', { name: 'maintain-pr', exact: false }),
+    }),
+  ).toContainText('CI passed.')
+})
+
 test('untested workflows always need the owner and older green heads remain visible during rebuilding', async ({
   page,
   factory,

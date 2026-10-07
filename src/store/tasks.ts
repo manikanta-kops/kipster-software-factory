@@ -74,12 +74,10 @@ export async function startTask(
       'SELECT lights_out FROM tickets WHERE id = $1',
       [task.ticket_id],
     )
-    const ticket = await createTicketInTransaction(
-      connection,
-      { ...child, lightsOut: parent.rows[0]!.lights_out },
-      true,
-      true,
-    )
+    const ticket = await createTicketInTransaction(connection, {
+      ...child,
+      lightsOut: parent.rows[0]!.lights_out,
+    })
     await connection.query(
       `UPDATE tasks SET status = 'running', child_ticket_id = $2, base_commit = $3, updated_at = now() WHERE id = $1`,
       [taskId, ticket.id, baseCommit],

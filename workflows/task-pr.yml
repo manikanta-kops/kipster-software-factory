@@ -8,7 +8,6 @@ steps:
   - id: test
     kind: agent
     role: tester
-    needs: [verify]
     limit: 3
     routes:
       changes-needed: build

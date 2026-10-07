@@ -26,7 +26,7 @@ test('home separates attention, progress and finished tickets', async ({
       .locator('.today-summary')
       .filter({ hasText: 'Add a dark mode toggle' }),
   ).toContainText('Ready')
-  await page.getByText('Show finished (3)').click()
+  await page.getByText('Show finished (5)').click()
   await expect(
     page.locator('.finished-list').getByText('Add a dark mode toggle'),
   ).toBeVisible()
@@ -646,7 +646,8 @@ test('repositories show valid and invalid kits and gate workflows on capabilitie
   await page
     .getByLabel('Repository', { exact: true })
     .selectOption('kipster/invalid-kit')
-  await expect(page.getByRole('radio', { name: /^lead / })).toBeDisabled()
+  await expect(page.getByRole('radio', { name: /^bug / })).toBeDisabled()
+  await expect(page.getByRole('radio', { name: /^lead / })).toBeEnabled()
   await expect(page.getByText(/needs a verified kit/).first()).toBeVisible()
 })
 

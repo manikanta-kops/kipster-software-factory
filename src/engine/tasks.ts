@@ -1,4 +1,4 @@
-import { untestedReasons } from '../domain/task-testing.ts'
+import { checkerVerdict } from '../domain/task-testing.ts'
 import type { AgentConfig } from '../config.ts'
 import { type RoleName, runTasksParams } from '../domain/catalog.ts'
 import { FactoryError } from '../domain/errors.ts'
@@ -259,7 +259,7 @@ export async function pollTasks(
           database,
           task.id,
           'merged',
-          `Pull request merged: ${child.pullRequestUrl ?? 'unknown URL'}${untestedTaskNote(task)}`,
+          `Pull request merged: ${child.pullRequestUrl ?? 'unknown URL'}. ${await taskVerdict(options, child.number)}`,
         )
     } else if (child.status === 'cancelled')
       await updateTask(
@@ -355,13 +355,21 @@ async function integrate(
     merged.conflicts ? 'conflict' : 'merged',
     merged.conflicts
       ? `Conflicts with the lead branch; the system aborted the merge. Files: ${merged.conflicts.join(', ')}. Branch ${branch} keeps the work.`
-      : `Merged into the lead branch at ${merged.head}.${untestedTaskNote(task)}`,
+      : mergedTaskResult(
+          merged.head,
+          await taskVerdict(options, task.child!.number),
+        ),
   )
 }
 
-function untestedTaskNote(task: LeadTask): string {
-  const reasons = untestedReasons({ ticket: task.child ?? {} })
-  return reasons.length ? ` Landed untested. ${reasons.join('; ')}.` : ''
+/** A branch task's result once the system merged it into the lead's branch. */
+export function mergedTaskResult(head: string, verdict: string): string {
+  return `Merged into the lead branch at ${head}. ${verdict}`
+}
+
+async function taskVerdict(options: RunnerOptions, number: number) {
+  const child = await getTicketDetail(options.database, number)
+  return child ? checkerVerdict(child) : 'No checker ran.'
 }
 
 async function childEnding(options: RunnerOptions, number: number) {

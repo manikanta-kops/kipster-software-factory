@@ -59,9 +59,8 @@ test('seeded decision list shows typed choices and links to child decisions', as
   ).toBeVisible()
   const tasks = page.getByRole('region', { name: 'Tasks', exact: true })
   await expect(tasks.locator('.badge.parked')).toHaveText('Parked')
-  await expect(page.locator('.ticket-meta')).toContainText(
-    'Untested task export-notes: no verify capability',
-  )
+  // Task verdicts live in the task report; the lead's own badges come from its final tester.
+  await expect(page.locator('.ticket-meta')).not.toContainText('Untested')
   const log = page.getByRole('region', { name: 'Decision log', exact: true })
   await expect(
     log.getByRole('heading', { name: 'Export format (synthetic demo)' }),
@@ -127,4 +126,10 @@ test('seeded decision list shows typed choices and links to child decisions', as
     path: childScreenshot,
     contentType: 'image/png',
   })
+  await page.goto(
+    `${factory.url}/#/tickets/${factory.tickets.lightsOutUntestedChild}`,
+  )
+  await expect(page.locator('.ticket-meta')).toContainText(
+    'Unverified by test: Read the export docs',
+  )
 })

@@ -3,8 +3,6 @@ import { join } from 'node:path'
 import { proofContext } from './fixtures/proof-agent.ts'
 import { untestedReasons } from '../src/domain/task-testing.ts'
 import { getMergeGate } from '../src/store/merge-gates.ts'
-import { writePullRequest } from '../src/engine/pr-writer.ts'
-import { withUntestedNotice } from '../src/engine/pr-writer.ts'
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { pollAutoMerge } from '../src/engine/auto-merge.ts'
@@ -21,6 +19,7 @@ import {
   until,
 } from './helpers/lead.ts'
 import { saveSettings } from '../src/store/settings.ts'
+import { builtInWorkflow } from './helpers/store.ts'
 
 test('a lead runs branch tasks in parallel, hears each finish while others run, and its branch gets all the work', async (t) => {
   const f = await leadFixture()
@@ -96,7 +95,7 @@ test('a lead runs branch tasks in parallel, hears each finish while others run, 
   for (const task of done.tasks)
     assert.match(
       task.result!,
-      /^Merged into the lead branch at [0-9a-f]{40}\.$/,
+      /^Merged into the lead branch at [0-9a-f]{40}\. No checker ran\.$/,
     )
   assert.deepEqual(await f.files(done.ticket.branch), [
     'README.md',
@@ -726,7 +725,7 @@ test('a task agent runs only the builder; workflow overrides and the allowed lis
 })
 
 for (const testing of ['missing', 'verify'] as const) {
-  test(`a built-in branch task ${testing === 'missing' ? 'lands untested without verify, including after restart' : 'runs its tester when verify is present'}`, async (t) => {
+  test(`a lead's branch task is built, checked and merged with the checker's verdict, then the final test runs (${testing === 'missing' ? 'no verify: the checker works in its checkout' : 'verify: the checker drives the started app'})`, async (t) => {
     const f = await leadFixture({}, testing)
     t.after(() => f.close())
     if (testing === 'verify')
@@ -735,7 +734,6 @@ for (const testing of ['missing', 'verify'] as const) {
         'valid',
         f.repository.kit?.error ?? 'Expected a valid verify kit',
       )
-    const builderWait = deferred()
     f.setBehaviour(async (role, invocation) => {
       if (role === 'lead') {
         const { tasks } = leadState(invocation.prompt)
@@ -756,116 +754,129 @@ for (const testing of ['missing', 'verify'] as const) {
               }),
         })
       }
-      if (role === 'builder') {
-        await builderWait.wait(invocation.signal)
+      if (role === 'builder')
         return build(invocation, 'change.txt', 'changed\n')
-      }
+      if (role === 'reviewer')
+        return result(invocation.directory, {
+          outcome: 'passed',
+          summary: 'Reviewed',
+          artifacts: [],
+        })
       assert.equal(role, 'tester')
-      const instance = proofContext(invocation.prompt).instances[0]!
-      const response = await fetch(`${instance.url}/checkout`, {
-        method: 'POST',
-        body: '{}',
-      })
-      assert.equal(response.status, 200)
-      const path = join(instance.evidenceDir, 'checkout.json')
-      await writeFile(path, await response.text())
+      const context = proofContext(invocation.prompt)
+      const instance = context.instances[0]!
+      const path = join(instance.evidenceDir, 'observed.txt')
+      const unverified = []
+      if (testing === 'verify') {
+        assert.equal(context.app, undefined)
+        const response = await fetch(`${instance.url}/checkout`, {
+          method: 'POST',
+          body: '{}',
+        })
+        assert.equal(response.status, 200)
+        await writeFile(path, await response.text())
+      } else {
+        assert.equal(context.app?.started, false)
+        assert.equal(instance.url, null)
+        await writeFile(
+          path,
+          await readFile(join(instance.checkout, 'change.txt'), 'utf8'),
+        )
+        unverified.push({
+          kind: 'evidence',
+          title: 'Not seen in a browser',
+          content: 'No app was started, so nobody looked at it.',
+          scenario: 'Browser view',
+          scenarioResult: 'unverified',
+        })
+      }
       return result(invocation.directory, {
         outcome: 'passed',
-        summary: 'Checkout passed',
+        summary: 'Checked the change',
         artifacts: [
           {
             kind: 'evidence',
-            title: 'Checkout',
+            title: 'Change',
             path,
-            scenario: 'Checkout',
+            scenario: 'Change',
             scenarioResult: 'passed',
           },
+          ...unverified,
         ],
       })
     })
-    const lead = await f.lead()
+    const lead = await createTicket(f.store.database, {
+      repository: f.repository.slug,
+      lightsOut: false,
+      workflow: await builtInWorkflow('lead'),
+      title: 'Lead the change',
+      body: 'Build the whole feature through tasks.',
+    })
     await f.start()
-    await until(
-      async () => f.invocations.filter((item) => item.role === 'builder'),
-      (items) => items.length === 1,
-    )
-    const running = await f.detail(lead.number)
-    const childNumber = running.tasks[0]!.child!.number
-    const child = await f.detail(childNumber)
-    const expected =
-      testing === 'missing'
-        ? [{ stepId: 'test', missingCapabilities: ['verify'] }]
-        : []
-    assert.deepEqual(child.ticket.skippedSteps, expected)
-    if (testing === 'missing') {
-      await f.stop()
-      await f.start()
-      await until(
-        async () => f.invocations.filter((item) => item.role === 'builder'),
-        (items) => items.length === 2,
-      )
-      assert.deepEqual(
-        (await f.detail(childNumber)).ticket.skippedSteps,
-        expected,
-      )
-    }
-    builderWait.release()
     const done = await until(
       () => f.detail(lead.number),
-      (detail) => detail.ticket.currentStep === 'confirm',
+      (detail) => detail.ticket.waiting?.for === 'pull-request-merge',
     )
-    assert.equal(done.tasks[0]!.status, 'merged')
+    const task = done.tasks[0]!
+    assert.equal(task.status, 'merged')
     assert.ok((await f.files(done.ticket.branch)).includes('change.txt'))
-    const finishedChild = await f.detail(childNumber)
-    assert.equal(finishedChild.ticket.status, 'done')
-    assert.deepEqual(finishedChild.ticket.skippedSteps, expected)
-    const testers = f.invocations.filter((item) => item.role === 'tester')
-    assert.equal(testers.length, testing === 'missing' ? 0 : 1)
-    if (testing === 'missing') {
-      assert.match(done.tasks[0]!.result!, /Landed untested/)
-      assert.ok(
-        done.artifacts.some(
-          (artifact) =>
-            artifact.title === 'Task report' &&
-            artifact.content?.includes('untested'),
-        ),
-      )
-      const warnings = untestedReasons(done)
-      assert.deepEqual(warnings, ['Untested task change: no verify capability'])
-      const signal = AbortSignal.timeout(60_000)
-      const head = await f.workspaces.head(done.ticket, signal)
-      const description = await writePullRequest(
-        f,
-        {
-          ticket: done.ticket,
-          attempt: done.attempts.at(-1)!,
-          workflow: done.workflow,
-          step: done.workflow.steps.at(-1)!,
-          repository: f.repository,
-        },
-        f.workspaces.path(done.ticket),
-        head,
-        signal,
-      )
-      assert.match(description, /Untested task change: no verify capability/)
-
-      assert.match(
-        withUntestedNotice('Lead PR', warnings),
-        /Untested task change/,
-      )
-    } else {
-      assert.equal(
-        finishedChild.attempts.find((attempt) => attempt.stepId === 'test')
-          ?.outcome,
-        'passed',
-      )
-      assert.deepEqual(untestedReasons(done), [])
-    }
+    const child = await f.detail(task.child!.number)
+    assert.equal(child.ticket.status, 'done')
+    assert.deepEqual(child.ticket.skippedSteps, [])
+    assert.deepEqual(
+      child.attempts.map((attempt) => [attempt.stepId, attempt.outcome]),
+      [
+        ['build', 'done'],
+        ['test', 'passed'],
+      ],
+    )
+    const checked = child.attempts[1]!.headCommit!
+    assert.match(
+      task.result!,
+      new RegExp(
+        `^Merged into the lead branch at [0-9a-f]{40}\\. Checker test passed at ${checked}${testing === 'missing' ? ' with unverified items\\. Unverified by test: Browser view\\.' : '\\.'}$`,
+      ),
+    )
+    assert.ok(
+      done.artifacts.some(
+        (artifact) =>
+          artifact.title === 'Task report' &&
+          artifact.content?.includes('Checker test passed'),
+      ),
+    )
+    assert.equal(
+      done.attempts.find((attempt) => attempt.stepId === 'final-test')?.outcome,
+      'passed',
+    )
+    assert.deepEqual(
+      f.invocations
+        .filter((item) => item.role === 'tester')
+        .map((item) => item.title),
+      ['Change', 'Lead the change'],
+    )
+    const expected =
+      testing === 'missing' ? ['Unverified by final-test: Browser view'] : []
+    assert.deepEqual(untestedReasons(done), expected)
+    const snapshot = await until(
+      () => getMergeGate(f.database, done.ticket.id),
+      (gate) => gate !== null,
+    )
+    assert.deepEqual(
+      snapshot!.latest.needsOwner.filter((reason) =>
+        /Untested|Unverified/.test(reason),
+      ),
+      expected,
+    )
+    const description = done.artifacts.find(
+      (artifact) => artifact.title === 'Pull request description',
+    )?.content
+    for (const reason of expected) assert.ok(description?.includes(reason))
+    assert.doesNotMatch(description ?? '', /Untested/)
     assert.deepEqual(f.errors, [])
   })
 }
 
-test('a task-pr without verify reaches the owner merge gate and its published description says untested', async (t) => {
+test('a task-pr without verify is checked in its checkout and reaches the merge gate without an untested reason', async (t) => {
   const f = await leadFixture({}, 'missing')
   t.after(() => f.close())
   f.setBehaviour(async (role, invocation) => {
@@ -888,6 +899,27 @@ test('a task-pr without verify reaches the owner merge gate and its published de
             }),
       })
     if (role === 'builder') return build(invocation, 'docs.txt', 'docs\n')
+    if (role === 'tester') {
+      const instance = proofContext(invocation.prompt).instances[0]!
+      const path = join(instance.evidenceDir, 'docs.txt')
+      await writeFile(
+        path,
+        await readFile(join(instance.checkout, 'docs.txt'), 'utf8'),
+      )
+      return result(invocation.directory, {
+        outcome: 'passed',
+        summary: 'Read the docs',
+        artifacts: [
+          {
+            kind: 'evidence',
+            title: 'Docs',
+            path,
+            scenario: 'Docs',
+            scenarioResult: 'passed',
+          },
+        ],
+      })
+    }
     assert.equal(role, 'reviewer')
     return result(invocation.directory, {
       outcome: 'passed',
@@ -903,22 +935,25 @@ test('a task-pr without verify reaches the owner merge gate and its published de
   )
   const child = await f.detail(ready.tasks[0]!.child!.number)
   assert.equal(child.ticket.waiting?.for, 'pull-request-merge')
-  assert.deepEqual(child.ticket.skippedSteps, [
-    { stepId: 'test', missingCapabilities: ['verify'] },
-  ])
+  assert.deepEqual(child.ticket.skippedSteps, [])
+  assert.equal(f.invocations.filter((item) => item.role === 'tester').length, 1)
+  assert.equal(
+    child.attempts.find((attempt) => attempt.stepId === 'test')?.outcome,
+    'passed',
+  )
   assert.ok(
-    child.artifacts.some(
+    !child.artifacts.some(
       (artifact) =>
         artifact.title === 'Pull request description' &&
-        artifact.content?.includes('Untested: no verify capability'),
+        artifact.content?.includes('Untested'),
     ),
   )
-  assert.equal(f.invocations.filter((item) => item.role === 'tester').length, 0)
   const snapshot = await getMergeGate(f.database, child.ticket.id)
-  assert.ok(
-    snapshot?.latest.needsOwner.includes(
-      'Untested: no verify capability (skipped test)',
+  assert.deepEqual(
+    snapshot?.latest.needsOwner.filter((reason) =>
+      /Untested|Unverified/.test(reason),
     ),
+    [],
   )
   assert.equal(snapshot?.latest.ready, true)
 

@@ -10,6 +10,7 @@ import { run } from '../src/executors/process.ts'
 import { cancelTicket, resolveAsk } from '../src/store/tickets.ts'
 import { isLatestTesterVerdictCurrent } from '../src/store/verdicts.ts'
 import { proofContext } from './fixtures/proof-agent.ts'
+import { untestedReasons } from '../src/domain/task-testing.ts'
 import { proofFixture } from './helpers/proof.ts'
 
 async function fixture(
@@ -163,7 +164,7 @@ async function resolveAskAfterReview(
   })
 }
 
-for (const rejection of ['unverified', 'title'] as const) {
+for (const rejection of ['failed', 'title'] as const) {
   test(`a fresh proof retry receives ${rejection} validation failure and proves new instances`, async (t) => {
     const f = await fixture(t, {
       workflow: 'tested-change',
@@ -182,8 +183,8 @@ for (const rejection of ['unverified', 'title'] as const) {
       if (runs === 2)
         assert.match(
           invocation.prompt,
-          rejection === 'unverified'
-            ? /Previous result validation failed:[\s\S]*A passing proof cannot contain failed or unverified scenario results/
+          rejection === 'failed'
+            ? /Previous result validation failed:[\s\S]*A passing proof cannot contain failed scenario results/
             : /Previous result validation failed:[\s\S]*artifacts.0.title: Too big/,
         )
       else
@@ -199,11 +200,11 @@ for (const rejection of ['unverified', 'title'] as const) {
       if (runs === 1) {
         const path = join(invocation.directory, 'result.json')
         const result = JSON.parse(await readFile(path, 'utf8'))
-        if (rejection === 'unverified')
+        if (rejection === 'failed')
           result.artifacts.push({
             ...result.artifacts[0],
             title: 'Superseded locator attempt',
-            scenarioResult: 'unverified',
+            scenarioResult: 'failed',
           })
         else result.artifacts[0].title = 'x'.repeat(201)
         await writeFile(path, JSON.stringify(result))
@@ -226,6 +227,80 @@ for (const rejection of ['unverified', 'title'] as const) {
     await cleaned(f)
   })
 }
+
+test('a tester whose app does not start still checks the change in its checkout and passes with unverified items', async (t) => {
+  const f = await fixture(t, {
+    workflow: 'tested-change',
+    start: 'echo no app on {port} {databaseUrl}; exit 3',
+    script: { builder: [{ commit: true, fixed: true }] },
+  })
+  await f.next('plan')
+  await f.approve()
+  await f.next('build')
+  let checkout = ''
+  f.options.execute = async (invocation) => {
+    f.invocations.push(invocation)
+    const context = proofContext(invocation.prompt)
+    assert.equal(context.app?.started, false)
+    assert.match(context.app!.reason, /did not start/)
+    assert.equal(context.app!.suggestedCommands.check, 'echo checked')
+    assert.match(invocation.prompt, /Work out how to check the change yourself/)
+    const [instance] = context.instances
+    assert.equal(instance!.url, null)
+    assert.equal(invocation.cwd, instance!.checkout)
+    checkout = instance!.checkout
+    const behaviour = await readFile(
+      join(instance!.checkout, 'behaviour.txt'),
+      'utf8',
+    )
+    const path = join(instance!.evidenceDir, 'behaviour.txt')
+    await writeFile(path, behaviour)
+    await writeFile(
+      join(invocation.directory, 'result.json'),
+      JSON.stringify({
+        outcome: 'passed',
+        summary: 'Read the change and its behaviour file',
+        artifacts: [
+          {
+            kind: 'evidence',
+            title: 'Behaviour file at head',
+            path,
+            scenario: 'Behaviour is fixed',
+            scenarioResult: 'passed',
+          },
+          {
+            kind: 'evidence',
+            title: 'Checkout API not driven without an app',
+            content: 'The app did not start, so POST /checkout was not called.',
+            scenario: 'Checkout succeeds',
+            scenarioResult: 'unverified',
+          },
+        ],
+      }),
+    )
+  }
+  const passed = await f.next('test')
+  assert.equal(passed.outcome, 'passed')
+  const detail = await f.detail()
+  assert.ok(
+    detail.artifacts.some(
+      (a) =>
+        a.attemptId === passed.id &&
+        a.kind === 'note' &&
+        a.title === 'The app did not start for the checker',
+    ),
+  )
+  assert.ok(
+    !detail.artifacts.some(
+      (a) => a.attemptId === passed.id && a.kind === 'finding',
+    ),
+  )
+  assert.deepEqual(untestedReasons(detail), [
+    'Unverified by test: Checkout succeeds',
+  ])
+  await assert.rejects(access(checkout))
+  assert.deepEqual(await readdir(join(f.home, 'verification')), [])
+})
 
 test('bug reproduced on base → fixed → tester proves failing base and passing head; steps reach both later sessions', async (t) => {
   const f = await fixture(t, {
@@ -354,7 +429,12 @@ for (const mode of ['failure', 'timeout', 'cancel', 'crash'] as const) {
       const scheduler = await startScheduler({
         ...f.options,
         events,
-        config: engineConfig.parse({ stepTimeoutMinutes: 0.1 }),
+        // Only the timeout mode tests the step timeout. Under parallel load a
+        // short one can expire before the agent drives the app, which cancel
+        // mode needs to reach.
+        config: engineConfig.parse(
+          mode === 'timeout' ? { stepTimeoutMinutes: 0.1 } : {},
+        ),
         fallbackMs: 20,
         onError: (error) => errors.push(error),
       })

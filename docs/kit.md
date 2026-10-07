@@ -24,7 +24,8 @@ verify:
 ```
 
 `version` and nonempty `check` are required. `setup` and `verify` are optional;
-omitting verify describes a repository that cannot yet run tester workflows.
+omitting verify means testers check the change in a disposable checkout without
+a started app, and bug workflows (which need `verify`) cannot start.
 Unknown keys are rejected by Zod. All commands run with `/bin/sh -c` at the fresh
 checkout root. Setup installs dependencies in every fresh checkout. Check is the
 repository's deterministic gate. Neither command may launch persistent services.
@@ -113,15 +114,20 @@ will drive it. **A generated kit that never ran is a draft.**
 - `home`: factory home; `repository`: local cache or ticket repository containing
   the objects; `commit`: full 40- or 64-character Git object ID.
 - `kit`: parsed `Kit` from `src/kit/kit.ts` (`loadKit(path, commit, signal?)` reads
-  and validates a committed kit; `parseKit(yaml)` validates the YAML alone).
+  and validates a committed kit; `parseKit(yaml)` validates the YAML alone), or
+  null for only the disposable checkout, without setup or an app.
 - `database`: factory pool opened with `openDatabase`; `signal?`: caller lifetime.
 - `check?`: default false; true runs check immediately after setup.
+- `checkOnly?`: default false; true runs setup (and check when requested) without
+  starting an app, so a kit without verify is accepted.
 
 It returns `{ url, ports, databaseUrl, checkout, evidenceDir, logs, exited, stop }`.
 URL is the expanded readiness URL (use `new URL(url).origin` for app navigation).
-Ports is an ordered number array. Database URL is null for none. Checkout is a
-separate detached clone at exactly the requested commit, under factory home;
-its object store borrows the cache read-only. Setup may generate or modify files
+Ports is an ordered number array. Database URL is null for none. A checkout-only
+handle (null kit or `checkOnly`) has an empty URL, no ports, a null database URL
+and an already resolved `exited`. Checkout is a separate detached clone at
+exactly the requested commit, under factory home; its object store borrows the
+cache read-only. Setup may generate or modify files
 there; it cannot dirty the ticket checkout. The start process is supervised in its
 own POSIX process group. `exited` rejects on unexpected exit, including after
 readiness. Callers must await `stop()` in `finally`; it is idempotent and kills
@@ -173,7 +179,9 @@ that a stored latest commit is a live Git ref.
 Tester and reproducer execution loads the trusted default-branch kit and its
 verification documents. The tester uses the exact ticket HEAD; the reproducer
 uses the base HEAD. Bug testers receive separate base and head instances and
-must attach evidence from both. The runner races agents against instance exits,
+must attach evidence from both. Without a verify block, or when a feature
+tester's app fails to set up or start, the tester gets only a disposable checkout
+and the reason, and checks the change itself. The runner races agents against instance exits,
 retains evidence, discards checkout edits and awaits stop in finally. Proof
 attempts pin headCommit before execution; successful tester summaries include
 `Verified at <sha>`. `isLatestTesterVerdictCurrent(database, ticketId, sha)` in
