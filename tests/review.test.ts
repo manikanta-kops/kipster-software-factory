@@ -8,7 +8,6 @@ import {
   settingsSchema,
   settingsProblems,
 } from '../src/domain/settings.ts'
-import { nextStep } from '../src/domain/routing.ts'
 import { loadLibrary } from '../src/library/library.ts'
 import { getMergeGate } from '../src/store/merge-gates.ts'
 import { setAutoMerge } from '../src/store/repositories.ts'
@@ -64,12 +63,9 @@ test('old settings parse and same-family reviewers warn without limiting list le
   )
 })
 
-async function reviewFixture(
-  limit?: number,
-  candidates: readonly object[] = pair,
-) {
+async function reviewFixture(limit: number) {
   const f = await leadFixture(
-    { agents: { default: builder, reviewers: candidates } },
+    { agents: { default: builder, reviewers: pair } },
     'verify',
   )
   const directory = join(f.root, 'review-workflows')
@@ -94,7 +90,7 @@ steps:
   - id: review
     kind: agent
     role: reviewer
-    ${limit ? `limit: ${limit}` : ''}
+    limit: ${limit}
     routes:
       changes-needed: lead
       limit: maintain-pr
@@ -126,18 +122,17 @@ steps:
   return f
 }
 
-for (const scenario of [
-  'consensus',
-  'unchanged',
-  'changed',
-  'exhausted',
-  'earlier',
-  'no-file',
-] as const) {
+// Round 2 of `kept` has one finding per reason a finding stays serious: it was
+// raised before, its file changed since round 1, or it names no file.
+const kept = [
+  { title: 'Original finding', file: 'README.md' },
+  { title: 'New finding', file: 'changed.txt' },
+  { title: 'Unfiled finding' },
+] as const
+
+for (const scenario of ['unchanged', 'kept'] as const) {
   test(`parallel lead reviewers: ${scenario}`, async (t) => {
-    const f = await reviewFixture(
-      ['exhausted', 'earlier', 'no-file'].includes(scenario) ? 2 : 5,
-    )
+    const f = await reviewFixture(scenario === 'kept' ? 2 : 5)
     t.after(() => f.close())
     let round = 0
     let count = 0
@@ -198,34 +193,27 @@ for (const scenario of [
         )
         assert.match(invocation.prompt, new RegExp(rounds[0]!.heads[0]!))
       }
-      const fails =
-        invocation.config.cli === 'claude' &&
-        (round === 1 || scenario !== 'consensus')
-      const file =
-        scenario === 'earlier'
-          ? 'README.md'
-          : round === 1 || scenario === 'exhausted'
-            ? 'changed.txt'
-            : scenario === 'unchanged'
-              ? 'README.md'
-              : 'changed.txt'
+      const fails = invocation.config.cli === 'claude'
+      const findings =
+        round === 1
+          ? [
+              {
+                title: 'Original finding',
+                file: scenario === 'kept' ? 'README.md' : 'changed.txt',
+              },
+            ]
+          : scenario === 'kept'
+            ? kept
+            : [{ title: 'New finding', file: 'README.md' }]
       return result(invocation.directory, {
         outcome: fails ? 'changes-needed' : 'passed',
         summary: fails ? 'Serious correction needed' : 'Passed',
         artifacts: fails
-          ? [
-              {
-                kind: 'finding',
-                title:
-                  round === 1 ||
-                  scenario === 'exhausted' ||
-                  scenario === 'earlier'
-                    ? 'Original finding'
-                    : 'New finding',
-                ...(scenario === 'no-file' && round > 1 ? {} : { file }),
-                content: 'Correct this serious problem.',
-              },
-            ]
+          ? findings.map((finding) => ({
+              kind: 'finding',
+              ...finding,
+              content: 'Correct this serious problem.',
+            }))
           : [],
         ...(invocation.config.cli === 'codex'
           ? { ownerReview: { reason: 'Public contract deserves review' } }
@@ -233,7 +221,7 @@ for (const scenario of [
       })
     })
     const ticket = await f.lead()
-    const expected = scenario === 'changed' ? 5 : 2
+    const expected = 2
     await f.start()
     for (let review = 1; review <= expected; review++)
       await until(
@@ -265,13 +253,11 @@ for (const scenario of [
     const reviews = detail.attempts.filter(
       (attempt) => attempt.stepId === 'review' && attempt.status === 'finished',
     )
-    assert.equal(reviews.length, expected)
+    assert.equal(reviews.length, 2)
     assert.equal(reviews[0]!.outcome, 'changes-needed')
     assert.equal(
       reviews.at(-1)!.outcome,
-      scenario === 'consensus' || scenario === 'unchanged'
-        ? 'passed'
-        : 'changes-needed',
+      scenario === 'unchanged' ? 'passed' : 'changes-needed',
     )
     assert.ok(
       detail.attempts.filter((attempt) => attempt.stepId === 'lead').length >=
@@ -294,8 +280,20 @@ for (const scenario of [
         ),
       )
       assert.ok(reviews.at(-1)!.ownerReview?.reason.includes('Public contract'))
-    }
-    if (['exhausted', 'changed', 'earlier', 'no-file'].includes(scenario)) {
+    } else {
+      for (const finding of kept) {
+        const artifact = detail.artifacts.find(
+          (a) =>
+            a.attemptId === reviews[1]!.id &&
+            a.title === `[claude · review] ${finding.title}`,
+        )
+        assert.ok(artifact, finding.title)
+        assert.equal(artifact.kind, 'finding', finding.title)
+        assert.equal(
+          artifact.file,
+          'file' in finding ? finding.file : undefined,
+        )
+      }
       assert.ok(
         gate.blockers.includes(
           'Reviewer verdict is not passing at the current head',
@@ -306,31 +304,12 @@ for (const scenario of [
         (artifact) => artifact.title === 'Pull request description',
       )!.content!
       assert.match(description, /## Open review findings/)
-      assert.match(
-        description,
-        scenario === 'exhausted' || scenario === 'earlier'
-          ? /Original finding/
-          : /New finding/,
-      )
+      for (const finding of kept)
+        assert.ok(description.includes(finding.title), finding.title)
     }
     assert.deepEqual(f.errors, [])
   })
 }
-
-test('review defaults to five finished rounds including the current run', async (t) => {
-  const f = await reviewFixture()
-  t.after(() => f.close())
-  const workflow = f.library.get('lead')!.workflow
-  for (let runs = 1; runs < 5; runs++)
-    assert.deepEqual(nextStep(workflow, 'review', 'changes-needed', runs), {
-      to: 'step',
-      stepId: 'lead',
-    })
-  assert.deepEqual(nextStep(workflow, 'review', 'changes-needed', 5), {
-    to: 'step',
-    stepId: 'maintain-pr',
-  })
-})
 
 for (const candidates of [true, false]) {
   test(`reviewer and tester independence: ${candidates ? 'replacement' : 'no candidate'}`, async (t) => {

@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
-import { createServer } from 'node:net'
+import { createServer, type AddressInfo } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { test } from 'node:test'
@@ -80,12 +80,15 @@ test('setup without a database URL creates a private PostgreSQL that serve start
     { mode: 0o700 },
   )
   const env = { ...process.env, PATH: `${tools}:${process.env['PATH']}` }
-  const reservation = createServer()
-  await new Promise<void>((resolve) =>
-    reservation.listen(0, '127.0.0.1', resolve),
-  )
-  const port = (reservation.address() as { port: number }).port
-  await new Promise<void>((resolve) => reservation.close(() => resolve()))
+  // An OS-assigned port: suites running at once would all probe upward from the same default.
+  const port = await new Promise<number>((resolve, reject) => {
+    const probe = createServer()
+    probe.once('error', reject)
+    probe.listen(0, '127.0.0.1', () => {
+      const assigned = (probe.address() as AddressInfo).port
+      probe.close(() => resolve(assigned))
+    })
+  })
 
   const setup = await command(
     [

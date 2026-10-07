@@ -209,6 +209,7 @@ verify:
     throw new Error('No behaviour set')
   }
   const pullRequests = new Map<string, PullRequest>()
+  let opened = 0
   const github: GitHub = {
     async merge() {
       throw new Error('The lead fixture never merges through GitHub')
@@ -217,7 +218,10 @@ verify:
       return { state: 'none', failures: [] }
     },
     async maintain({ branch }) {
-      const url = `https://github.com/fixture/app/pull/${pullRequests.size + 1}`
+      // Numbered before any await, so tasks publishing at once never share a URL.
+      const url =
+        pullRequests.get(branch)?.url ??
+        `https://github.com/fixture/app/pull/${++opened}`
       const pr: PullRequest = {
         url,
         state: 'OPEN',

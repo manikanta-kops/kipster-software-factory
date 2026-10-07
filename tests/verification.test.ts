@@ -277,27 +277,24 @@ function asyncError(stage: string) {
     error instanceof VerificationError && error.stage === stage
 }
 
-test(
-  'none database, simultaneous instances, cancellation and post-ready crash',
-  { timeout: 60_000 },
-  async (t) => {
-    const f = await fixture(t)
-    f.kit.verify!.database = 'none'
-    f.kit.verify!.start = `${process.execPath} app.ts {port} {databaseUrl} later-crash`
-    const first = await startVerification(f)
-    t.after(() => first.stop())
-    assert.equal(first.databaseUrl, null)
-    const controller = new AbortController()
-    const second = await startVerification({ ...f, signal: controller.signal })
-    t.after(() => second.stop())
-    assert.ok(first.ports.every((port) => !second.ports.includes(port)))
-    controller.abort()
-    await second.stop()
-    await assert.rejects(access(second.checkout))
-    await fetch(new URL('/crash', first.url))
-    await assert.rejects(first.exited, /start.*failed/)
-  },
-)
+test('none database, simultaneous instances, cancellation and post-ready crash', async (t) => {
+  const f = await fixture(t)
+  f.kit.verify!.database = 'none'
+  f.kit.verify!.start = `${process.execPath} app.ts {port} {databaseUrl}`
+  const first = await startVerification(f)
+  t.after(() => first.stop())
+  assert.equal(first.databaseUrl, null)
+  const { pid } = (await (await fetch(first.url)).json()) as { pid: number }
+  const controller = new AbortController()
+  const second = await startVerification({ ...f, signal: controller.signal })
+  t.after(() => second.stop())
+  assert.ok(first.ports.every((port) => !second.ports.includes(port)))
+  controller.abort()
+  await second.stop()
+  await assert.rejects(access(second.checkout))
+  process.kill(pid, 'SIGKILL')
+  await assert.rejects(first.exited, /start.*failed/)
+})
 
 test('checkout failures name their stage and leave no checkout behind', async (t) => {
   const f = await fixture(t)
