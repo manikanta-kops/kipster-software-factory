@@ -1,7 +1,8 @@
+import { runReviewAttempt } from './review.ts'
 import { DependencyChangedError } from '../workspace/dependencies.ts'
 import { dependencySession } from './dependencies.ts'
 import { requestOtherRepository } from './ticket-links.ts'
-import { agentFor, leadContext, leadResultProblem } from './tasks.ts'
+import { agentFor, agentsFor, leadContext, leadResultProblem } from './tasks.ts'
 import { getTaskOfChild, parkForTasks } from '../store/tasks.ts'
 import { setArtifactHome } from '../store/database.ts'
 import {
@@ -44,6 +45,7 @@ export interface RunnerOptions {
   github: GitHub
   decisions?: DecisionDependencies
   execute: AgentExecutor
+  attemptAgents?: import('../domain/catalog.ts').AgentChoice[]
   library?: import('../library/library.ts').Library
 }
 export async function runAttempt(
@@ -53,6 +55,22 @@ export async function runAttempt(
 ): Promise<void> {
   setArtifactHome(options.database, options.home)
   try {
+    if (context.step.kind === 'agent' && !options.attemptAgents) {
+      const selections = await agentsFor(options, context, context.step.role)
+      await addAttemptArtifacts(
+        options.database,
+        context.attempt.id,
+        selections.notes,
+      )
+      options = { ...options, attemptAgents: selections.agents }
+      context = {
+        ...context,
+        attempt: {
+          ...context.attempt,
+          agent: context.attempt.agent ?? selections.agents[0]!,
+        },
+      }
+    }
     await executeAttempt(options, context, signal)
   } catch (error) {
     // Execution has stopped; keep a commit observation even when its result failed.
@@ -188,6 +206,10 @@ async function executeAttempt(
     )
     return
   }
+  if (step.kind === 'agent' && step.role === 'reviewer') {
+    await runReviewAttempt(options, context, detail, cwd, diff, signal)
+    return
+  }
   if (step.kind === 'agent') {
     const selected = await agentFor(options, context, step.role)
     const lead =
@@ -209,6 +231,7 @@ async function executeAttempt(
       await mkdir(directory, { recursive: true })
       const session = await dependencySession(options, detail, signal)
       const prompt = await buildPrompt({
+        database: options.database,
         dependencies: session.dependencies,
         step,
         detail,

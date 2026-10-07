@@ -30,7 +30,7 @@ import {
 } from '../src/store/tickets.ts'
 import {
   assertFactoryError,
-  builtInWorkflow,
+  testWorkflow,
   createTestStore,
   quickTicket,
   type TestStore,
@@ -138,10 +138,10 @@ describe('creating tickets', () => {
     assert.equal(ticket.status, 'queued')
     assert.equal(ticket.currentStep, 'plan')
     assert.equal(ticket.repository.slug, 'acme/shop')
-    assert.equal(ticket.workflow.name, 'quick-change')
+    assert.equal(ticket.workflow.name, 'planned-change')
     assert.equal(
       ticket.workflow.version,
-      (await builtInWorkflow('quick-change')).version,
+      (await testWorkflow('planned-change')).version,
     )
     assert.equal(
       ticket.branch,
@@ -172,11 +172,11 @@ describe('creating tickets', () => {
 
   test('rejects workflows needing capabilities the repository lacks', async () => {
     await quickTicket(database)
-    for (const name of ['feature', 'bug']) {
+    for (const name of ['tested-change', 'bug']) {
       await assertFactoryError(
         createTicket(database, {
           repository: 'acme/shop',
-          workflow: await builtInWorkflow(name),
+          workflow: await testWorkflow(name),
           title: 'Needs verify',
         }),
         'invalid',
@@ -188,7 +188,7 @@ describe('creating tickets', () => {
   })
 
   test('needs a registered, ready repository', async () => {
-    const workflow = await builtInWorkflow('quick-change')
+    const workflow = await testWorkflow('planned-change')
     await assertFactoryError(
       createTicket(database, {
         repository: 'nobody/here',
@@ -221,7 +221,7 @@ describe('creating tickets', () => {
   })
 })
 
-describe('the quick-change lifecycle', () => {
+describe('the planned-change lifecycle', () => {
   test('runs from plan to done', async () => {
     const { number } = await quickTicket(database)
 

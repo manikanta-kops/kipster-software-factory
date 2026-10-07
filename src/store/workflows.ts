@@ -50,3 +50,13 @@ export async function listUploadedWorkflows(
   )
   return rows
 }
+
+/** Workflow names retained by stored tickets, including retired files. */
+export async function ticketWorkflowNames(
+  database: Database,
+): Promise<readonly string[]> {
+  const { rows } = await database.query<{ name: string }>(
+    'SELECT DISTINCT workflow_name AS name FROM tickets ORDER BY name',
+  )
+  return rows.map((row) => row.name)
+}

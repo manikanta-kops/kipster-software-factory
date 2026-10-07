@@ -27,7 +27,7 @@ test('recorded files are factory-owned per ticket, scenario index prefers key vi
       ),
     ),
   )
-  const roles = new Map([['test', 'tester']])
+  const roles = new Map([['final-test', 'tester']])
   const index = scenarioIndex(
     detail.artifacts,
     detail.attempts,

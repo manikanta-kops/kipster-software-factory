@@ -64,7 +64,7 @@ jobs:
           cat "$RUNNER_TEMP/serve.log"
           [ "$healthy" = true ]
           curl -fs http://127.0.0.1:4690/ | grep -q '<div id="root">'
-          curl -fs http://127.0.0.1:4690/api/workflows | grep -q '"name":"feature"'
+          curl -fs http://127.0.0.1:4690/api/workflows | grep -q '"name":"lead"'
           kill -TERM "$server"
           wait "$server"
           if "$home/current/postgres/bin/pg_ctl" -D "$home/postgres" status; then

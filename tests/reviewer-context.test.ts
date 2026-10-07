@@ -33,6 +33,7 @@ test('reviewer can audit retained tester evidence after instance scratch cleanup
   )!
   assert.notEqual(retained.path, source)
   const prompt = await buildPrompt({
+    database: f.store.database,
     step: {
       id: 'review',
       kind: 'agent',

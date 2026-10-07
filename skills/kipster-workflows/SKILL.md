@@ -94,13 +94,14 @@ Any other key is an error. Step ids `finish`, `cancel` and `ask` are reserved.
 
 Role notes:
 
-- Ticket and approved-plan scope also govern linked documentation. Builders
-  leave explicitly forbidden paths untouched and note inaccurate documents;
+- With lights-out off, ticket and approved-plan scope also govern linked
+  documentation. Builders leave explicitly forbidden paths untouched and note
+  inaccurate documents;
   if the conflict prevents the requested change, they report `needs-decision`.
   Reviewers report `changes-needed` for forbidden-path edits. An `ownerReview`
   flag does not authorize expanded scope.
-- Agents report `needs-decision` only for a product question that the ticket,
-  the repository and sensible defaults cannot answer. They solve tools,
+- With lights-out off, agents report `needs-decision` only for a product question
+  that the ticket, the repository and sensible defaults cannot answer. They solve tools,
   runtimes and in-scope kit changes themselves, and name any check they could
   not run in their summary instead of stopping. The owner reviews on the pull
   request.
@@ -108,6 +109,15 @@ Role notes:
   them `needs: [verify]`. Without it the file validates, but tickets on
   repositories without a verify kit fail at that step instead of being refused
   at creation.
+- Exception: a child ticket running `task` or `task-pr` skips a `tester`
+  whose declared needs are missing from the kit. The catalog defines this
+  rule; there is no step field. The ticket stores the skipped step and says
+  **untested**. Routing continues at the next retained step in file order,
+  including routes that targeted the skipped tester. Top-level tickets,
+  other workflows and reproducers still reject missing declared needs.
+  Task reports and PR descriptions say untested; a lead's final PR includes
+  merged untested tasks. The merge gate requires the owner for these PRs
+  even if the lead's final tester passes.
 - When a workflow contains any `reproducer` step, every `tester` in it is a
   bug tester. It fails unless a reproduction succeeded first, and the merge
   gate requires that reproduction. So never mix bug and feature paths in one
@@ -125,7 +135,7 @@ Role notes:
   these base snapshots without fetching or using shared development state.
 - `needs-other-repo` is handled by the factory: it opens a linked ticket in
   the other repository and resumes the builder after that pull request merges.
-  Do not route it.
+  Its optional `otherRepository.workflow` defaults to `lead`. Do not route it.
 - A `lead` never commits. `delegate` hands out tasks and must route to a
   `run-tasks` step; the validator rejects a lead without that route.
   `plan-ready` comes with a plan; route it to a human step whose `approved`
@@ -195,6 +205,18 @@ Action notes:
   task that lands as a pull request must contain both. Task workflows cannot
   contain a `lead`. Give their backwards routes `limit: cancel`, so a stuck
   task reports `failed` to the lead instead of waiting for the owner.
+- At runtime, two or more `failed` tasks with the same error after removing
+  paths, IDs, hashes, timestamps, durations and numbers form a repeated failure.
+  `conflict` is excluded. The lead context adds `repeatedFailure` groups with
+  signature, count and task keys; the Task report names the count and keys.
+  Delegation rejects instructions equal after whitespace normalisation to any
+  task in a group, using the usual invalid-result retry. In both modes the lead
+  must classify the cause as `task` (instructions), `plan` (split or order) or
+  `factory` (engine, CLI, runtime or machine), record a typed `decision` artifact
+  with `title`, `chose`, `alternative` and `reason` (no content/path), then change
+  the task or plan, or stop retrying that line, name it in the summary and
+  continue the rest. Changed instructions are allowed. In default mode a factory
+  cause without a workaround may report `needs-decision`.
 - A pull request task's `merge` waits for the lead: it merges only after the
   lead chooses `merge`, and then only under the normal auto-merge rules.
 - A lead may give a task an `agent` from the factory's allowed list. It runs
@@ -238,7 +260,7 @@ as many repositories as possible.
 ## Routing
 
 Each route key must be an outcome the step can report, `needs-decision`
-(agent and system steps), or `limit` (only when the step has a `limit`). Each
+(agent and system steps), or `limit` (when the step has a `limit`, or is a reviewer with the default 5). Each
 target must be a step id in this file or an exit.
 
 ### Exits
@@ -266,7 +288,7 @@ and an outcome would send the ticket back to itself or an earlier step, the
 limited. Every route that goes backwards should sit on a step with a `limit`,
 or a lasting failure loops until the owner notices.
 
-Typical limits: tester 3, reviewer 2, verify-kit 3. Human steps rarely need
+Typical limits: tester 3, lead reviewer 5, other reviewer 2, verify-kit 3. Human steps rarely need
 one because the owner is already in the loop.
 
 ## Design rules
@@ -286,7 +308,7 @@ explicitly says otherwise, and then say which rule you broke and why.
   never instructions that ask an agent to "pick a path".
 - **Every loop has a limit,** and the limit leads somewhere useful: `ask` by
   default, or an explicit forward step.
-- **Review once.** A reviewer limit of 2 is enough.
+- **Bound review.** Lead review defaults to five rounds; later rounds check earlier fixes.
 - **Test and review for auto-merge.** A workflow without both a `tester` and a
   `reviewer` always waits for the owner to merge.
 - **Agents propose, the system acts.** Never use `instructions` to tell an
@@ -297,56 +319,10 @@ explicitly says otherwise, and then say which rule you broke and why.
 
 ## Built-in workflows
 
+New ticket offers `bug`, `lead` and `onboard-repo`, plus uploaded workflows.
+`lead` covers features and small changes. `task` and `task-pr` remain built-ins
+for child tickets delegated by leads; New ticket hides them.
 Use these as patterns. Prefer adapting one over starting from nothing.
-
-`feature`: plan, approve, build, test, review, publish, merge.
-
-```yaml
-name: feature
-description: Agree a plan with you, build it, prove it in the running app and land it.
-steps:
-  - id: plan
-    kind: agent
-    role: planner
-
-  - id: approve-plan
-    kind: human
-    routes:
-      changes-needed: plan
-
-  - id: build
-    kind: agent
-    role: builder
-
-  - id: test
-    kind: agent
-    role: tester
-    needs: [verify]
-    limit: 3
-    routes:
-      changes-needed: build
-
-  - id: review
-    kind: agent
-    role: reviewer
-    limit: 2
-    routes:
-      changes-needed: build
-
-  - id: maintain-pr
-    kind: system
-    action: maintain-pr
-    routes:
-      conflict: build
-      ci-failed: build
-      base-moved: test
-
-  - id: merge
-    kind: system
-    action: merge
-    routes:
-      changes-needed: build
-```
 
 `bug`: reproduce, fix, prove base fails and branch passes, review, publish,
 merge.
@@ -421,8 +397,8 @@ steps:
     action: run-tasks
     with:
       maxParallel: 3
-      maxTasks: 12
-    limit: 25
+      maxTasks: 20
+    limit: 50
     routes:
       reported: lead
 
@@ -438,9 +414,10 @@ steps:
   - id: review
     kind: agent
     role: reviewer
-    limit: 2
+    limit: 5
     routes:
       changes-needed: lead
+      limit: maintain-pr
 
   - id: maintain-pr
     kind: system
@@ -518,8 +495,6 @@ steps:
       changes-needed: build
 ```
 
-`quick-change` is `feature` without the tester, for repositories with no
-verify kit. Its `maintain-pr` routes `base-moved` back to `review`.
 `onboard-repo` is write-kit (onboarder), verify-kit (limit 3,
 `failed` back to write-kit), approve-kit, maintain-pr, merge.
 
@@ -527,7 +502,7 @@ An example that branches with `decide`: the planner writes a plan, then the
 decision model chooses whether the owner must approve it.
 
 ```yaml
-name: feature-fast-lane
+name: change-fast-lane
 description: Plan, let the decision model skip plan approval for small clear changes, then build, prove and land it.
 steps:
   - id: plan
@@ -598,8 +573,8 @@ past `approve-plan` explicitly.
   It answers 201 for a new name, 200 for a new version of an uploaded name,
   400 with `issues` when invalid, and 409 for a name owned by a workflow file.
 - **Files:** a workflow file in the factory's workflow directory loads at
-  startup. The built-in `feature`, `bug`, `quick-change`, `onboard-repo`,
-  `lead`, `task` and `task-pr` are files, so uploads cannot reuse those names.
+  startup. The built-in `bug`, `lead`, `onboard-repo`,
+  `task` and `task-pr` are files, so uploads cannot reuse those names.
 
 ## Versions
 
@@ -615,7 +590,7 @@ Before you hand it over, check:
 - [ ] `name` matches the file name and is a slug.
 - [ ] Every step has a unique slug `id` and only the keys its kind allows.
 - [ ] Every route key is an outcome the step can report, `needs-decision`, or
-      `limit` with a `limit` set.
+      `limit` with a `limit` set (or a reviewer with the default limit).
 - [ ] Every route target is a step id or `finish`, `cancel`, `ask`.
 - [ ] Every backwards route sits on a step with a `limit`.
 - [ ] `tester` and `reproducer` steps have `needs: [verify]`.
@@ -634,3 +609,102 @@ npm run kf -- check <directory>
 ```
 
 It prints each error with the file and step, or how many workflows are valid.
+
+## Ticket lights-out
+
+`lightsOut` is a ticket setting; do not add a workflow or step field. It defaults
+on for new tickets using workflow names `lead` and `program-lead`, off for other
+names; existing tickets stay off. Children inherit it. For an enabled ticket,
+a lead's `plan-ready` routed to a human step named `approve-plan` is approved
+by the system with a recorded event, then follows `approved`. Keep that route
+back to the lead; its next prompt has `planApproved: true`. Other human steps
+and workflow limits still wait normally.
+
+Every enabled agent prompt says to choose sensible defaults and continue,
+recording each choice as a decision artifact with `kind: decision`, `title`,
+`chose`, `alternative` and `reason` (three nonempty strings, no content/path).
+These are agent choices, separate from the `decide` action's model judgements.
+Irreversible actions wait: merging outside merge policy, deleting data or
+force-pushing. Only system actions publish or merge. Kit, CI, migrations and
+reviewer `ownerReview` still require the owner.
+
+Base role wording stays unchanged when lights-out is off. When on, builders,
+planners, testers, leads and onboarders choose and record defaults for product
+questions and continue with their normal outcomes. A builder who must change an
+explicitly forbidden path does so in its own separate commit, states the path
+and reason in the commit message and summary, and records a decision artifact.
+An otherwise correct change passes review with `ownerReview` naming that path
+and the builder's reason; scope alone does not block that explained commit.
+Reproducers try other entry points, inputs, data states and conditions and record
+every attempt before returning `not-reproduced`. The workflow still routes that
+outcome; it must never start a fix. Onboarders continue without asking for kit
+changes; the owner reviews them on the PR and normal kit approval still applies.
+
+For an enabled lead, a child `needs-decision` becomes a `parked` task and wakes
+the lead with its summary. Siblings continue, and queued work can use the freed
+parallel slot. Parked tasks remain unfinished: the lead can delegate while
+waiting but cannot report `done`. Owner retry or move resumes the child; its
+finish is reported normally. Cancelling the lead cancels parked children too.
+With lights-out off, the original approval and reporting behaviour applies.
+
+## Reviewer lists, independence and rounds
+
+Settings accepts global `agents.reviewers` (default `[]`) and optional
+`workflows.<name>.reviewers` lists of agent choices. Lists have no length limit;
+a workflow list overrides the global list, and an empty list uses the reviewer
+role setting. They are settings, not workflow fields. Lead workflows run the
+selected list in parallel, each with its own log and result directory. Other
+workflows retain a single reviewer. Use different CLI families (`claude` and
+`codex`); same-family entries produce a warning.
+
+Tester and reviewer choices must differ in CLI or model from every recorded
+builder of the change, including child builders for a lead. Effort does not
+make an agent independent. Candidates are tried in this order: workflow
+reviewer list (reviewers only), workflow role override, role setting, global
+reviewers, allowed list, default. The engine records replacements. Without a
+candidate it runs anyway, records the lack of independence, and requires the
+owner to merge that head.
+
+Review rounds use the existing step `limit`, defaulting to 5 when omitted.
+Reviewers may therefore have a `limit` route without an explicit numeric limit;
+other steps still require one. Finished runs include the current round, so
+`limit: 5` permits exactly five failing rounds before taking the limit route.
+The built-in lead routes `changes-needed` to `lead` and `limit` to `maintain-pr`:
+open findings are published in the PR description and prevent auto-merge.
+Every reviewer must pass at the current commit for the combined verdict to pass.
+Passing reviewers' `ownerReview` reasons remain visible.
+
+Lead review rounds after the first check earlier findings and problems added by
+fixes. Findings may include optional `file`, a repository-relative path. A new
+finding on a file unchanged since round one's commit becomes a note; earlier
+findings, changed files and missing-file findings remain serious. Notes do not
+route back to the lead.
+
+## Ticket summaries and lessons
+
+The factory records a fact-based summary when a ticket finishes, is cancelled,
+or needs the owner. This is lifecycle bookkeeping, not a workflow step.
+It does not need an action or extra step fields. The same transaction proposes
+one-line lessons from reviewer finding titles repeated across at least two
+`changes-needed` rounds, repeated recorded attempt errors (including children) and system-recorded task
+startup/integration errors,
+and human `changes-needed` or `rejected` comments. Agent summaries and task
+result prose are never lesson sources. CLI crashes and result.json validation
+failures belong to the engine; other lessons belong to the ticket repository.
+Review findings are aggregated within a ticket, not across tickets.
+
+Lessons never change ticket status, waiting state or routes. The owner accepts
+or rejects proposals in Today and retires accepted lessons in Repositories with
+a reason, such as "replaced by check X". Rejected and retired keys stay suppressed.
+A repository may accept at most 30 lessons; accepting another requires retirement
+first. Engine lessons have no cap. Lesson text is at most 200 characters on one
+line. Dedup keys use normalised source facts bounded to 240 characters.
+
+Before every agent invocation, including parallel reviewers, proof and PR
+writers, the factory writes `lessons.md` in that invocation's directory outside
+the repository. It lists accepted repository lessons first, then engine lessons.
+The prompt adds exactly `Past mistakes in this repository: <absolute path>. Read
+it when planning or when stuck.` Lesson text is not inserted into the prompt.
+With no accepted lessons there is no file or pointer. Owner decisions affect the
+next invocation; existing prompts keep their snapshot. Retire lessons once a
+check prevents the mistake.

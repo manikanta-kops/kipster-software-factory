@@ -1,5 +1,5 @@
-name: quick-change
-description: Agree a plan with you, build it, have it reviewed and land it. Needs nothing from the repository's kit.
+name: tested-change
+description: Agree a plan with you, build it, prove it in the running app and land it.
 steps:
   - id: plan
     kind: agent
@@ -14,6 +14,14 @@ steps:
     kind: agent
     role: builder
 
+  - id: test
+    kind: agent
+    role: tester
+    needs: [verify]
+    limit: 3
+    routes:
+      changes-needed: build
+
   - id: review
     kind: agent
     role: reviewer
@@ -27,8 +35,10 @@ steps:
     routes:
       conflict: build
       ci-failed: build
-      base-moved: review
+      base-moved: test
 
   - id: merge
     kind: system
     action: merge
+    routes:
+      changes-needed: build

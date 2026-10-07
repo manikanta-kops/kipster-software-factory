@@ -1,3 +1,4 @@
+import { exhaustedReview } from '../domain/review.ts'
 import { refreshMergeGate, freshFeedback } from './merge-gate.ts'
 import { settledCI } from '../domain/auto-merge.ts'
 import { baseSyncCount, beginBaseSync } from '../store/auto-merge.ts'
@@ -33,7 +34,7 @@ function hasStaleReview(
   return (
     !!reviewer &&
     (reviewer.status !== 'finished' ||
-      reviewer.outcome !== 'passed' ||
+      (reviewer.outcome !== 'passed' && !exhaustedReview(detail, reviewer)) ||
       reviewer.headCommit !== head)
   )
 }

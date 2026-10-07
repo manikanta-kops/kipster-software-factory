@@ -39,7 +39,13 @@ import {
 import { startScheduler } from '../src/engine/scheduler.ts'
 import { listenForEvents } from '../src/store/events.ts'
 import { FACTORY_MARKER } from '../src/github/feedback.ts'
-import { factoryDescription, fitGitHubLimit } from '../src/engine/pr-writer.ts'
+import {
+  factoryDescription,
+  fitGitHubLimit,
+  openFindingsNotice,
+  withUntestedNotice,
+  writePullRequest,
+} from '../src/engine/pr-writer.ts'
 import {
   getPullRequestDescription,
   savePullRequestDescription,
@@ -1237,3 +1243,150 @@ test('factory description lists exposed lead tasks and omits URLs and paths from
   const commits = factoryDescription(detail, f.head, ['abc first change'], 7)
   assert.match(commits, /Commits:\n- abc first change\nand 7 more/)
 })
+
+test('open review findings stay short even with long finding text', () => {
+  const notice = openFindingsNotice(
+    Array.from({ length: 30 }, (_, index) => ({
+      title: `Finding ${index} ${'x'.repeat(190)}`,
+      file: 'src/app.ts',
+    })),
+  )
+  assert.match(notice, /Open review findings/)
+  assert.match(notice, /further findings/)
+  assert.ok(notice.length < 4000)
+})
+
+for (const source of ['writer', 'cached', 'fallback'] as const) {
+  for (const oversized of [false, true]) {
+    test(`${source} description gets factory notices before trimming, oversized: ${oversized}`, async (t) => {
+      const { addAttemptArtifacts } = await import('../src/store/tickets.ts')
+      const f = await fixture(t, true, 60, true)
+      const detail = await f.detail()
+      const tester = detail.attempts.find(
+        (attempt) => attempt.stepId === 'test',
+      )!
+      const reviewer = detail.attempts.find(
+        (attempt) => attempt.stepId === 'review',
+      )!
+      const scenario = 'Empty checkout succeeds'
+      await addAttemptArtifacts(f.store.database, tester.id, [
+        {
+          kind: 'evidence',
+          title: scenario,
+          scenario,
+          scenarioResult: 'passed',
+          content: 'Observed a successful checkout at the tested head',
+        },
+      ])
+      const finding = {
+        title: 'Check basket behavior',
+        file: 'src/basket.ts',
+        content: 'A correction remains open.',
+      }
+      await addAttemptArtifacts(f.store.database, reviewer.id, [
+        { kind: 'finding', ...finding },
+      ])
+      // Exercise the writer with facts from an unresolved review and a skipped proof step.
+      await f.store.database.query(
+        "UPDATE attempts SET outcome = 'changes-needed' WHERE id = $1",
+        [reviewer.id],
+      )
+      await f.store.database.query(
+        'UPDATE tickets SET skipped_steps = $1 WHERE id = $2',
+        [
+          JSON.stringify([
+            { stepId: 'unavailable-proof', missingCapabilities: ['verify'] },
+          ]),
+          f.ticket.id,
+        ],
+      )
+      const reason =
+        'Untested: no verify capability (skipped unavailable-proof)'
+      const note = `  Submitting a blank basket completes successfully. ${oversized ? '🌻'.repeat(40_000) : ''}  `
+      if (source === 'cached')
+        await savePullRequestDescription(
+          f.store.database,
+          f.ticket.id,
+          f.head,
+          note,
+        )
+      else if (source === 'writer') writerRuns(f, [{ notes: [note] }])
+      else {
+        writerRuns(f, [{ missing: true }, { crash: true }])
+        if (oversized)
+          await f.store.database.query(
+            'UPDATE tickets SET title = $1 WHERE id = $2',
+            ['x'.repeat(70_000), f.ticket.id],
+          )
+      }
+      const context = await f.next()
+      const body = await writePullRequest(
+        f.options,
+        context,
+        f.cwd,
+        f.head,
+        signal,
+      )
+      const saved = await getPullRequestDescription(
+        f.store.database,
+        f.ticket.id,
+        f.head,
+      )
+      const artifact = (await f.detail()).artifacts.find(
+        (a) =>
+          a.title ===
+          (source === 'fallback' ? 'factory PR description' : 'PR description'),
+      )
+      const full =
+        source === 'fallback'
+          ? artifact!.content!
+          : withUntestedNotice(note, [reason]) + openFindingsNotice([finding])
+      assert.ok(full.includes(reason))
+      assert.match(full, /## Open review findings/)
+      assert.match(full, /Check basket behavior \(src\/basket.ts\)/)
+      assert.equal(body, fitGitHubLimit(full, f.ticket.number))
+      assert.ok(body.length + `\n\n${FACTORY_MARKER}`.length <= 65_536)
+      assert.equal(
+        f.writers(),
+        source === 'cached' ? 0 : source === 'writer' ? 1 : 2,
+      )
+      if (source === 'cached') {
+        assert.equal(saved, full)
+        assert.equal(
+          await writePullRequest(f.options, context, f.cwd, f.head, signal),
+          body,
+        )
+        assert.equal(
+          await getPullRequestDescription(
+            f.store.database,
+            f.ticket.id,
+            f.head,
+          ),
+          full,
+        )
+      } else {
+        assert.equal(artifact!.content, full)
+        assert.equal(saved, body)
+        const prompt = await readFile(
+          join(
+            f.options.home,
+            'steps',
+            String(f.ticket.id),
+            String(context.attempt.id),
+            'writer-1',
+            'prompt.md',
+          ),
+          'utf8',
+        )
+        assert.ok(prompt.includes(scenario))
+        assert.ok(!note.includes(scenario))
+        assert.ok(prompt.includes(reason))
+        assert.match(
+          prompt,
+          /Maximum description length before the factory adds open findings:/,
+        )
+        assert.match(prompt, /Open review findings:/)
+      }
+    })
+  }
+}

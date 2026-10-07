@@ -28,14 +28,14 @@ const request = {
   body: 'Required for the caller change.',
 }
 
-test('other repository result is typed, trimmed and defaults to feature', () => {
+test('other repository result is typed, trimmed and defaults to lead', () => {
   const result = parseStepResult({
     outcome: 'needs-other-repo',
     summary: 'Blocked on the API',
     artifacts: [],
     otherRepository: request,
   })
-  assert.equal(result.otherRepository?.workflow, 'feature')
+  assert.equal(result.otherRepository?.workflow, 'lead')
   for (const otherRepository of [
     undefined,
     {},
