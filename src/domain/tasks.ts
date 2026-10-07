@@ -271,3 +271,40 @@ function checkDecisions(input: DelegationInput): string[] {
   }
   return errors
 }
+
+const ENDED_WITHOUT_LANDING: readonly TaskStatus[] = [
+  'cancelled',
+  'failed',
+  'conflict',
+]
+
+/** A retried task takes a new key with a `-<n>` suffix, so `export`, `export-2` and `export-3` share a stem. */
+function keyStem(key: string): string {
+  return key.replace(/-\d+$/, '')
+}
+
+/**
+ * For each task that ended without landing and was retried, the child ticket number
+ * of the task that replaced it: the earliest later task with the same key stem, once
+ * that task has a child ticket.
+ */
+export function replacements(
+  tasks: readonly (Pick<LeadTask, 'key' | 'status' | 'createdAt'> & {
+    readonly child: { readonly number: number } | null
+  })[],
+): Map<string, number> {
+  const replaced = new Map<string, number>()
+  for (const task of tasks) {
+    if (!ENDED_WITHOUT_LANDING.includes(task.status)) continue
+    const stem = keyStem(task.key)
+    const after = Date.parse(task.createdAt)
+    const successor = tasks
+      .filter(
+        (other) =>
+          keyStem(other.key) === stem && Date.parse(other.createdAt) > after,
+      )
+      .sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt))[0]
+    if (successor?.child) replaced.set(task.key, successor.child.number)
+  }
+  return replaced
+}

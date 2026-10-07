@@ -13,7 +13,12 @@ import {
 import { listTicketLinks, listDependencies } from './ticket-links.ts'
 import { getTaskOfChild, listTasks, taskEvent } from './task-records.ts'
 import { type AgentChoice, runTasksParams } from '../domain/catalog.ts'
-import { delegateTarget, taskWorkflowName } from '../domain/tasks.ts'
+import {
+  delegateTarget,
+  isFinalTask,
+  replacements,
+  taskWorkflowName,
+} from '../domain/tasks.ts'
 import type { DecisionInput } from '../domain/decisions.ts'
 import { insertDecision, finishDecision } from './decisions.ts'
 // Tickets and their attempts and artifacts. Every write locks the ticket row, asks the
@@ -193,7 +198,16 @@ export async function getTicketDetail(
     dependencies,
     links,
     tasks,
-    parentTask: parent?.parent ?? null,
+    parentTask: parent
+      ? {
+          ...parent.parent,
+          replacedBy: isFinalTask(parent.task.status)
+            ? (replacements(
+                await listTasks(database, parent.task.ticketId),
+              ).get(parent.task.key) ?? null)
+            : null,
+        }
+      : null,
   }
 }
 

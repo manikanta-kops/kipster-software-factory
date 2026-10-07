@@ -112,6 +112,7 @@ test('Today folds the child tickets of a lead under it until expanded', async ({
   expect(tickets.find((item) => item.number === child)?.task).toEqual({
     key: 'api-export',
     leadNumber: lead,
+    replacedBy: null,
   })
   expect(tickets.find((item) => item.number === lead)?.task).toBeNull()
 

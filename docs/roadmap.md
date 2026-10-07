@@ -172,9 +172,11 @@ with the scheduler disabled.
 
 End-of-ticket summaries now persist on completion, cancellation and owner waits,
 with fact-based status, actions, activity, issues and unverified work. Ticket
-pages show the compact card; Today shows attention and completions from the last
-24 hours with links to details. Synthetic demo tickets cover Ready, Needs you
-and Blocked. Summary rewrites and legacy null reports have PostgreSQL coverage;
+pages show the compact card; Today puts the pill and activity line on each
+owner ticket's row and folds a lead's sub-tasks under it. A task retried under
+the next key reads "Replaced by #N" and no longer blocks its lead; the link is
+derived when read, with no stored column. Synthetic demo tickets cover Ready,
+Needs you, Blocked and a replaced task. Summary rewrites and legacy null reports have PostgreSQL coverage;
 phone/desktop reports have light/dark browser coverage. Real overnight use and
 owner morning checks remain unverified.
 

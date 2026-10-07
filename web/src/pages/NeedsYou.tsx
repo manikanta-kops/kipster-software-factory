@@ -56,9 +56,8 @@ export function NeedsYou({
   const repositories = useQuery(repositoriesQuery)
   const now = useNow()
   const all = query.data?.tickets ?? []
-  const waiting = all.filter(
-    (ticket) => ticket.status === 'needs-you' && matches(filter, ticket),
-  )
+  // Children included: a waiting child's gate decides whether its lead needs you.
+  const waiting = all.filter((ticket) => ticket.status === 'needs-you')
   const details = useQueries({
     queries: waiting.map((ticket) => ticketQuery(ticket.number)),
   })
@@ -80,43 +79,57 @@ export function NeedsYou({
       })
       .map((ticket) => ticket.number),
   )
-  const needsYou = waiting.filter((ticket) => !factoryMerges.has(ticket.number))
   if (query.isPending) return <p className="muted">Loading tickets…</p>
   if (query.isError) return <ErrorMessage error={query.error} />
-  const visible = all.filter((ticket) => matches(filter, ticket))
-  const moving = visible
-    .filter(
-      (ticket) =>
-        ['queued', 'running'].includes(ticket.status) ||
-        factoryMerges.has(ticket.number),
-    )
-    .sort(
-      (a, b) => Number(a.status === 'queued') - Number(b.status === 'queued'),
-    )
-  const leads = new Set(moving.map((ticket) => ticket.number))
+  const waitsForOwner = (ticket: ListedTicket) =>
+    ticket.status === 'needs-you' && !factoryMerges.has(ticket.number)
   const tasksOf = new Map<number, ListedTicket[]>()
-  for (const ticket of visible)
-    if (ticket.task && leads.has(ticket.task.leadNumber))
+  for (const ticket of all)
+    if (ticket.task)
       tasksOf.set(ticket.task.leadNumber, [
         ...(tasksOf.get(ticket.task.leadNumber) ?? []),
         ticket,
       ])
-  const topMoving = moving.filter(
-    (ticket) => !(ticket.task && leads.has(ticket.task.leadNumber)),
+  const waitingTasksOf = (ticket: ListedTicket) =>
+    (tasksOf.get(ticket.number) ?? []).filter(waitsForOwner)
+  const ended = (ticket: ListedTicket) =>
+    ['done', 'cancelled'].includes(ticket.status)
+  // Only owner tickets get rows; a lead's tasks fold under it.
+  const visible = all.filter(
+    (ticket) => !ticket.task && matches(filter, ticket),
   )
+  const needsYou = visible.filter((ticket) =>
+    ended(ticket)
+      ? ticket.summary?.status === 'needs-you' &&
+        now - Date.parse(ticket.updatedAt) < 24 * 60 * 60 * 1000
+      : waitsForOwner(ticket) || waitingTasksOf(ticket).length > 0,
+  )
+  const moving = visible
+    .filter(
+      (ticket) =>
+        !needsYou.includes(ticket) &&
+        (['queued', 'running'].includes(ticket.status) ||
+          factoryMerges.has(ticket.number)),
+    )
+    .sort(
+      (a, b) => Number(a.status === 'queued') - Number(b.status === 'queued'),
+    )
   const workflowOf = (ticket: ListedTicket) =>
     workflows.data?.workflows.find((item) => item.name === ticket.workflow.name)
-  const finished = visible.filter((ticket) =>
-    ['done', 'cancelled'].includes(ticket.status),
+  const finished = visible.filter(
+    (ticket) => ended(ticket) && !needsYou.includes(ticket),
   )
-  const summarized = visible.filter(
-    (ticket) =>
-      ticket.summary &&
-      (needsYou.some((item) => item.id === ticket.id) ||
-        (['done', 'cancelled'].includes(ticket.status) &&
-          now - Date.parse(ticket.updatedAt) < 24 * 60 * 60 * 1000)),
-  )
-  const summaryIds = new Set(summarized.map((ticket) => ticket.id))
+  const fold = (ticket: ListedTicket) => {
+    const tasks = tasksOf.get(ticket.number)
+    return tasks ? (
+      <TaskFold
+        tasks={tasks}
+        workflowOf={workflowOf}
+        factoryMerges={factoryMerges}
+        now={now}
+      />
+    ) : null
+  }
   const scope = isFiltered(filter) ? ` in ${describeFilter(filter)}` : ''
   const repositoryRefs = [
     ...new Map(
@@ -149,31 +162,6 @@ export function NeedsYou({
         />
       </header>
       <Lessons status="proposed" repositories={filter.repositories} />
-      {summarized.length > 0 && (
-        <section className="today-summaries" aria-label="Ticket summaries">
-          <h2 className="section-title">Ticket summaries</h2>
-          <ul>
-            {summarized.map((ticket) => (
-              <li className="today-summary" key={ticket.id}>
-                <SummaryStatus summary={ticket.summary!} />
-                <a
-                  className="summary-title"
-                  href={`#/tickets/${ticket.number}`}
-                >
-                  {ticket.title}
-                </a>
-                <span className="summary-happened">
-                  {ticket.summary!.happened}
-                </span>
-                <a className="text-link" href={`#/tickets/${ticket.number}`}>
-                  View details
-                  <span className="sr-only"> for {ticket.title}</span>
-                </a>
-              </li>
-            ))}
-          </ul>
-        </section>
-      )}
       {needsYou.length === 0 && moving.length === 0 && !scope ? (
         <EmptyFactory
           hasRepositories={repositories.data?.repositories.length !== 0}
@@ -181,32 +169,41 @@ export function NeedsYou({
       ) : (
         <>
           <section className="needs" aria-label="Needs you">
-            {needsYou.filter((ticket) => !summaryIds.has(ticket.id)).length ? (
+            {needsYou.length ? (
               <>
                 <h2 className="section-title attention">
                   <i aria-hidden="true" />
                   Needs you
                 </h2>
-                {needsYou
-                  .filter((ticket) => !summaryIds.has(ticket.id))
-                  .map((ticket, index) => (
+                {needsYou.map((ticket, index) => {
+                  const waitingTasks = waitingTasksOf(ticket)
+                  const focus =
+                    ticket.status !== 'needs-you' && waitingTasks.length === 1
+                      ? waitingTasks[0]!
+                      : ticket
+                  return (
                     <DecisionCard
                       key={ticket.id}
                       ticket={ticket}
-                      detail={detailByNumber.get(ticket.number)}
+                      focus={focus}
+                      waitingTasks={waitingTasks}
+                      detail={detailByNumber.get(focus.number)}
                       now={now}
                       index={index}
-                    />
-                  ))}
+                    >
+                      {fold(ticket)}
+                    </DecisionCard>
+                  )
+                })}
               </>
-            ) : needsYou.length === 0 ? (
+            ) : (
               <h2 className="all-clear">
                 <span className="all-clear-mark" aria-hidden="true">
                   <Icon name="check" size={11} stroke={2.6} />
                 </span>
                 Nothing{scope} needs you.
               </h2>
-            ) : null}
+            )}
           </section>
           {moving.length > 0 && (
             <section className="moving" aria-labelledby="moving-heading">
@@ -214,8 +211,8 @@ export function NeedsYou({
                 Moving
               </h2>
               <ul className="rows">
-                {topMoving.map((ticket) => {
-                  const tasks = tasksOf.get(ticket.number)
+                {moving.map((ticket) => {
+                  const tasks = fold(ticket)
                   const row = (
                     <MovingRow
                       key={ticket.id}
@@ -226,17 +223,10 @@ export function NeedsYou({
                     />
                   )
                   return tasks ? (
-                    <LeadGroup
-                      key={ticket.id}
-                      tasks={tasks}
-                      moving={moving}
-                      needsYou={needsYou}
-                      workflowOf={workflowOf}
-                      factoryMerges={factoryMerges}
-                      now={now}
-                    >
+                    <li className="lead-group" key={ticket.id}>
                       {row}
-                    </LeadGroup>
+                      {tasks}
+                    </li>
                   ) : (
                     row
                   )
@@ -263,7 +253,14 @@ export function NeedsYou({
                       stroke={2.4}
                     />
                   </span>
-                  <span className="finished-title">{ticket.title}</span>
+                  <span className="finished-main">
+                    <span className="finished-title">{ticket.title}</span>
+                    {ticket.summary && (
+                      <span className="finished-happened">
+                        {ticket.summary.happened}
+                      </span>
+                    )}
+                  </span>
                   <RepositoryTag repository={ticket.repository} />
                   <span className="muted">
                     {ticket.status === 'cancelled' ? 'Cancelled' : 'Done'}{' '}
@@ -316,16 +313,23 @@ function planSummary(detail: TicketResponse | undefined) {
 
 function DecisionCard({
   ticket,
+  focus,
+  waitingTasks,
   detail,
   now,
   index,
+  children,
 }: {
   ticket: ListedTicket
+  /** The ticket the owner acts on: the lead itself, or its one waiting task. */
+  focus: ListedTicket
+  waitingTasks: readonly ListedTicket[]
   detail: TicketResponse | undefined
   now: number
   index: number
+  children: ReactNode
 }) {
-  const waiting = ticket.waiting
+  const waiting = focus.waiting
   const image = lastImage(detail)
   const plan = waiting?.for === 'human' ? planSummary(detail) : undefined
   const action =
@@ -336,6 +340,22 @@ function DecisionCard({
       : waiting?.for === 'ask'
         ? 'Decide'
         : 'Open ticket'
+  const question =
+    focus !== ticket
+      ? `Task ${focus.task?.key}: ${attention(focus)}`
+      : ticket.status !== 'needs-you' && waitingTasks.length > 1
+        ? `${waitingTasks.length} tasks need you`
+        : ticket.status !== 'needs-you' && ticket.summary?.actions[0]
+          ? ticket.summary.actions[0].label
+          : attention(ticket)
+  // A running lead's stored summary is stale; its waiting tasks are the count.
+  const live = ['queued', 'running'].includes(ticket.status)
+  const status =
+    ticket.summary && !live
+      ? ticket.summary
+      : waitingTasks.length
+        ? { status: 'needs-you' as const, needsYouCount: waitingTasks.length }
+        : null
   return (
     <article
       className="decision"
@@ -349,78 +369,76 @@ function DecisionCard({
     >
       <div className="decision-main">
         <p className="decision-meta">
+          {status && <SummaryStatus summary={status} />}
           <RepositoryTag repository={ticket.repository} />
-          {ticket.task && (
-            <span>
-              Task {ticket.task.key} of #{ticket.task.leadNumber}
-            </span>
-          )}
           {waiting && <span>waiting {since(waiting.since, now)}</span>}
         </p>
         <h3 id={`decision-${ticket.id}`}>
           <a href={`#/tickets/${ticket.number}`}>{ticket.title}</a>
         </h3>
-        <p className="decision-question">{attention(ticket)}</p>
+        <p className="decision-question">{question}</p>
         {waiting?.summary && (
           <p className="decision-context">{waiting.summary}</p>
         )}
         {plan && <p className="decision-context">{plan}</p>}
+        {ticket.summary && !live && (
+          <p className="decision-happened summary-happened">
+            {ticket.summary.happened}
+          </p>
+        )}
       </div>
       {image && (
         <a
           className="decision-thumb"
-          href={`#/tickets/${ticket.number}`}
+          href={`#/tickets/${focus.number}`}
           aria-label={`Open ${image.title}`}
         >
           <img src={api.artifactUrl(image.id)} alt="" loading="lazy" />
         </a>
       )}
       <div className="decision-actions">
-        <a className="button primary" href={`#/tickets/${ticket.number}`}>
+        <a className="button primary" href={`#/tickets/${focus.number}`}>
           {action}
         </a>
         <PullRequest
           url={
-            waiting?.for === 'pull-request-merge' ? ticket.pullRequestUrl : null
+            waiting?.for === 'pull-request-merge' ? focus.pullRequestUrl : null
           }
         />
       </div>
+      {children && <div className="decision-tasks">{children}</div>}
     </article>
   )
 }
 
-type TaskState = 'done' | 'now' | 'you' | 'queued' | 'stopped'
+type TaskState = 'done' | 'now' | 'you' | 'queued' | 'stopped' | 'replaced'
 
-/** A lead's row with its child tickets folded underneath, so one piece of work reads as one. */
-function LeadGroup({
+/** A lead's child tickets folded under its row, so one piece of work reads as one. */
+function TaskFold({
   tasks,
-  moving,
-  needsYou,
   workflowOf,
   factoryMerges,
   now,
-  children,
 }: {
   tasks: readonly ListedTicket[]
-  moving: readonly ListedTicket[]
-  needsYou: readonly ListedTicket[]
   workflowOf: (ticket: ListedTicket) => WorkflowSummary | undefined
   factoryMerges: ReadonlySet<number>
   now: number
-  children: ReactNode
 }) {
   const [open, setOpen] = useState(false)
   const panelId = useId()
   const state = (ticket: ListedTicket): TaskState =>
-    needsYou.includes(ticket)
-      ? 'you'
-      : ticket.status === 'done'
-        ? 'done'
-        : ticket.status === 'cancelled'
-          ? 'stopped'
-          : ticket.status === 'queued'
-            ? 'queued'
-            : 'now'
+    ticket.task?.replacedBy
+      ? 'replaced'
+      : ticket.status === 'needs-you' && !factoryMerges.has(ticket.number)
+        ? 'you'
+        : ticket.status === 'done'
+          ? 'done'
+          : ticket.status === 'cancelled'
+            ? 'stopped'
+            : ticket.status === 'queued'
+              ? 'queued'
+              : 'now'
   const counts = new Map<string, number>()
   for (const ticket of tasks) {
     const value = state(ticket)
@@ -439,13 +457,17 @@ function LeadGroup({
             you: 'Need you',
             queued: 'Queued',
             stopped: 'Cancelled',
+            replaced: 'Replaced',
           }[value]
     counts.set(label, (counts.get(label) ?? 0) + 1)
   }
-  const running = tasks.filter((ticket) => moving.includes(ticket))
+  const running = tasks.filter(
+    (ticket) =>
+      ['queued', 'running'].includes(ticket.status) ||
+      factoryMerges.has(ticket.number),
+  )
   return (
-    <li className="lead-group">
-      {children}
+    <>
       <button
         type="button"
         className="lead-tasks-toggle"
@@ -486,16 +508,18 @@ function LeadGroup({
                   <span className={`task-dot ${state(ticket)}`} />
                   <span className="task-line-title">{ticket.title}</span>
                   <span className="muted">
-                    {state(ticket) === 'you'
-                      ? 'Needs you'
-                      : humanize(ticket.status)}
+                    {ticket.task?.replacedBy
+                      ? `Replaced by #${ticket.task.replacedBy}`
+                      : state(ticket) === 'you'
+                        ? 'Needs you'
+                        : humanize(ticket.status)}
                   </span>
                 </a>
               </li>
             ))}
         </ul>
       )}
-    </li>
+    </>
   )
 }
 
@@ -537,10 +561,18 @@ function MovingRow({
                 Task {ticket.task.key} of #{ticket.task.leadNumber}
               </span>
             )}
+            {factoryMerge && ticket.summary && (
+              <SummaryStatus summary={ticket.summary} />
+            )}
             <span className="row-doing">
               {factoryMerge ? 'Factory merge pending' : doing(ticket, step)}
             </span>
             <span className="muted">{since(ticket.updatedAt, now)}</span>
+            {factoryMerge && ticket.summary && (
+              <span className="row-happened summary-happened">
+                {ticket.summary.happened}
+              </span>
+            )}
           </span>
         </span>
         {workflow && at !== undefined && at >= 0 && (

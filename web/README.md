@@ -84,10 +84,16 @@ continue. Lights-out leaves the merge gate and untested warnings in effect.
 Ticket pages show a compact fact-based summary for parked and finished tickets:
 Ready, Needs you with an action count, or Blocked; linked actions, activity and
 only present issues/unverified facts. View details scrolls and moves keyboard
-focus to the rest of the ticket. Today shows one compact row per summarized
-ticket needing attention or finished within 24 hours, respecting filters and
-factory auto-merge. Older tickets with no stored summary retain their existing
-view. Resumed tickets hide their last parked report. Summary events refresh both
+focus to the rest of the ticket. Today gives one row to each owner ticket
+(leads, bugs, onboarding); a lead's sub-tasks fold under its row, in Needs you
+and in Moving. Needs-you cards and factory-merge rows carry the summary pill and
+its one-line activity; queued and running rows keep their live line. A lead
+with a waiting sub-task needs you, counted on its pill. Finished tickets whose
+summary still needs you stay in Needs you for 24 hours; the rest fold into
+Finished. A sub-task the lead retried under the next key (`export` →
+`export-2`) reads "Replaced by #N" in the fold, the lead's task list and its own
+ticket, never Blocked. Older tickets with no stored summary retain their
+existing view. Resumed tickets hide their last parked report. Summary events refresh both
 views. The appearance suite covers these reports at 390px and 1280px in both
 themes, including the details control.
 

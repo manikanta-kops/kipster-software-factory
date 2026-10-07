@@ -23,7 +23,7 @@ for (const colorScheme of ['light', 'dark'] as const) {
           route: `/tickets/${factory.tickets.proofStale}`,
           heading: 'Cart proof needs another run',
         },
-        { name: 'needs-you', route: '/', heading: 'Ticket summaries' },
+        { name: 'needs-you', route: '/', heading: 'Needs you' },
         { name: 'new-ticket', route: '/tickets/new', heading: 'New ticket' },
         {
           name: 'ticket',
@@ -216,22 +216,34 @@ for (const colorScheme of ['light', 'dark'] as const)
       await page.setViewportSize({ width, height: 900 })
       await page.emulateMedia({ colorScheme, reducedMotion: 'reduce' })
       await page.goto(`${factory.url}/#/`)
-      const rows = page.getByRole('region', { name: 'Ticket summaries' })
+      const rows = page.getByRole('region', { name: 'Needs you', exact: true })
       await expect(rows).toBeVisible()
       for (const [number, status] of [
-        [factory.tickets.done, 'Ready'],
         [factory.tickets.approvePlan, 'Needs you · 1'],
         [factory.tickets.askAfterLimit, 'Blocked'],
+        [factory.tickets.replacedLead, 'Needs you · 1'],
       ] as const) {
-        const row = rows.locator('.today-summary').filter({
-          has: page.locator(`a.summary-title[href="#/tickets/${number}"]`),
+        const row = rows.locator('.decision').filter({
+          has: page.locator(`h3 a[href="#/tickets/${number}"]`),
         })
         await expect(row.locator('.summary-status')).toHaveText(status)
-        await expect(row.locator('.summary-happened')).toBeVisible()
-        await expect(
-          row.getByRole('link', { name: /View details/ }),
-        ).toHaveAttribute('href', `#/tickets/${number}`)
+        await expect(row.locator('.decision-happened')).toBeVisible()
+        expect(
+          await row.evaluate(
+            (element) => element.scrollWidth <= element.clientWidth,
+          ),
+        ).toBeTruthy()
       }
+      await rows
+        .locator('.decision')
+        .filter({
+          has: page.locator(
+            `h3 a[href="#/tickets/${factory.tickets.replacedLead}"]`,
+          ),
+        })
+        .getByRole('button', { name: /2 tasks/ })
+        .click()
+      await expect(rows.getByText(/^Replaced by #\d+$/)).toBeVisible()
       expect(
         await page.evaluate(
           'document.documentElement.scrollWidth <= window.innerWidth',
@@ -240,6 +252,7 @@ for (const colorScheme of ['light', 'dark'] as const)
       const todayPath = testInfo.outputPath(
         `today-summary-${width}-${colorScheme}.png`,
       )
+      await page.mouse.move(0, 0)
       await page.evaluate('window.scrollTo(0, 0)')
       await page.screenshot({ path: todayPath, fullPage: true })
       await testInfo.attach('Today summary lines', {
@@ -247,13 +260,7 @@ for (const colorScheme of ['light', 'dark'] as const)
         contentType: 'image/png',
       })
       const number = factory.tickets.approvePlan
-      await rows
-        .locator('.today-summary')
-        .filter({
-          has: page.locator(`a.summary-title[href="#/tickets/${number}"]`),
-        })
-        .getByRole('link', { name: /View details/ })
-        .click()
+      await rows.locator(`h3 a[href="#/tickets/${number}"]`).click()
       await expect(page).toHaveURL(`${factory.url}/#/tickets/${number}`)
       for (const [ticketNumber, status] of [
         [number, 'Needs you · 1'],
