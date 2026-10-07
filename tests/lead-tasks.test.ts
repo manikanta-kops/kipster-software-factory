@@ -455,6 +455,21 @@ test('pull request tasks wait for the lead: merge goes through the merge step, l
   })
   const lead = await f.lead()
   await f.start()
+  for (const key of ['keep', 'park']) {
+    await until(
+      () => f.detail(lead.number),
+      (detail) =>
+        detail.tasks.some(
+          (task) =>
+            task.key === key && ['pr-ready', 'left-open'].includes(task.status),
+        ),
+    )
+    await until(
+      () => f.detail(lead.number),
+      (detail) =>
+        detail.tasks.some((task) => task.key === key && task.decision !== null),
+    )
+  }
   const decided = await until(
     () => f.detail(lead.number),
     (detail) =>
