@@ -27,6 +27,7 @@ import { runAttempt } from '../src/engine/runner.ts'
 import { run } from '../src/executors/process.ts'
 import { withPreparedArtifacts } from '../src/store/artifact-preparation.ts'
 import { transaction } from '../src/store/database.ts'
+import { until } from './helpers/timing.ts'
 
 test('ready tested and reviewed head merges without a key or any model call and records factory attribution', async (t) => {
   const f = await autoMergeFixture(t)
@@ -394,11 +395,10 @@ test('evidence copies precede ticket lock and rollback removes only copies, pres
     summary: 'Already closed',
     artifacts: [{ kind: 'evidence', title: 'Will roll back', path: source }],
   })
-  const deadline = Date.now() + 3000
-  while ((await readdir(directory)).length === before.length) {
-    assert.ok(Date.now() < deadline, 'Copy waited for the ticket lock')
-    await new Promise((resolve) => setTimeout(resolve, 10))
-  }
+  await until(
+    () => readdir(directory),
+    (entries) => entries.length !== before.length,
+  )
   await connection.query('ROLLBACK')
   connection.release()
   await assert.rejects(recording, /no longer open/)
@@ -491,15 +491,13 @@ test('a slow post-merge check cannot hold a scheduler slot or stop another ticke
     mergePollMs: 20,
   })
   try {
-    const deadline = Date.now() + 5000
-    while (
-      !observed.started ||
-      (await getTicketDetail(f.store.database, other.number))!.ticket.waiting
-        ?.for !== 'ask'
-    ) {
-      assert.ok(Date.now() < deadline, 'Post-merge work blocked another ticket')
-      await new Promise((resolve) => setTimeout(resolve, 20))
-    }
+    await until(
+      async () => ({
+        started: observed.started,
+        ticket: (await getTicketDetail(f.store.database, other.number))!.ticket,
+      }),
+      (value) => value.started && value.ticket.waiting?.for === 'ask',
+    )
     assert.equal((await pendingPostMergeChecks(f.store.database)).length, 1)
   } finally {
     await scheduler.close()
@@ -772,17 +770,13 @@ test('a background merge error with a failed gate invalidation does not reject t
     },
   })
   try {
-    const deadline = Date.now() + 5000
-    while (
-      errors.filter((error) => error.includes('gate invalidation unavailable'))
-        .length < 2
-    ) {
-      assert.ok(
-        Date.now() < deadline,
-        'Scheduler did not continue polling after invalidation failed',
-      )
-      await new Promise((resolve) => setTimeout(resolve, 20))
-    }
+    await until(
+      async () =>
+        errors.filter((error) =>
+          error.includes('gate invalidation unavailable'),
+        ).length,
+      (count) => count >= 2,
+    )
     assert.ok(
       errors.some((error) => error.includes('GitHub observation failed')),
     )

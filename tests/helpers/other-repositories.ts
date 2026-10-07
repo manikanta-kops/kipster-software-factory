@@ -16,20 +16,8 @@ import {
 import { createTicket, getTicketDetail } from '../../src/store/tickets.ts'
 import { Workspaces } from '../../src/workspace/workspaces.ts'
 import { createTestStore } from './store.ts'
+export { until } from './timing.ts'
 
-export async function until<T>(
-  read: () => Promise<T>,
-  predicate: (value: T) => boolean,
-): Promise<T> {
-  const deadline = Date.now() + 15_000
-  while (true) {
-    const value = await read()
-    if (predicate(value)) return value
-    if (Date.now() >= deadline)
-      throw new Error(`Timed out: ${JSON.stringify(value)}`)
-    await new Promise((resolve) => setTimeout(resolve, 20))
-  }
-}
 export function packet(prompt: string): { ticket: { title: string } } {
   return JSON.parse(
     prompt

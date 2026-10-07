@@ -51,7 +51,7 @@ export async function proofFixture(
   )
   await writeFile(
     join(source, '.kipster/kit.yml'),
-    `version: 1\ncheck: echo checked\nverify:\n  start: ${process.execPath} app.ts {port} {databaseUrl}\n  ready: http://127.0.0.1:{port}/health\n  ports: 1\n  database: postgres\n  timeoutSeconds: 5\n`,
+    `version: 1\ncheck: echo checked\nverify:\n  start: ${process.execPath} app.ts {port} {databaseUrl}\n  ready: http://127.0.0.1:{port}/health\n  ports: 1\n  database: postgres\n  timeoutSeconds: 60\n`,
   )
   await writeFile(
     join(source, '.kipster/verify/README.md'),

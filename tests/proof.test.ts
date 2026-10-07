@@ -11,6 +11,7 @@ import { cancelTicket, resolveAsk } from '../src/store/tickets.ts'
 import { isLatestTesterVerdictCurrent } from '../src/store/verdicts.ts'
 import { proofContext } from './fixtures/proof-agent.ts'
 import { proofFixture } from './helpers/proof.ts'
+import { until, controlledTimer } from './helpers/timing.ts'
 
 async function fixture(
   t: TestContext,
@@ -32,7 +33,13 @@ async function cleaned(f: Awaited<ReturnType<typeof proofFixture>>) {
     for (const instance of proofContext(invocation.prompt).instances) {
       await assert.rejects(access(instance.checkout))
       await assert.rejects(
-        fetch(`${instance.url}/health`, { signal: AbortSignal.timeout(500) }),
+        fetch(`${instance.url}/health`, {
+          signal: AbortSignal.timeout(60_000),
+        }),
+        (error: unknown) =>
+          error instanceof TypeError &&
+          (error.cause as NodeJS.ErrnoException | undefined)?.code ===
+            'ECONNREFUSED',
       )
       assert.ok(
         !rows.some(
@@ -351,35 +358,35 @@ for (const mode of ['failure', 'timeout', 'cancel', 'crash'] as const) {
       const events = listenForEvents(f.store.database)
       await events.ready
       const errors: unknown[] = []
+      const deadline = mode === 'timeout' ? controlledTimer(t, 6000) : undefined
       const scheduler = await startScheduler({
         ...f.options,
         events,
-        config: engineConfig.parse({ stepTimeoutMinutes: 0.1 }),
+        config: engineConfig.parse({
+          stepTimeoutMinutes: mode === 'timeout' ? 0.1 : 120,
+        }),
         fallbackMs: 20,
         onError: (error) => errors.push(error),
       })
       try {
-        // Generous under parallel load; the step's own 6 s timeout is what's tested.
-        const end = Date.now() + 60_000
-        while (true) {
+        await until(async () => {
           const invocation = f.invocations.at(-1)!
-          try {
-            if (invocation.prompt.startsWith('You are an independent tester')) {
-              await access(join(invocation.directory, 'observations.json'))
-              break
-            }
-          } catch {}
-          assert.ok(Date.now() < end, 'agent did not drive app')
-          await new Promise((resolve) => setTimeout(resolve, 20))
-        }
+          if (!invocation.prompt.startsWith('You are an independent tester'))
+            return false
+          return access(join(invocation.directory, 'observations.json')).then(
+            () => true,
+            () => false,
+          )
+        }, Boolean)
+        deadline?.expire()
         if (mode === 'cancel')
           await cancelTicket(f.store.database, {
             ticketNumber: f.ticket.number,
           })
-        while ((await f.detail()).ticket.status === 'running') {
-          assert.ok(Date.now() < end, 'scheduler did not time out')
-          await new Promise((resolve) => setTimeout(resolve, 20))
-        }
+        await until(
+          () => f.detail(),
+          (detail) => detail.ticket.status !== 'running',
+        )
         if (mode === 'timeout')
           assert.match(
             (await f.detail()).attempts.find((a) => a.stepId === 'test')!

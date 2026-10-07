@@ -233,7 +233,13 @@ for (const scenario of [
       })
     })
     const ticket = await f.lead()
+    const expected = scenario === 'changed' ? 5 : 2
     await f.start()
+    for (let review = 1; review <= expected; review++)
+      await until(
+        async () => round,
+        (observedRound) => observedRound >= review,
+      )
     const detail = await until(
       async () => {
         if (f.errors.length) throw new Error(f.errors.map(String).join('\n'))
@@ -259,7 +265,6 @@ for (const scenario of [
     const reviews = detail.attempts.filter(
       (attempt) => attempt.stepId === 'review' && attempt.status === 'finished',
     )
-    const expected = scenario === 'changed' ? 5 : 2
     assert.equal(reviews.length, expected)
     assert.equal(reviews[0]!.outcome, 'changes-needed')
     assert.equal(

@@ -17,6 +17,12 @@ const fixed =
   existsSync('behaviour.txt') &&
   readFileSync('behaviour.txt', 'utf8').trim() === 'fixed'
 createServer((request, response) => {
+  if (mode === 'later-crash' && request.url === '/crash') {
+    response.once('finish', () => process.exit(8))
+    response.end('crashing')
+    return
+  }
+  if (mode === 'timeout') console.log('fixture not ready')
   if (request.url === '/checkout' && request.method === 'POST') {
     response.writeHead(fixed ? 200 : 500, {
       'content-type': 'application/json',
@@ -34,4 +40,3 @@ createServer((request, response) => {
   })
   response.end(JSON.stringify({ databaseUrl, pid: process.pid }))
 }).listen(Number(port), '127.0.0.1')
-if (mode === 'later-crash') setTimeout(() => process.exit(8), 1500)

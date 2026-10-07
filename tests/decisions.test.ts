@@ -30,6 +30,7 @@ import { createTestStore } from './helpers/store.ts'
 import { decisionWorkflow } from './helpers/decisions.ts'
 import { createApp } from '../src/api/app.ts'
 import { listenForEvents } from '../src/store/events.ts'
+import { controlledTimer } from './helpers/timing.ts'
 
 const sentinel = 'test-only-key-not-a-real-credential'
 for (const scenario of [
@@ -103,6 +104,8 @@ for (const scenario of [
     await commit(cwd)
     const secrets = secretStore(home, 'file')
     if (scenario !== 'no-key') await secrets.set('typesafe', sentinel)
+    const deadline =
+      scenario === 'timeout' ? controlledTimer(t, 60_123) : undefined
     let requests = 0
     let sent: { model: string; questions: object; state: object } | undefined
     server = createServer(async (req, res) => {
@@ -113,7 +116,10 @@ for (const scenario of [
       let text = ''
       for await (const chunk of req) text += chunk
       sent = JSON.parse(text)
-      if (scenario === 'timeout') return
+      if (deadline) {
+        deadline.expire()
+        return
+      }
       res.setHeader('content-type', 'application/json')
       if (typeof scenario === 'number') {
         res.writeHead(scenario)
@@ -156,7 +162,7 @@ for (const scenario of [
         secrets,
         transport: {
           baseURL: `http://127.0.0.1:${address.port}`,
-          timeout: scenario === 'timeout' ? 30 : 1000,
+          timeout: scenario === 'timeout' ? 60_123 : 60_000,
           retry: { backoffInitialMs: 1, backoffMaxMs: 2 },
         },
       },

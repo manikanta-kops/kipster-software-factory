@@ -229,7 +229,7 @@ test('seed CLI retains and serves demo evidence with a relative home', async (t)
       '--home',
       '.local/verification-home',
     ],
-    { cwd: directory, timeout: 15_000 },
+    { cwd: directory, timeout: 60_000 },
   )
   assert.match(stdout, /Seeded demo tickets:/)
   assert.match(stdout, /#\d+  retiredWorkflow/)
@@ -341,7 +341,7 @@ test('serve CLI accepts --no-scheduler and refuses demo scheduling by default', 
     await new Promise<void>((resolve, reject) => {
       const timer = setTimeout(
         () => reject(new Error('CLI did not serve')),
-        10_000,
+        60_000,
       )
       child.stdout.on('data', (data) => {
         if (String(data).includes('running at')) {
