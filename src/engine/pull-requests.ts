@@ -5,6 +5,7 @@ import { baseSyncCount, beginBaseSync } from '../store/auto-merge.ts'
 import { actions } from '../domain/catalog.ts'
 import type { ArtifactInput } from '../domain/lifecycle.ts'
 import { run } from '../executors/process.ts'
+import type { Checks } from '../github/checks.ts'
 import { FACTORY_MARKER } from '../github/feedback.ts'
 import { isLatestTesterVerdictCurrent } from '../store/verdicts.ts'
 import {
@@ -265,28 +266,47 @@ export async function pollPullRequestChecks(
   )
   await refreshMergeGate(options, context, signal, { checks })
   signal.throwIfAborted()
-  if (checks.state === 'head-changed') {
-    await finish(
-      'needs-decision',
-      'The pull request head changed on GitHub; reconcile the branch before retrying maintain-pr.',
-    )
-  } else if (checks.state === 'failed') {
-    await finish(
-      'ci-failed',
-      `CI failed: ${checks.failures.map((f) => f.name).join(', ')}`,
-      checks.failures.map((f) => ({
-        kind: 'finding',
-        title: `CI failed: ${f.name}`.slice(0, 200),
-        content: `[${f.name}](${f.url})\n\n${f.excerpt.slice(-2000)}`,
-      })),
-    )
-  } else if (await pollPullRequestBase(options, context, signal)) {
-    return
-  } else if (checks.state !== 'pending') {
-    await finish(
-      'ready',
-      `Pull request: ${ticket.pullRequestUrl}. ${checks.state === 'none' ? 'No checks configured.' : 'CI passed.'}`,
-    )
+  const result = checksResult(checks, ticket.pullRequestUrl)
+  if (result && result.outcome !== 'ready')
+    await finish(result.outcome, result.summary, result.artifacts)
+  else if (await pollPullRequestBase(options, context, signal)) return
+  else if (result) await finish(result.outcome, result.summary)
+}
+
+/** The summary and one finding per failed check, with its link and log excerpt, for the builder. */
+export function ciFailure(failures: Checks['failures']): {
+  summary: string
+  artifacts: ArtifactInput[]
+} {
+  return {
+    summary: `CI failed: ${failures.map((f) => f.name).join(', ')}`,
+    artifacts: failures.map((f) => ({
+      kind: 'finding',
+      title: `CI failed: ${f.name}`.slice(0, 200),
+      content: `[${f.name}](${f.url})\n\n${f.excerpt.slice(-2000)}`,
+    })),
+  }
+}
+
+/** The maintain-pr result for one CI snapshot; null while awaited checks are pending. */
+export function checksResult(
+  checks: Checks,
+  pullRequestUrl: string,
+): { outcome: string; summary: string; artifacts: ArtifactInput[] } | null {
+  if (checks.state === 'head-changed')
+    return {
+      outcome: 'needs-decision',
+      summary:
+        'The pull request head changed on GitHub; reconcile the branch before retrying maintain-pr.',
+      artifacts: [],
+    }
+  if (checks.state === 'failed')
+    return { outcome: 'ci-failed', ...ciFailure(checks.failures) }
+  if (checks.state === 'pending') return null
+  return {
+    outcome: 'ready',
+    summary: `Pull request: ${pullRequestUrl}. ${checks.state === 'none' ? 'No checks configured.' : 'CI passed.'}`,
+    artifacts: [],
   }
 }
 

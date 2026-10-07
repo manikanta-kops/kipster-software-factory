@@ -803,3 +803,102 @@ test('only a reviewer may return the typed owner-review field', async (t) => {
   })
   await assert.rejects(readResult(f.home, 'tester', f.home), /Only a reviewer/)
 })
+
+for (const autoMerge of [true, false])
+  test(`an optional check that fails during the merge wait returns to build with its excerpt (auto-merge ${autoMerge ? 'on' : 'off'})`, async (t) => {
+    const url = 'https://github.com/fixture/auto/actions/runs/8/job/81'
+    const excerpt =
+      'Bundle\tSize\tdist/app.js is 410 kB, over the 250 kB budget\nError: Process completed with exit code 1.'
+    let bundle: { status: string; conclusion: string | null } = {
+      status: 'IN_PROGRESS',
+      conclusion: null,
+    }
+    // The real check adapter parses GitHub's answer; only the gh process is replaced.
+    const gh: typeof run = async (_command, args) => {
+      if (args[0] === 'run') return excerpt
+      if (args.includes('--slurp')) return '[[]]'
+      const head = args.find((a) => a.startsWith('sha='))!.slice(4)
+      return JSON.stringify({
+        data: {
+          repository: {
+            pullRequest: {
+              headRefOid: head,
+              baseRefName: 'main',
+              baseRef: {
+                branchProtectionRule: { requiredStatusCheckContexts: ['ci'] },
+              },
+            },
+            object: {
+              statusCheckRollup: {
+                contexts: {
+                  pageInfo: { hasNextPage: false },
+                  nodes: [
+                    {
+                      kind: 'CheckRun',
+                      name: 'ci',
+                      isRequired: true,
+                      status: 'COMPLETED',
+                      conclusion: 'SUCCESS',
+                    },
+                    {
+                      kind: 'CheckRun',
+                      name: 'Bundle',
+                      isRequired: false,
+                      ...bundle,
+                      databaseId: 81,
+                      detailsUrl: url,
+                    },
+                  ],
+                },
+              },
+            },
+          },
+        },
+      })
+    }
+    const f = await autoMergeFixture(t, { taskPr: true, gh })
+    await setAutoMerge(f.store.database, f.repository.id, autoMerge)
+    const ready = await f.detail()
+    assert.equal(
+      ready.attempts.findLast((a) => a.stepId === 'maintain-pr')!.outcome,
+      'ready',
+    )
+    assert.equal(ready.ticket.currentStep, 'merge')
+    assert.equal(ready.ticket.waiting?.for, 'pull-request-merge')
+    const context = await f.context()
+    if (!autoMerge) {
+      // The owner holds the merge; a pending optional check neither blocks nor routes.
+      await pollMergeWait(f.options, context, f.signal)
+      const pending = await f.detail()
+      assert.equal(pending.ticket.currentStep, 'merge')
+      assert.equal(pending.ticket.waiting?.for, 'pull-request-merge')
+      assert.equal(
+        (await getMergeGate(f.store.database, f.ticket.id))!.latest.facts.ci,
+        'passed',
+      )
+    }
+    bundle = { status: 'COMPLETED', conclusion: 'FAILURE' }
+    await pollMergeWait(f.options, context, f.signal)
+    const d = await f.detail()
+    const merge = d.attempts.find((a) => a.id === context.attempt.id)!
+    assert.equal(merge.stepId, 'merge')
+    assert.equal(merge.outcome, 'changes-needed')
+    assert.equal(merge.summary, 'CI failed: Bundle')
+    assert.equal(merge.headCommit, f.head())
+    assert.equal(d.ticket.currentStep, 'build')
+    assert.equal(d.ticket.waiting, null)
+    assert.equal(d.attempts.at(-1)!.stepId, 'build')
+    assert.equal(d.attempts.at(-1)!.status, 'pending')
+    const finding = d.artifacts.find((a) => a.attemptId === merge.id)!
+    assert.equal(finding.kind, 'finding')
+    assert.equal(finding.title, 'CI failed: Bundle')
+    assert.equal(finding.content, `[Bundle](${url})\n\n${excerpt}`)
+    assert.ok(
+      (await getMergeGate(
+        f.store.database,
+        f.ticket.id,
+      ))!.latest.blockers.includes('CI failed'),
+    )
+    assert.equal(f.merges(), 0)
+    assert.deepEqual(await listWaitingForMerge(f.store.database), [])
+  })

@@ -158,7 +158,8 @@ export async function inspectChecks(
     (requiredName) =>
       !selected.some((c) => (c.name ?? c.context) === requiredName),
   )
-  const failed = relevant.filter((c) =>
+  // Only required checks are awaited, but any completed failure goes back to the builder.
+  const failed = checks.filter((c) =>
     c.kind === 'CheckRun'
       ? c.status === 'COMPLETED' &&
         !['SUCCESS', 'NEUTRAL', 'SKIPPED'].includes(c.conclusion ?? '')
