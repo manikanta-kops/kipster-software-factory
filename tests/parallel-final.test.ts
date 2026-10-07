@@ -24,22 +24,7 @@ import { build, deferred, leadFixture, packet, result } from './helpers/lead.ts'
 import { builtInWorkflow } from './helpers/store.ts'
 import { proofFixture } from './helpers/proof.ts'
 import { commit } from './helpers/other-repositories.ts'
-
-async function until<T>(
-  read: () => Promise<T>,
-  predicate: (value: T) => boolean,
-): Promise<T> {
-  const deadline = Date.now() + 180_000
-  while (true) {
-    const value = await read()
-    if (predicate(value)) return value
-    assert.ok(
-      Date.now() < deadline,
-      `Condition timed out: ${JSON.stringify(value).slice(0, 4000)}`,
-    )
-    await new Promise((resolve) => setTimeout(resolve, 20))
-  }
-}
+import { until } from './helpers/timing.ts'
 
 const reviewers = [
   { cli: 'codex', model: 'review' },
