@@ -208,7 +208,8 @@ export function factoryDescription(
 ): string {
   const plainFact = (value: string) =>
     value
-      .replace(/(?:[a-z][a-z\d+.-]*:\/\/|www\.)\S+/gi, '[URL omitted]')
+      // A bounded scheme keeps this linear on long unbroken words.
+      .replace(/(?:[a-z][a-z\d+.-]{0,31}:\/\/|www\.)\S+/gi, '[URL omitted]')
       .replace(/(?:[A-Za-z]:\\|~?\/)\S+/g, '[path omitted]')
       .replace(/\s+/g, ' ')
       .trim()

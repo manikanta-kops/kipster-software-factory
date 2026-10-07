@@ -85,14 +85,16 @@ export class Workspaces {
       return branch
     })
   }
-  /** `startPoint` is where a new ticket branch begins; the default branch when absent. */
+  /**
+   * `startPoint` is where a new ticket branch begins; the default branch when absent.
+   * Call `prepareRepository` first: this reuses the cache as the caller left it.
+   */
   async prepare(
     ticket: Ticket,
     repository: Repository,
     signal: AbortSignal,
     startPoint?: string,
   ): Promise<string> {
-    await this.prepareRepository(repository, signal)
     return this.serial(repository.id, async () => {
       const root = join(this.home, 'worktrees', String(ticket.id))
       const path = this.path(ticket)
