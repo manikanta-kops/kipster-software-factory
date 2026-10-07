@@ -14,14 +14,19 @@ import type {
   WorkflowResponse,
   WorkflowsResponse,
 } from '../src/api/contract.ts'
-import { addUploads } from '../src/library/library.ts'
+import { addUploads, parseUpload } from '../src/library/library.ts'
 import { startFactory } from '../src/server.ts'
 import { type EventSignal, listenForEvents } from '../src/store/events.ts'
 import {
   createRepository,
   markRepositoryReady,
 } from '../src/store/repositories.ts'
-import { createTicket } from '../src/store/tickets.ts'
+import { startTask } from '../src/store/tasks.ts'
+import {
+  claimAttempts,
+  createTicket,
+  markRunning,
+} from '../src/store/tickets.ts'
 import { listUploadedWorkflows } from '../src/store/workflows.ts'
 import {
   builtInLibrary,
@@ -383,6 +388,87 @@ describe('removing an uploaded workflow', () => {
     )
     await json<ErrorResponse>(await remove('review-only'), 404)
     await json<WorkflowResponse>(await upload(reviewOnly()), 201)
+  })
+
+  test('refuses while a running ticket or a lead task child runs it', async () => {
+    const running = await json<TicketResponse>(
+      await post('/api/tickets', {
+        repository: 'acme/shop',
+        workflow: 'review-only',
+        title: 'Shorten the checkout labels',
+      }),
+      201,
+    )
+    const claimed = await claimAttempts(store.database, 100)
+    const started = claimed.find(
+      ({ ticket }) => ticket.number === running.ticket.number,
+    )
+    assert.ok(started)
+    await markRunning(store.database, started.attempt.id, 'claude-code')
+
+    const lead = await createTicket(store.database, {
+      repository: 'acme/kitted',
+      workflow: await builtInWorkflow('lead'),
+      title: 'Split the cart work',
+    })
+    const {
+      rows: [task],
+    } = await store.database.query<{ id: number }>(
+      `INSERT INTO tasks (ticket_id, attempt_id, key, title, instructions, land, workflow)
+       SELECT ticket_id, id, 'labels', 'Tidy labels', 'Tidy the labels.', 'branch', 'review-only'
+       FROM attempts WHERE ticket_id = $1
+       RETURNING id`,
+      [lead.id],
+    )
+    const uploaded = parseUpload(reviewOnly())
+    assert.ok(uploaded.ok)
+    const child = await startTask(
+      store.database,
+      task!.id,
+      {
+        repository: 'acme/kitted',
+        workflow: uploaded.entry,
+        title: 'Tidy labels',
+      },
+      null,
+    )
+    assert.ok(child)
+
+    const problem = await json<WorkflowInUseResponse>(
+      await remove('review-only'),
+      409,
+    )
+    assert.deepEqual(problem.tickets, [
+      running.ticket.number,
+      lead.number,
+      child.number,
+    ])
+    assert.equal(
+      (
+        await json<TicketResponse>(
+          await app.request(`/api/tickets/${running.ticket.number}`),
+          200,
+        )
+      ).ticket.status,
+      'running',
+    )
+    assert.ok((await workflows()).some((w) => w.name === 'review-only'))
+
+    for (const number of [running.ticket.number, lead.number])
+      await json<TicketResponse>(
+        await post(`/api/tickets/${number}/cancel`, {}),
+        200,
+      )
+    assert.equal(
+      (
+        await json<TicketResponse>(
+          await app.request(`/api/tickets/${child.number}`),
+          200,
+        )
+      ).ticket.status,
+      'cancelled',
+    )
+    await json<RemoveWorkflowResponse>(await remove('review-only'), 200)
   })
 
   test('stays removed after a restart, and its tickets still open', async () => {

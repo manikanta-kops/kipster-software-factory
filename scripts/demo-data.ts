@@ -24,6 +24,7 @@ import {
   updateTask,
 } from '../src/store/tasks.ts'
 import { migrate } from '../src/store/migrate.ts'
+import { saveUploadedWorkflow } from '../src/store/workflows.ts'
 import {
   createRepository,
   getRepository,
@@ -80,6 +81,22 @@ steps:
     action: merge
 `
 
+// An uploaded workflow that unfinished tickets use, so removing it is refused.
+const SYNTHETIC_UPLOAD = `name: synthetic-review
+description: Synthetic uploaded demo workflow. Build it and have it reviewed.
+steps:
+  - id: build
+    kind: agent
+    role: builder
+
+  - id: review
+    kind: agent
+    role: reviewer
+    limit: 2
+    routes:
+      changes-needed: build
+`
+
 /** Ticket numbers of the demo tickets, by the state each one is left in. */
 export interface DemoTickets {
   readonly proofPassed: number
@@ -95,6 +112,9 @@ export interface DemoTickets {
   readonly lightsOutLead: number
   readonly lightsOutChild: number
   readonly lightsOutUntestedChild: number
+  readonly uploadRunning: number
+  readonly uploadLead: number
+  readonly uploadChild: number
 }
 
 export async function seedDemo(
@@ -638,6 +658,63 @@ async function seedLocked(
     ],
   })
 
+  // Running on an uploaded workflow, and a lead whose running child task uses it.
+  const upload = parseUpload(SYNTHETIC_UPLOAD)
+  if (!upload.ok) {
+    throw new Error(
+      `Cannot parse the synthetic uploaded workflow: ${upload.errors.join('; ')}`,
+    )
+  }
+  await saveUploadedWorkflow(database, upload.entry)
+  const uploadRunning = await create(
+    'Shorten the checkout labels (synthetic upload)',
+    'Synthetic ticket running an uploaded workflow; no real agent is running.',
+    upload.entry,
+  )
+  await run(uploadRunning)
+  const uploadLead = (
+    await createTicket(database, {
+      repository: DEMO_REPOSITORY,
+      workflow: leadWorkflow,
+      title: 'Tidy the cart copy (synthetic upload lead)',
+      body: 'Synthetic lead with a task that runs the uploaded synthetic-review workflow. No real agents ran.',
+    })
+  ).number
+  await run(uploadLead, {
+    outcome: 'plan-ready',
+    summary: 'Prepared the synthetic cart copy plan for automatic approval.',
+    artifacts: [{ kind: 'plan', title: 'Plan', content: planFor('cart copy') }],
+  })
+  await run(uploadLead, {
+    outcome: 'delegate',
+    summary: 'Delegated the synthetic cart copy task.',
+    tasks: [
+      {
+        key: 'cart-copy',
+        title: 'Tidy the cart copy (synthetic upload task)',
+        instructions: 'Tidy the wording on the cart page.',
+        land: 'branch',
+        workflow: upload.entry.workflow.name,
+      },
+    ],
+  })
+  const uploadTasks = await run(uploadLead, undefined, 'system')
+  await parkForTasks(database, uploadTasks.attempt.id)
+  const [cartTask] = await listTasks(database, uploadTasks.ticket.id)
+  const uploadChildTicket = await startTask(
+    database,
+    cartTask!.id,
+    {
+      repository: DEMO_REPOSITORY,
+      workflow: upload.entry,
+      title: cartTask!.title,
+      body: 'Synthetic child task running the uploaded workflow; no real agent is running.',
+    },
+    null,
+  )
+  const uploadChild = uploadChildTicket!.number
+  await run(uploadChild)
+
   // Running: the lead is working on it.
   const running = await create(
     'Fix the typo on the pricing page',
@@ -665,6 +742,9 @@ async function seedLocked(
     lightsOutChild,
     lightsOutUntestedChild,
     retiredWorkflow,
+    uploadRunning,
+    uploadLead,
+    uploadChild,
   }
 }
 

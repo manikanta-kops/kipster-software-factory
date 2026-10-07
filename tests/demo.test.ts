@@ -15,6 +15,11 @@ import {
 } from '../src/store/repositories.ts'
 import { getTicketDetail, listTickets } from '../src/store/tickets.ts'
 import { createDemoStore } from './helpers/demo.ts'
+import { WorkflowInUse } from '../src/domain/errors.ts'
+import {
+  listUploadedWorkflows,
+  removeUploadedWorkflow,
+} from '../src/store/workflows.ts'
 import { acquireSchedulerLock } from '../src/store/scheduler.ts'
 import { startFactory } from '../src/server.ts'
 import { builtInLibrary, createTestStore } from './helpers/store.ts'
@@ -63,7 +68,7 @@ describe('demo data', () => {
       assert.equal(ticket.status, status, `#${number}`)
       assert.equal(ticket.waiting?.for ?? null, waitingFor, `#${number}`)
     }
-    assert.equal((await listTickets(demo.database)).length, 13)
+    assert.equal((await listTickets(demo.database)).length, 16)
   })
 
   test('retired quick-change keeps its stored workflow and completed plan', async () => {
@@ -117,6 +122,33 @@ describe('demo data', () => {
     assert.equal(plan.title, 'Historical plan')
     assert.match(plan.content ?? '', /Retain the old workflow history/)
     assert.equal((await builtInLibrary()).get('quick-change'), undefined)
+  })
+
+  test('an uploaded workflow in use by a running ticket and a lead task child cannot be removed', async () => {
+    const { uploadRunning, uploadLead, uploadChild } = demo.tickets
+    const running = await detail(uploadRunning)
+    const lead = await detail(uploadLead)
+    const child = await detail(uploadChild)
+    assert.equal(running.ticket.status, 'running')
+    assert.equal(running.workflow.name, 'synthetic-review')
+    assert.equal(lead.workflow.name, 'lead')
+    assert.equal(lead.ticket.waiting?.for, 'tasks')
+    assert.equal(lead.tasks[0]?.workflow, 'synthetic-review')
+    assert.equal(lead.tasks[0]?.child?.number, uploadChild)
+    assert.equal(child.ticket.status, 'running')
+    assert.equal(child.workflow.name, 'synthetic-review')
+    assert.deepEqual(
+      (await listUploadedWorkflows(demo.database)).map(({ name }) => name),
+      ['synthetic-review'],
+    )
+    await assert.rejects(
+      removeUploadedWorkflow(demo.database, 'synthetic-review'),
+      (error) =>
+        error instanceof WorkflowInUse &&
+        error.tickets.join() ===
+          [uploadRunning, uploadLead, uploadChild].join(),
+    )
+    assert.equal((await listUploadedWorkflows(demo.database)).length, 1)
   })
 
   test('lights-out demo exposes typed decisions and a linked child without running agents', async () => {
