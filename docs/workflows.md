@@ -212,11 +212,13 @@ limits and merge policy remain in effect.
 
 A tester immediately followed by a reviewer runs alongside that reviewer when
 its `passed` route continues there (implicitly or explicitly). No step field is
-needed. The built-in lead and bug workflows use this pairing. The tester uses the running disposable app when available, otherwise it
-checks the change in a disposable checkout. All configured lead reviewers
-run as separate sessions. Each step has its own attempt, directories and logs.
-The pair occupies one scheduler slot and shares its timeout. Both verdicts must
-match the pinned branch head. Both passes continue after review; a correction
+needed. This applies to the built-in `lead`, `bug` and `task-pr` workflows,
+and to any owner-defined workflow of that shape. The reviewer does not see
+that round's tester evidence. The tester uses the running disposable app when
+available, otherwise it checks the change in a disposable checkout. All
+configured lead reviewers run as separate sessions. Each step has its own attempt, directories and logs.
+The paired reviewer shares the tester's scheduler slot and timeout. Both
+verdicts must match the pinned branch head. Both passes continue after review; a correction
 wake carries both results and findings, only after both finish.
 
 Each joined round counts one finished run for each step, even when it passes.

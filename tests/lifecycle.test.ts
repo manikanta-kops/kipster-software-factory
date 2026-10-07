@@ -664,6 +664,23 @@ describe('step results', () => {
     }
   })
 
+  test('artifact titles are at most 200 characters', () => {
+    const result = (title: string) => ({
+      outcome: 'passed',
+      summary: 'Proved',
+      artifacts: [{ kind: 'evidence', title, content: 'HTTP 200' }],
+    })
+    assert.equal(
+      parseStepResult(result('x'.repeat(200))).artifacts[0]!.title.length,
+      200,
+    )
+    rejects(
+      () => parseStepResult(result('x'.repeat(201))),
+      'invalid',
+      /artifacts\.0\.title: Too big/,
+    )
+  })
+
   test('rejects unknown kinds and missing summaries', () => {
     rejects(
       () =>

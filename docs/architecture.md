@@ -1047,8 +1047,10 @@ is independent, execution continues with the original and a note, and the
 commit-bound gate requires owner merging for that verdict.
 
 A tester immediately followed by a reviewer, with success continuing to that
-reviewer, runs as one concurrent pair. This includes lead's `final-test`/`review`
-and bug's `test`/`review`. The pair uses one scheduler slot and one timeout,
+reviewer, runs as one concurrent pair. This includes `lead`'s
+`final-test`/`review`, `bug`'s and `task-pr`'s `test`/`review`, and any
+owner-defined workflow of that shape. The reviewer does not see that round's
+tester evidence. The paired reviewer shares the tester's scheduler slot and timeout,
 like the configured reviewer list. Sessions, attempts, step directories and logs
 remain separate. Testers use disposable running instances when available,
 otherwise they check the change in a disposable checkout. Dependency checkouts are prepared once and shared read-only. Both verdicts must match the

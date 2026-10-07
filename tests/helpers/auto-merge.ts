@@ -21,68 +21,32 @@ import {
   getTicketDetail,
   listWaitingForMerge,
   markRunning,
+  setPullRequestUrl,
+  waitForPullRequestMerge,
 } from '../../src/store/tickets.ts'
+import { setArtifactHome } from '../../src/store/database.ts'
 import { runAttempt, type RunnerOptions } from '../../src/engine/runner.ts'
 import type { Checks } from '../../src/github/checks.ts'
 import { createGitHub, type PullRequest } from '../../src/github/github.ts'
 import { builtInWorkflow, createTestStore } from './store.ts'
 
-export async function autoMergeFixture(
-  t: TestContext,
-  settings: {
-    path?: string
-    tester?: boolean
-    reviewer?: boolean
-    ownerReview?: string
-    initialBaseMove?: boolean
-    settle?: number
-    maxBaseSyncs?: number
-    /** Runs the built-in task-pr workflow, starting with a finished build. */
-    taskPr?: boolean
-    /** Answers check inspection through the real adapter instead of fixed Checks. */
-    gh?: typeof run
-  } = {},
-) {
-  const root = await mkdtemp(join(tmpdir(), 'ksf-auto-'))
-  const home = join(root, 'home'),
-    source = join(root, 'source'),
-    bare = join(root, 'origin.git')
-  await mkdir(home)
-  await run('git', ['init', '-b', 'main', source])
-  const commit = async (cwd: string, path: string, content: string) => {
-    await mkdir(dirname(join(cwd, path)), { recursive: true })
-    await writeFile(join(cwd, path), content)
-    await run('git', ['add', '.'], { cwd })
-    await run(
-      'git',
-      [
-        '-c',
-        'user.name=Fixture',
-        '-c',
-        'user.email=fixture@test',
-        'commit',
-        '-m',
-        'Fixture change',
-      ],
-      { cwd },
-    )
-    return run('git', ['rev-parse', 'HEAD'], { cwd })
-  }
-  await commit(source, 'README.md', 'Base\n')
-  await commit(
-    source,
-    '.kipster/kit.yml',
-    'version: 1\ncheck: node -e "process.exit(0)"\n',
-  )
-  await run('git', ['clone', '--bare', source, bare])
-  const store = await createTestStore()
-  const registered = await createRepository(store.database, {
-    slug: 'fixture/auto',
-    cloneUrl: bare,
-  })
-  const repository = await markRepositoryReady(store.database, registered.id)
-  await setAutoMerge(store.database, repository.id, true)
-  const workflow: Workflow = {
+interface FixtureSettings {
+  path?: string
+  tester?: boolean
+  reviewer?: boolean
+  ownerReview?: string
+  settle?: number
+  maxBaseSyncs?: number
+  /** Runs the built-in task-pr workflow, starting with a finished build. */
+  taskPr?: boolean
+  /** Answers check inspection through the real adapter instead of fixed Checks. */
+  gh?: typeof run
+  /** The CI snapshot the fixture's own publication sees; passed by default. */
+  checks?: Checks
+}
+
+function fixtureWorkflow(settings: FixtureSettings): Workflow {
+  return {
     name: 'auto-test',
     description: 'Auto merge fixture',
     steps: [
@@ -129,6 +93,52 @@ export async function autoMergeFixture(
       },
     ],
   }
+}
+
+export async function autoMergeFixture(
+  t: TestContext,
+  settings: FixtureSettings = {},
+) {
+  const root = await mkdtemp(join(tmpdir(), 'ksf-auto-'))
+  const home = join(root, 'home'),
+    source = join(root, 'source'),
+    bare = join(root, 'origin.git')
+  await mkdir(home)
+  await run('git', ['init', '-b', 'main', source])
+  const commit = async (cwd: string, path: string, content: string) => {
+    await mkdir(dirname(join(cwd, path)), { recursive: true })
+    await writeFile(join(cwd, path), content)
+    await run('git', ['add', '.'], { cwd })
+    await run(
+      'git',
+      [
+        '-c',
+        'user.name=Fixture',
+        '-c',
+        'user.email=fixture@test',
+        'commit',
+        '-m',
+        'Fixture change',
+      ],
+      { cwd },
+    )
+    return run('git', ['rev-parse', 'HEAD'], { cwd })
+  }
+  await commit(source, 'README.md', 'Base\n')
+  await commit(
+    source,
+    '.kipster/kit.yml',
+    'version: 1\ncheck: node -e "process.exit(0)"\n',
+  )
+  await run('git', ['clone', '--bare', source, bare])
+  const store = await createTestStore()
+  const registered = await createRepository(store.database, {
+    slug: 'fixture/auto',
+    cloneUrl: bare,
+  })
+  const repository = await markRepositoryReady(store.database, registered.id)
+  await setAutoMerge(store.database, repository.id, true)
+  const workflow = fixtureWorkflow(settings)
   const sourceWorkflow = JSON.stringify(workflow)
   const ticket = await createTicket(store.database, {
     repository: repository.slug,
@@ -143,13 +153,14 @@ export async function autoMergeFixture(
   })
   const workspaces = new Workspaces(home)
   const operationSignal = () => AbortSignal.timeout(60_000)
+  await workspaces.prepareRepository(repository, operationSignal())
   const cwd = await workspaces.prepare(ticket, repository, operationSignal())
   let head = await commit(
     cwd,
     settings.path ?? 'ui.ts',
     'export const label = "Last 10 minutes"\n',
   )
-  let checks: Checks = { state: 'passed', failures: [] }
+  let checks: Checks = settings.checks ?? { state: 'passed', failures: [] }
   let postChecks: Checks = { state: 'passed', failures: [] }
   let pr: PullRequest = {
     url: 'https://github.com/fixture/auto/pull/7',
@@ -261,14 +272,6 @@ export async function autoMergeFixture(
   }
   if (settings.tester !== false) await pass()
   if (settings.reviewer !== false) await pass()
-  if (settings.initialBaseMove) {
-    await commit(
-      source,
-      'initial-base.txt',
-      'Base moved before first publication',
-    )
-    await run('git', ['push', bare, 'main'], { cwd: source })
-  }
   await runAttempt(options, await next(), operationSignal())
   if (
     (await getTicketDetail(store.database, ticket.number))!.ticket
@@ -317,6 +320,105 @@ export async function autoMergeFixture(
       pr = { ...pr, headRefOid: head }
       await run('git', ['push', 'origin', ticket.branch], { cwd })
       return head
+    },
+  }
+}
+
+/**
+ * The auto-merge fixture's ticket and database without Git, a publication or a
+ * merge step, for tests that need only stored attempts and a factory home.
+ */
+export async function autoMergeStoreFixture(t: TestContext) {
+  const root = await mkdtemp(join(tmpdir(), 'ksf-auto-store-'))
+  const home = join(root, 'home')
+  const store = await createTestStore()
+  t.after(async () => {
+    await store.close()
+    await rm(root, { recursive: true, force: true })
+  })
+  setArtifactHome(store.database, home)
+  const registered = await createRepository(store.database, {
+    slug: 'fixture/auto',
+  })
+  const repository = await markRepositoryReady(store.database, registered.id)
+  const source = JSON.stringify(fixtureWorkflow({}))
+  const ticket = await createTicket(store.database, {
+    repository: repository.slug,
+    title: 'A useful change',
+    workflow: {
+      workflow: fixtureWorkflow({}),
+      source,
+      version: workflowVersion(source),
+    },
+  })
+  // Published steps leave this directory behind; evidence tests compare its contents.
+  await mkdir(join(home, 'evidence', String(ticket.id)), { recursive: true })
+  const head = 'c'.repeat(40)
+  const url = 'https://github.com/fixture/auto/pull/7'
+  let postChecks: Checks = { state: 'passed', failures: [] }
+  const unexpected = async (): Promise<never> => {
+    throw new Error('The store fixture has no Git or pull request')
+  }
+  const options: RunnerOptions = {
+    database: store.database,
+    home,
+    config: engineConfig.parse({}),
+    workspaces: new Workspaces(home),
+    execute: unexpected,
+    github: {
+      maintain: unexpected,
+      inspect: unexpected,
+      checks: unexpected,
+      feedback: unexpected,
+      merge: unexpected,
+      commitChecks: async () => postChecks,
+    },
+  }
+  const next = async () => {
+    const [context] = await claimAttempts(store.database, 1)
+    assert.ok(context)
+    await markRunning(store.database, context.attempt.id, 'system')
+    return context
+  }
+  const finish = async (outcome: string) => {
+    const context = await next()
+    await completeAttempt(
+      store.database,
+      context.attempt.id,
+      { outcome, summary: 'Stored verdict', artifacts: [] },
+      { headCommit: head },
+    )
+  }
+  return {
+    root,
+    home,
+    store,
+    repository,
+    ticket,
+    options,
+    signal: new AbortController().signal,
+    head,
+    next,
+    detail: async () => (await getTicketDetail(store.database, ticket.number))!,
+    setPostChecks: (value: Checks) => {
+      postChecks = value
+    },
+    /** Records passed verdicts and a ready publication, then parks the merge step. */
+    async mergeWait() {
+      await finish('passed')
+      await finish('passed')
+      await finish('ready')
+      const merge = await next()
+      await setPullRequestUrl(store.database, ticket.id, url)
+      await waitForPullRequestMerge(
+        store.database,
+        merge.attempt.id,
+        'pull-request-merge',
+        head,
+      )
+      const [context] = await listWaitingForMerge(store.database)
+      assert.ok(context)
+      return context
     },
   }
 }

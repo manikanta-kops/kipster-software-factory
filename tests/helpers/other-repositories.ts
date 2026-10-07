@@ -1,5 +1,6 @@
 import type { Repository } from '../../src/domain/records.ts'
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { rmSync } from 'node:fs'
+import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { engineConfig } from '../../src/config.ts'
@@ -35,7 +36,38 @@ export function dependencies(
   )[1]
   return data ? JSON.parse(data.split('\n\n')[0]!) : []
 }
-export async function otherRepositoriesFixture() {
+const names = ['caller', 'library'] as const
+let template: Promise<string> | undefined
+/** Builds the source repositories and their bare remotes once per test process. */
+function gitTemplate(): Promise<string> {
+  template ??= (async () => {
+    const root = await mkdtemp(join(tmpdir(), 'factory-other-repos-template-'))
+    process.once('exit', () => rmSync(root, { recursive: true, force: true }))
+    for (const name of names) {
+      const source = join(root, name)
+      await mkdir(source)
+      await run('git', ['init', '-b', 'next'], { cwd: source })
+      await writeFile(join(source, 'README.md'), `${name} initial\n`)
+      await writeFile(join(source, '.gitignore'), 'ignored.txt\n')
+      await commit(source, 'Initial')
+      await run('git', [
+        'init',
+        '--bare',
+        '-b',
+        'next',
+        join(root, `${name}.git`),
+      ])
+      await run('git', ['remote', 'add', 'origin', join(root, `${name}.git`)], {
+        cwd: source,
+      })
+      await run('git', ['push', 'origin', 'next'], { cwd: source })
+    }
+    return root
+  })()
+  return template
+}
+/** `git: false` registers both repositories without building any git state. */
+export async function otherRepositoriesFixture({ git = true } = {}) {
   const root = await mkdtemp(join(tmpdir(), 'factory-other-repos-'))
   const home = join(root, 'home')
   await mkdir(home)
@@ -43,30 +75,35 @@ export async function otherRepositoriesFixture() {
   const events = listenForEvents(store.database)
   await events.ready
   const workspaces = new Workspaces(home)
-  const signal = AbortSignal.timeout(60_000)
   const repositories: Repository[] = []
   const sources: string[] = []
   const remotes: string[] = []
-  for (const name of ['caller', 'library']) {
-    const source = join(root, name)
+  if (git) {
+    const shared = await gitTemplate()
+    await cp(shared, root, { recursive: true })
+    for (const name of names) {
+      const config = join(root, name, '.git', 'config')
+      await writeFile(
+        config,
+        (await readFile(config, 'utf8')).replaceAll(shared, root),
+      )
+    }
+  }
+  for (const name of names) {
     const remote = join(root, `${name}.git`)
-    await mkdir(source)
-    await run('git', ['init', '-b', 'next'], { cwd: source })
-    await writeFile(join(source, 'README.md'), `${name} initial\n`)
-    await writeFile(join(source, '.gitignore'), 'ignored.txt\n')
-    await commit(source, 'Initial')
-    await run('git', ['clone', '--bare', source, remote])
-    await run('git', ['remote', 'add', 'origin', remote], { cwd: source })
     const pending = await createRepository(store.database, {
       slug: `fixture/${name}`,
       cloneUrl: remote,
     })
-    const defaultBranch = await workspaces.prepareRepository(pending, signal)
     repositories.push(
-      await markRepositoryReady(store.database, pending.id, { defaultBranch }),
+      await markRepositoryReady(store.database, pending.id, {
+        defaultBranch: 'next',
+      }),
     )
-    sources.push(source)
-    remotes.push(remote)
+    if (git) {
+      sources.push(join(root, name))
+      remotes.push(remote)
+    }
   }
   const workflows = join(root, 'workflows')
   await mkdir(workflows)
