@@ -347,14 +347,23 @@ after the merge committed but before its outcome was recorded. Workflows without
 a tester can still publish after refreshing any prior review. A branch with no commits ahead asks the owner.
 
 Before publishing a new head, `engine/pr-writer.ts` runs the writer in a fresh
-session using the writer's configured CLI and kit instructions. Its one inline
-note explains the change and why, describes current-commit scenario evidence in the factory,
-optionally includes a small Mermaid diagram, identifies `Verified at <sha>`, and
-states `Merge danger:` with a one-way/two-way door and blast radius. Output is
-limited to 4,000 characters and names the factory ticket; it contains no local evidence links. CI is still pending at this point; the prose describes its status at
+session using the writer's configured CLI and kit instructions. The writer is guided to
+explain the change and why in an inline note, describe current-commit scenario evidence in the factory,
+optionally include a small Mermaid diagram, identify `Verified at <sha>`, and
+state `Merge danger:` with a one-way/two-way door and blast radius, aim for 150–250
+words and keep it under 4,000 characters, name the factory ticket and omit local
+evidence links. These are instructions only; the factory publishes the first
+non-empty inline note from a successful `done` result without checking its wording.
+CI is still pending at this point; the prose describes its status at
 writing and directs readers to current checks rather than making a lasting status claim.
 The factory caches the description by ticket and head, records the note and run
-log, and rejects writer worktree edits. Invalid output gets one fresh retry.
+log. It trims only if the description plus factory marker exceeds GitHub's
+65,536-character limit, ending with `Full description on ticket #<n> in the factory`
+and preserving the full note on the ticket. When a run produces no usable note
+(including a crash, missing or invalid result, or `needs-decision`), it retries
+once in a fresh session, then publishes a factory description from the ticket,
+tasks or commits, and latest tester and reviewer verdicts. Worktree edits still
+stop publication; aborts and infrastructure failures propagate.
 Full plans, logs and prior review rounds remain in the factory timeline.
 
 The action pushes normally, creates or updates the branch PR through `gh`, and
@@ -699,8 +708,9 @@ role/scenario from the latest attempt, preferring the requested head. Unlabelled
 files remain in the archive. The API adds `evidenceIndex`; stable same-origin
 routes `#/tickets/<number>/evidence/<artifact-id>` open items. Older attempts,
 additional media and logs are behind the archive. No installation URL or Tailscale
-integration is required. PR descriptions state `Verified at <sha>`, scenario
-observations and `Evidence on ticket #<n> in the factory`, with no local links.
+integration is required. Writers are instructed to state `Verified at <sha>`, scenario
+observations and `Evidence on ticket #<n> in the factory`, with no local links;
+the factory does not validate their wording.
 
 `config.json` adds `evidenceRetentionDays` (positive integer, default 30).
 An hourly bounded scheduler background task prunes finished/cancelled ticket logs
