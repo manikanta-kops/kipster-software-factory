@@ -114,15 +114,20 @@ will drive it. **A generated kit that never ran is a draft.**
 - `home`: factory home; `repository`: local cache or ticket repository containing
   the objects; `commit`: full 40- or 64-character Git object ID.
 - `kit`: parsed `Kit` from `src/kit/kit.ts` (`loadKit(path, commit, signal?)` reads
-  and validates a committed kit; `parseKit(yaml)` validates the YAML alone).
+  and validates a committed kit; `parseKit(yaml)` validates the YAML alone), or
+  null for only the disposable checkout, without setup or an app.
 - `database`: factory pool opened with `openDatabase`; `signal?`: caller lifetime.
 - `check?`: default false; true runs check immediately after setup.
+- `checkOnly?`: default false; true runs setup (and check when requested) without
+  starting an app, so a kit without verify is accepted.
 
 It returns `{ url, ports, databaseUrl, checkout, evidenceDir, logs, exited, stop }`.
 URL is the expanded readiness URL (use `new URL(url).origin` for app navigation).
-Ports is an ordered number array. Database URL is null for none. Checkout is a
-separate detached clone at exactly the requested commit, under factory home;
-its object store borrows the cache read-only. Setup may generate or modify files
+Ports is an ordered number array. Database URL is null for none. A checkout-only
+handle (null kit or `checkOnly`) has an empty URL, no ports, a null database URL
+and an already resolved `exited`. Checkout is a separate detached clone at
+exactly the requested commit, under factory home; its object store borrows the
+cache read-only. Setup may generate or modify files
 there; it cannot dirty the ticket checkout. The start process is supervised in its
 own POSIX process group. `exited` rejects on unexpected exit, including after
 readiness. Callers must await `stop()` in `finally`; it is idempotent and kills

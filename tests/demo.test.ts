@@ -78,6 +78,7 @@ describe('demo data', () => {
       [tickets.done, 'done', null],
       [tickets.bundleFailed, 'queued', null],
       [tickets.bundlePending, 'needs-you', 'pull-request-merge'],
+      [tickets.bundleLateFailed, 'queued', null],
       [tickets.checkedWithoutVerifyLead, 'needs-you', 'pull-request-merge'],
       [tickets.checkedWithVerifyLead, 'needs-you', 'pull-request-merge'],
       [tickets.checkedWithoutVerifyChild, 'done', null],
@@ -89,7 +90,7 @@ describe('demo data', () => {
       assert.equal(ticket.status, status, `#${number}`)
       assert.equal(ticket.waiting?.for ?? null, waitingFor, `#${number}`)
     }
-    assert.equal((await listTickets(demo.database)).length, 28)
+    assert.equal((await listTickets(demo.database)).length, 29)
   })
 
   test('retired quick-change keeps its stored workflow and completed plan', async () => {
@@ -445,6 +446,52 @@ describe('demo data', () => {
       [
         ['Demo repository checks', 'passed', true],
         ['Bundle', 'pending', false],
+      ],
+    )
+  })
+
+  test('an optional check that fails during the merge wait sends the ticket back to build through merge', async () => {
+    const { ticket, attempts, artifacts } = await detail(
+      demo.tickets.bundleLateFailed,
+    )
+    const mergeGate = await getMergeGate(demo.database, ticket.id)
+    assert.equal(ticket.title, 'Bundle check failed while waiting to merge')
+    assert.match(ticket.body, /Synthetic demo.*No real GitHub or agents ran/s)
+    assert.equal(ticket.currentStep, 'build')
+    const maintain = attempts.findLast((a) => a.stepId === 'maintain-pr')
+    assert.equal(maintain?.outcome, 'ready')
+    assert.equal(
+      maintain?.summary,
+      'Pull request: https://github.com/kipster/demo-shop/pull/48. CI passed.',
+    )
+    const merge = attempts.findLast((a) => a.stepId === 'merge')
+    assert.equal(merge?.outcome, 'changes-needed')
+    assert.equal(merge?.summary, 'CI failed: Bundle')
+    assert.equal(merge?.headCommit, '9'.repeat(40))
+    assert.equal(attempts.at(-1)?.stepId, 'build')
+    assert.equal(attempts.at(-1)?.status, 'pending')
+    assert.equal(
+      artifacts.filter((a) => a.attemptId === maintain?.id).length,
+      0,
+    )
+    const finding = artifacts.find((a) => a.attemptId === merge?.id)
+    assert.equal(finding?.kind, 'finding')
+    assert.equal(finding?.title, 'CI failed: Bundle')
+    assert.match(
+      finding?.content ?? '',
+      /^\[Bundle\]\(https:\/\/github\.com\/kipster\/demo-shop\/actions\/runs\/480\/job\/482\)\n\n/,
+    )
+    assert.match(
+      finding?.content ?? '',
+      /dist\/assets\/vendor\.js is 410\.2 kB, over the 250 kB budget/,
+    )
+    assert.equal(mergeGate?.latest.facts.ci, 'failed')
+    assert.ok(mergeGate?.latest.blockers.includes('CI failed'))
+    assert.deepEqual(
+      mergeGate?.latest.facts.checks.map((c) => [c.name, c.state, c.required]),
+      [
+        ['Demo repository checks', 'passed', true],
+        ['Bundle', 'failed', false],
       ],
     )
   })

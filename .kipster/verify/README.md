@@ -96,8 +96,8 @@ Run every scenario once on one fresh instance, one after another, read-only
 cases first:
 
 1. Read-only: today, filter, repositories, workflows, timeline, proof, stale,
-   ci-failed, ci-pending, checked-without-verify, checked-with-verify,
-   untested-gate, decisions and responsive.
+   ci-failed, ci-pending, ci-late-failed, checked-without-verify,
+   checked-with-verify, untested-gate, decisions and responsive.
 2. Mutations: register, policy, upload, remove-in-use, new-ticket,
    gate-workflows, approve, changes, reject, retry, move and cancel.
 
