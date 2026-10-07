@@ -124,15 +124,21 @@ Migration 015 stores the latest fact-based ticket summary and its timestamp.
 `cancelled` and `needs-you`, including repeated parks and initial human waits.
 Merge gate changes refresh a parked report under the same ticket lock.
 `ticket.summary` events invalidate the live list and detail. Existing tickets
-keep a null summary until their next park or completion.
+keep a null summary until their next park or completion. Server start
+recomputes stored summaries of done, cancelled and needs-you tickets with a
+replaced task, so a report written before replacement awareness stops blocking
+its lead; it writes and emits an event only when the report changed.
 
 The pure `domain/summary.ts` function uses status/ask reasons, attempt times,
 retry counts, task states, tester/reviewer outcomes, typed decision counts,
 skipped steps, scenario evidence and merge gate facts. Agent summaries,
 descriptions, findings and decision explanations never enter the report.
 The API adds the summary to listed tickets and ticket detail. Ticket pages
-show it above the details; Today shows it on each owner ticket's row, with a
-lead's sub-tasks folded underneath. Reports hide while a ticket resumes running.
+show it above the details. Today gives each owner ticket one row, with a lead's
+sub-tasks folded underneath; owner rows that need the owner and factory-merge
+rows carry the summary pill and one-line activity, queued and running rows keep
+their live line, and the collapsed Finished list has no summary pill. Reports
+hide while a ticket resumes running.
 `domain/tasks.ts` `replacements` derives which ended task a later task with the
 same key stem replaced; the summary, the listed child's `task.replacedBy` and a
 child's `parentTask.replacedBy` use it.

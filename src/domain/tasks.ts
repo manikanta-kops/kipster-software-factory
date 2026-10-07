@@ -272,7 +272,8 @@ function checkDecisions(input: DelegationInput): string[] {
   return errors
 }
 
-const ENDED_WITHOUT_LANDING: readonly TaskStatus[] = [
+/** A task that ended this way can be replaced by a retry. */
+export const ENDED_WITHOUT_LANDING: readonly TaskStatus[] = [
   'cancelled',
   'failed',
   'conflict',
