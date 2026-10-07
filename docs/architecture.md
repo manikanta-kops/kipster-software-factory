@@ -862,8 +862,19 @@ a file with the same name, or no longer valid for the current catalog, is left
 out with a warning; its rows stay. `GET /api/workflows` adds `origin: file |
 upload`. The Workflows page uploads a chosen `.yml` file and lists the issues.
 
-There is no removal or rename yet, and the API has no authentication beyond
-binding to localhost and the CORS allow-list.
+`DELETE /api/workflows/:name` removes an upload: it deletes only the
+`uploaded_workflows` row and the in-memory library entry. `workflow_versions`
+rows stay, because tickets reference `(workflow_name, workflow_version)` and
+load their definition from there, so done and cancelled tickets keep opening
+and no migration is needed. A workflow file answers 409, an unknown name 404.
+Under a row lock on the upload, the store refuses with 409 and the sorted
+`tickets` numbers while a ticket that is not done or cancelled runs it, or an
+unfinished lead has a task naming it. A ticket created in the instant before
+removal still runs from its stored version. Per-workflow Settings overrides for
+the name are kept; if no ticket ever ran it, the next Settings save reports the
+override as an unknown workflow until it is removed. There is no rename, and
+the API has no authentication beyond binding to localhost and the CORS
+allow-list (which now allows `DELETE`).
 `skills/kipster-workflows/SKILL.md` teaches a model to write a valid file.
 
 ## Lead tickets and tasks

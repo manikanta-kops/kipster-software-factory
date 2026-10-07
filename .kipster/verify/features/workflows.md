@@ -5,6 +5,7 @@
 - Built-in versioned workflows, roles, needs and route limits.
 - Selecting a step and displaying all loops.
 - Uploading YAML, validation errors and uploaded versions.
+- Removing an uploaded workflow, with confirmation; refused for workflow files and while unfinished tickets use it.
 
 ## How to get to it (user point of view)
 
@@ -22,4 +23,4 @@ Every command asserts the results and saves a screenshot, trace and JSON observa
 
 ## Gotchas
 
-Uploads mutate only the supplied database and remain until the instance is discarded. The helper uses in-memory YAML, not files from outside the checkout. Uploaded workflow execution is disabled. Built-in name collisions and updates of uploaded names have coverage in tests/e2e/workflow-upload.spec.ts and tests/workflow-upload.test.ts.
+Uploads mutate only the supplied database and remain until the instance is discarded. The helper uses in-memory YAML, not files from outside the checkout. Uploaded workflow execution is disabled. Built-in name collisions and updates of uploaded names have coverage in tests/e2e/workflow-upload.spec.ts and tests/workflow-upload.test.ts. Remove has no drive command; tests/e2e/workflow-remove.spec.ts and tests/workflow-upload.test.ts cover it. Removing deletes only the upload's library entry, never stored versions or tickets.
