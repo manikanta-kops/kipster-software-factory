@@ -140,11 +140,21 @@ branch tasks two at a time, a report after each and a final `done`. Pull
 request tasks, testers inside tasks and Codex leads have not run live, nor on
 factory-floor.
 
-Tasks on the `task` and `task-pr` child workflows now skip a tester when its
-declared kit capabilities are missing, recording a durable **untested** marker.
-Task reports, ticket pages, task PRs and the lead's final PR make this explicit;
-the merge gate retains owner merging for merged untested tasks. Top-level
-workflows and reproducer steps still reject missing capabilities.
+Tasks on the `task` and `task-pr` child workflows used to skip a tester when its
+declared kit capabilities were missing, recording a durable **untested** marker
+that task reports, ticket pages, task PRs and the lead's final PR showed.
+Steps that declare `needs`, such as the `bug` reproducer and tester, still
+reject missing capabilities.
+
+Every task and the lead's final change are now always checked, replacing that
+skip. Testers in `task`, `task-pr` and `lead` no longer need `verify`: without a
+working kit app the tester checks the change in a disposable checkout. Untested
+now means the tester reported unverified items; the task report carries each
+checker's verdict. The verification demo seeds a checked lead and task with and
+without `verify` through the real routing, task result and merge gate code;
+`drive.mjs checked-without-verify`, `checked-with-verify` and `untested-gate`
+assert them in the browser. Live runs with real agents on a repository without
+`verify` remain unverified.
 
 ## Slice 6: The factory builds itself
 
@@ -187,6 +197,43 @@ Review `limit` controls rounds (default 5); the built-in lead publishes unresolv
 findings after round five and keeps the PR for the owner. Later lead rounds check
 earlier fixes; new findings on unchanged files become notes. An unavailable
 independent candidate is recorded and always requires owner merging.
+
+### Removing uploaded workflows (implemented)
+
+The Workflows page has Remove, with a confirmation, on uploaded workflows only;
+`DELETE /api/workflows/:name` does the same. Workflow files are refused, and so
+is a workflow that unfinished tickets or an unfinished lead's tasks use, with
+their ticket numbers. Done and cancelled tickets keep their stored copy and
+still open. Real PostgreSQL and browser tests cover this; existing uploads were
+not removed.
+
+### Every failed check returns to the builder (implemented)
+
+`maintain-pr` still waits only for required checks, but any check on the pull
+request head that has already failed, required or not, routes `ci-failed` with
+its name, link and log excerpt and blocks the merge gate. A non-required check
+still pending when the required checks pass is not awaited. Under lights-out the
+builder fixes a failure outside the ticket's scope in its own commit and flags
+it for the owner. Adapter and real PostgreSQL routing tests cover this; a live
+non-required GitHub failure remains unverified.
+
+The verification demo shows both cases without GitHub: seeding runs the real
+check inspection and maintain-pr result over fixture GitHub output, so "Bundle
+check failed on the pull request" is back at build with the `Bundle` link and log
+excerpt, and "Optional check still running" is ready with `Bundle` pending and
+not required. `drive.mjs ci-failed` and `ci-pending` assert them in the browser.
+
+A check that fails after maintain-pr reported `ready`, such as a non-required
+check still running then, now also returns to the builder: the merge wait sees
+it on the pull request head and the merge step reports `changes-needed` with the
+same `CI failed` findings, with auto-merge on or off. Real PostgreSQL tests and
+the demo ticket "Bundle check failed while waiting to merge" (`drive.mjs
+ci-late-failed`) cover this; live polling of a real GitHub pull request remains
+unverified.
+
+The `.kipster/verify` drivers and feature maps now follow the current app and
+built-in workflows. Every scenario runs once, in the guide's order, on one
+seeded instance, with a separate demo ticket for each plan and ask action.
 
 ### Lessons (implemented)
 

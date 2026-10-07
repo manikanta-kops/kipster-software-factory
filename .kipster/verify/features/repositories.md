@@ -15,12 +15,12 @@ Choose Repositories in the header. Choose New ticket to see how kit capabilities
 Use the APP_URL and EVIDENCE_DIR environment from [the guide](../README.md).
 Every command asserts the results and saves a screenshot, trace and JSON observation.
 
-| User action                                           | Exact command                                   | Observable result                                                                               |
-| ----------------------------------------------------- | ----------------------------------------------- | ----------------------------------------------------------------------------------------------- |
-| Inspect repository states and kit errors              | `node .kipster/verify/drive.mjs repositories`   | The demo-shop kit is ready; invalid-kit shows verify.ready; legacy-api shows its clone failure. |
-| Add a disposable repository record                    | `node .kipster/verify/drive.mjs register`       | A unique verification/map-* repository appears with Waiting for setup. No clone occurs.         |
-| Enable auto-merge, reload, then restore it off        | `node .kipster/verify/drive.mjs policy`         | The checkbox survives reload and ends unchecked.                                                |
-| Start onboarding for a repository with an invalid kit | `node .kipster/verify/drive.mjs gate-workflows` | Feature and bug are disabled; Start onboard-repo ticket creates a queued kit ticket.            |
+| User action                                           | Exact command                                   | Observable result                                                                                                           |
+| ----------------------------------------------------- | ----------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
+| Inspect repository states and kit errors              | `node .kipster/verify/drive.mjs repositories`   | The demo-shop kit is ready; invalid-kit shows verify.ready; legacy-api shows its clone failure.                             |
+| Add a disposable repository record                    | `node .kipster/verify/drive.mjs register`       | A unique verification/map-* repository appears with Waiting for setup. No clone occurs.                                     |
+| Enable auto-merge, reload, then restore it off        | `node .kipster/verify/drive.mjs policy`         | The checkbox survives reload and ends unchecked.                                                                            |
+| Start onboarding for a repository with an invalid kit | `node .kipster/verify/drive.mjs gate-workflows` | bug is disabled because it needs a verified kit, lead stays enabled; Start onboard-repo ticket creates a queued kit ticket. |
 
 ## Gotchas
 

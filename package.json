@@ -1,6 +1,6 @@
 {
   "name": "kipster-software-factory",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Turns tickets into verified pull requests through workflows of agent, human and system steps.",
   "license": "Apache-2.0",
   "private": true,
@@ -20,7 +20,7 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "typecheck": "tsc -p tsconfig.json && tsc -p web/tsconfig.json",
-    "test": "node scripts/with-test-database.ts node --test \"tests/**/*.test.ts\"",
+    "test": "node scripts/with-test-database.ts node --test --test-concurrency=4 \"tests/**/*.test.ts\"",
     "test:e2e": "playwright test"
   },
   "dependencies": {

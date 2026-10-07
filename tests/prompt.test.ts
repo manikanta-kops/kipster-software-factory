@@ -1,12 +1,17 @@
 import assert from 'node:assert/strict'
-import { dirname } from 'node:path'
-import { test } from 'node:test'
-import { readFile } from 'node:fs/promises'
+import { mkdtemp, readFile, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { dirname, join } from 'node:path'
+import { after, before, test } from 'node:test'
 import { roles, type RoleName } from '../src/domain/catalog.ts'
 import { renderRole } from '../src/domain/role.ts'
 import { buildPrompt } from '../src/engine/prompt.ts'
-import { loadTrustedInstructions } from '../src/kit/kit.ts'
-import { autoMergeFixture } from './helpers/auto-merge.ts'
+import { getTicketDetail, type TicketDetail } from '../src/store/tickets.ts'
+import {
+  createTestStore,
+  quickTicket,
+  type TestStore,
+} from './helpers/store.ts'
 
 // Default fixtures; the lead includes the shared repeated-failure rule.
 const defaults = JSON.parse(
@@ -26,6 +31,7 @@ const variants: Partial<
       'commit message and summary',
       'Never report\nneeds-decision for this conflict.',
       'sensible default that can be completed in this repository',
+      'fixing a failed CI\ncheck, required or not',
     ],
     absent: [
       'Report done, needs-other-repo, or needs-decision.',
@@ -93,65 +99,87 @@ const variants: Partial<
   },
 }
 
-for (const role of Object.keys(roles) as RoleName[]) {
-  test(`${role} prompt matches the default fixture and renders lights-out rules`, async (t) => {
-    const f = await autoMergeFixture(t)
-    const detail = await f.detail()
-    const source = await readFile(
-      new URL(`../src/roles/${role}.md`, import.meta.url),
-      'utf8',
-    )
-    assert.equal(renderRole(source, { lightsOut: false }), defaults[role])
-    for (const lightsOut of [false, true]) {
-      const prompt = await buildPrompt({
-        database: f.store.database,
-        step: { id: 'role', kind: 'agent', role, needs: [], routes: {} },
-        detail: { ...detail, ticket: { ...detail.ticket, lightsOut } },
-        trusted: { roleInstructions: '', contextIndex: '' },
-        directory: f.home,
-        diff: '',
-        home: f.home,
-      })
-      assert.doesNotMatch(prompt, /<!--\s*\/?(?:default|lights-out)\s*-->/)
-      if (role === 'lead') {
-        assert.match(prompt, /When `repeatedFailure` appears/)
-        assert.match(prompt, /`task` .*`plan` .*`factory`/)
-        assert.match(
-          prompt,
-          /Record the classification as a typed `decision` artifact/,
-        )
-        assert.match(prompt, /Do not retry with the same instructions/)
-        assert.match(
-          prompt,
-          /stop retrying it, name it in your summary, and continue the rest/,
-        )
-        if (!lightsOut)
-          assert.match(prompt, /factory cause you cannot work around/)
-      }
-      if (!lightsOut) {
-        assert.equal(prompt.slice(0, defaults[role].length), defaults[role])
-      } else {
-        for (const sentence of variants[role]?.present ?? [])
-          assert.ok(prompt.includes(sentence), `${role} missing ${sentence}`)
-        for (const sentence of variants[role]?.absent ?? [])
-          assert.ok(!prompt.includes(sentence), `${role} retained ${sentence}`)
-        assert.ok(!prompt.includes('use it only for a product question'))
-        assert.match(prompt, /Only irreversible actions wait/)
+// Rendering only reads the database for lessons, so one ticket serves every test.
+let store: TestStore
+let detail: TicketDetail
+let home: string
+
+before(async () => {
+  store = await createTestStore()
+  const ticket = await quickTicket(store.database)
+  detail = (await getTicketDetail(store.database, ticket.number))!
+  home = await mkdtemp(join(tmpdir(), 'ksf-prompt-'))
+})
+
+after(async () => {
+  await store?.close()
+  if (home) await rm(home, { recursive: true, force: true })
+})
+
+test('role prompts match the default fixtures and render lights-out rules', async (t) => {
+  for (const role of Object.keys(roles) as RoleName[]) {
+    await t.test(role, async () => {
+      const source = await readFile(
+        new URL(`../src/roles/${role}.md`, import.meta.url),
+        'utf8',
+      )
+      assert.equal(renderRole(source, { lightsOut: false }), defaults[role])
+      for (const lightsOut of [false, true]) {
+        const prompt = await buildPrompt({
+          database: store.database,
+          step: { id: 'role', kind: 'agent', role, needs: [], routes: {} },
+          detail: { ...detail, ticket: { ...detail.ticket, lightsOut } },
+          trusted: { roleInstructions: '', contextIndex: '' },
+          directory: home,
+          diff: '',
+          home,
+        })
+        assert.doesNotMatch(prompt, /<!--\s*\/?(?:default|lights-out)\s*-->/)
+        assert.equal(prompt.includes('Lights-out is on.'), lightsOut)
         assert.match(
           prompt,
           /"kind":"decision".*"chose".*"alternative".*"reason"/,
         )
-        if (role === 'writer')
-          assert.equal(renderRole(source, { lightsOut }), defaults[role])
+        if (role === 'lead') {
+          assert.match(prompt, /When `repeatedFailure` appears/)
+          assert.match(prompt, /`task` .*`plan` .*`factory`/)
+          assert.match(
+            prompt,
+            /Record the classification as a typed `decision` artifact/,
+          )
+          assert.match(prompt, /Do not retry with the same instructions/)
+          assert.match(
+            prompt,
+            /stop retrying it, name it in your summary, and continue the rest/,
+          )
+          if (!lightsOut)
+            assert.match(prompt, /factory cause you cannot work around/)
+        }
+        if (!lightsOut) {
+          assert.equal(prompt.slice(0, defaults[role].length), defaults[role])
+        } else {
+          for (const sentence of variants[role]?.present ?? [])
+            assert.ok(prompt.includes(sentence), `${role} missing ${sentence}`)
+          for (const sentence of variants[role]?.absent ?? [])
+            assert.ok(
+              !prompt.includes(sentence),
+              `${role} retained ${sentence}`,
+            )
+          assert.ok(!prompt.includes('use it only for a product question'))
+          assert.match(prompt, /Only irreversible actions wait/)
+          assert.match(prompt, /Do not stop to ask/)
+          assert.match(prompt, /merge gate and ownerReview rules still apply/)
+          if (role === 'writer')
+            assert.equal(renderRole(source, { lightsOut }), defaults[role])
+        }
       }
-    }
-  })
-}
+    })
+  }
+})
 
-test('agents are told to solve setup themselves and where the factory runtimes are', async (t) => {
-  const f = await autoMergeFixture(t)
+test('agents are told to solve setup themselves and where the factory runtimes are', async () => {
   const prompt = await buildPrompt({
-    database: f.store.database,
+    database: store.database,
     step: {
       id: 'build',
       kind: 'agent',
@@ -159,16 +187,11 @@ test('agents are told to solve setup themselves and where the factory runtimes a
       needs: [],
       routes: {},
     },
-    detail: await f.detail(),
-    trusted: await loadTrustedInstructions(
-      f.cwd,
-      'origin/main',
-      'builder',
-      f.signal,
-    ),
-    directory: f.home,
+    detail,
+    trusted: { roleInstructions: '', contextIndex: '' },
+    directory: home,
     diff: '',
-    home: f.home,
+    home,
   })
   assert.match(
     prompt,
@@ -183,33 +206,4 @@ test('agents are told to solve setup themselves and where the factory runtimes a
       `The factory runs Node ${process.version} from ${dirname(process.execPath)}`,
     ),
   )
-})
-
-test('lights-out instructions are present only when enabled, with typed decision instructions', async (t) => {
-  const f = await autoMergeFixture(t)
-  const detail = await f.detail()
-  for (const lightsOut of [false, true]) {
-    const prompt = await buildPrompt({
-      database: f.store.database,
-      step: {
-        id: 'build',
-        kind: 'agent',
-        role: 'builder',
-        needs: [],
-        routes: {},
-      },
-      detail: { ...detail, ticket: { ...detail.ticket, lightsOut } },
-      trusted: { roleInstructions: '', contextIndex: '' },
-      directory: f.home,
-      diff: '',
-      home: f.home,
-    })
-    assert.equal(prompt.includes('Lights-out is on.'), lightsOut)
-    assert.match(prompt, /"kind":"decision".*"chose".*"alternative".*"reason"/)
-    if (lightsOut) {
-      assert.match(prompt, /Do not stop to ask/)
-      assert.match(prompt, /Only irreversible actions wait/)
-      assert.match(prompt, /merge gate and ownerReview rules still apply/)
-    }
-  }
 })

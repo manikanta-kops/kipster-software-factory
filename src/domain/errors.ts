@@ -20,3 +20,16 @@ export class AttemptMovedOn extends FactoryError {
     super('conflict', message)
   }
 }
+
+/** An uploaded workflow that unfinished tickets or tasks still need. */
+export class WorkflowInUse extends FactoryError {
+  readonly tickets: readonly number[]
+
+  constructor(name: string, tickets: readonly number[]) {
+    super(
+      'conflict',
+      `"${name}" is used by unfinished tickets ${tickets.map((n) => `#${n}`).join(', ')}; finish or cancel them first`,
+    )
+    this.tickets = tickets
+  }
+}

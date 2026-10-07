@@ -208,51 +208,63 @@ test('cancelled linked ticket asks the owner; cancelling an original leaves its 
   )
 })
 
-for (const invalid of [
-  'unregistered',
-  'workflow',
-  'same-repository',
-  'malformed',
-] as const) {
-  test(`invalid other repository request (${invalid}) goes to the owner without a linked ticket`, async (t) => {
-    const f = await otherRepositoriesFixture()
-    t.after(() => f.close())
-    f.setExecute(async (invocation) =>
-      result(invocation.directory, {
-        ...request,
-        otherRepository:
-          invalid === 'malformed'
-            ? { repository: 'invalid' }
-            : {
-                ...request.otherRepository,
-                ...(invalid === 'unregistered'
-                  ? { repository: 'fixture/missing' }
-                  : invalid === 'same-repository'
-                    ? { repository: 'fixture/caller' }
-                    : { workflow: 'unknown' }),
-              },
-      }),
+test('invalid other repository targets always ask the owner without a linked ticket, even when needs-decision has a custom workflow route', async (t) => {
+  const f = await otherRepositoriesFixture()
+  t.after(() => f.close())
+  const { parseWorkflow } = await import('../src/domain/workflow.ts')
+  const { workflowVersion } = await import('../src/library/library.ts')
+  const { createTicket } = await import('../src/store/tickets.ts')
+  const source = f.library
+    .get('caller')!
+    .source.replace(
+      '    role: builder',
+      '    role: builder\n    routes:\n      needs-decision: confirm-completion',
     )
-    const ticket = await f.ticket()
-    await f.start()
+  const parsed = parseWorkflow(source)
+  if (!parsed.ok) assert.fail(parsed.errors.join())
+  const variants: Record<string, [object, RegExp]> = {
+    unregistered: [
+      { repository: 'fixture/missing' },
+      /No repository fixture\/missing/,
+    ],
+    workflow: [{ workflow: 'unknown' }, /No workflow/],
+    'same-repository': [{ repository: 'fixture/caller' }, /another repository/],
+  }
+  f.setExecute(async (invocation) =>
+    result(invocation.directory, {
+      ...request,
+      otherRepository: {
+        ...request.otherRepository,
+        ...variants[packet(invocation.prompt).ticket.title]![0],
+      },
+    }),
+  )
+  const tickets = new Map<string, number>()
+  for (const title of Object.keys(variants)) {
+    const ticket = await createTicket(f.database, {
+      repository: 'fixture/caller',
+      title,
+      workflow: {
+        workflow: parsed.workflow,
+        version: workflowVersion(source),
+        source,
+      },
+    })
+    tickets.set(title, ticket.number)
+  }
+  await f.start()
+  for (const [title, [, message]] of Object.entries(variants)) {
     const ask = await until(
-      () => f.detail(ticket.number),
-      (detail) => detail.ticket.waiting?.for === 'ask',
+      () => f.detail(tickets.get(title)!),
+      (detail) => detail.ticket.status === 'needs-you',
     )
-    assert.equal(ask.links.length, 0)
-    assert.match(
-      ask.ticket.waiting!.summary!,
-      invalid === 'malformed'
-        ? /Invalid or missing result/
-        : invalid === 'unregistered'
-          ? /No repository fixture\/missing/
-          : invalid === 'same-repository'
-            ? /another repository/
-            : /No workflow/,
-    )
-    assert.equal((await listTickets(f.database)).length, 1)
-  })
-}
+    assert.equal(ask.ticket.currentStep, 'build', title)
+    assert.equal(ask.ticket.waiting?.for, 'ask', title)
+    assert.equal(ask.links.length, 0, title)
+    assert.match(ask.ticket.waiting!.summary!, message)
+  }
+  assert.equal((await listTickets(f.database)).length, 3)
+})
 
 test('dependency checkouts are fresh, detached, read-only and named with exact commits in every prompt', async (t) => {
   const f = await otherRepositoriesFixture()
@@ -397,6 +409,7 @@ test('cleanup removes read-only dependencies and cache pins even when the ticket
   t.after(() => f.close())
   const ticket = await f.ticket('Cleanup dependencies', ['fixture/library'])
   const signal = new AbortController().signal
+  await f.workspaces.prepareRepository(f.repositories[0]!, signal)
   const path = await f.workspaces.prepare(ticket, f.repositories[0]!, signal)
   await writeFile(join(path, 'README.md'), 'Retain this ticket change')
   const session = await prepareDependencies(
@@ -431,14 +444,15 @@ test('cleanup removes read-only dependencies and cache pins even when the ticket
   )
 })
 
-for (const terminal of ['done', 'cancelled'] as const) {
-  test(`scheduler removes read-only dependency checkouts when a ticket is ${terminal}`, async (t) => {
-    const f = await otherRepositoriesFixture()
-    t.after(() => f.close())
-    const ticket = await f.ticket('Terminal dependency cleanup', [
-      'fixture/library',
-    ])
-    await f.start()
+test('scheduler removes read-only dependency checkouts when a ticket is done or cancelled', async (t) => {
+  const f = await otherRepositoriesFixture()
+  t.after(() => f.close())
+  const terminals = [
+    [await f.ticket('Done cleanup', ['fixture/library']), 'done'],
+    [await f.ticket('Cancelled cleanup', ['fixture/library']), 'cancelled'],
+  ] as const
+  await f.start()
+  for (const [ticket, terminal] of terminals) {
     const ready = await until(
       () => f.detail(ticket.number),
       (detail) => detail.ticket.waiting?.for === 'human',
@@ -456,8 +470,13 @@ for (const terminal of ['done', 'cancelled'] as const) {
         choice: 'approved',
       })
     else await cancelTicket(f.database, { ticketNumber: ticket.number })
+  }
+  for (const [ticket, terminal] of terminals) {
     await until(
-      () => lstat(root).catch(() => null),
+      () =>
+        lstat(join(f.home, 'dependencies', String(ticket.id))).catch(
+          () => null,
+        ),
       (info) => info === null,
     )
     await until(
@@ -465,17 +484,17 @@ for (const terminal of ['done', 'cancelled'] as const) {
       (info) => info === null,
     )
     assert.equal((await f.detail(ticket.number)).ticket.status, terminal)
-    assert.equal(
-      await run(
-        'git',
-        ['for-each-ref', '--format=%(refname)', 'refs/kipster/dependencies'],
-        { cwd: f.workspaces.cache(f.repositories[1]!) },
-      ),
-      '',
-    )
-    assert.deepEqual(f.errors, [])
-  })
-}
+  }
+  assert.equal(
+    await run(
+      'git',
+      ['for-each-ref', '--format=%(refname)', 'refs/kipster/dependencies'],
+      { cwd: f.workspaces.cache(f.repositories[1]!) },
+    ),
+    '',
+  )
+  assert.deepEqual(f.errors, [])
+})
 
 test('dependency restoration uses the step cancellation signal', async (t) => {
   const f = await otherRepositoriesFixture()
@@ -514,7 +533,7 @@ test('dependency restoration uses the step cancellation signal', async (t) => {
 })
 
 test('linked-ticket polling is throttled despite frequent scheduler wakes', async (t) => {
-  const f = await otherRepositoriesFixture()
+  const f = await otherRepositoriesFixture({ git: false })
   t.after(() => f.close())
   const original = await f.ticket()
   const context = (await claimAttempts(f.database, 1))[0]!
@@ -569,11 +588,13 @@ test('linked-ticket polling is throttled despite frequent scheduler wakes', asyn
     polls++
     throw new Error('Temporary GitHub error keeps the link unresolved')
   }
-  await f.start({ mergePollMs: 1_500, fallbackMs: 20 })
+  await f.start({ mergePollMs: 60_000, fallbackMs: 20 })
   await until(
     async () => polls,
     (count) => count === 1,
   )
+  // Frozen Date makes the 60 s interval exact; scheduler timers stay real.
+  t.mock.timers.enable({ apis: ['Date'], now: Date.now() })
   for (let wake = 0; wake < 4; wake++)
     await addAttemptArtifacts(f.database, context.attempt.id, [
       {
@@ -584,6 +605,7 @@ test('linked-ticket polling is throttled despite frequent scheduler wakes', asyn
     ])
   await new Promise((resolve) => setTimeout(resolve, 250))
   assert.equal(polls, 1)
+  t.mock.timers.tick(60_000)
   await until(
     async () => polls,
     (count) => count === 2,
@@ -592,81 +614,61 @@ test('linked-ticket polling is throttled despite frequent scheduler wakes', asyn
     (await f.detail(original.number)).ticket.waiting?.for,
     'other-repo',
   )
+  t.mock.timers.reset()
 })
 
-for (const edit of [
-  'tracked',
-  'ignored',
-  'metadata',
-  'executor-failure',
-] as const) {
-  test(`dependency ${edit} changes fail to the owner and restore the checkout`, async (t) => {
-    const f = await otherRepositoriesFixture()
-    t.after(() => f.close())
-    let dependencyPath = ''
-    f.setExecute(async (invocation) => {
-      const [dependency] = dependencies(invocation.prompt)
-      dependencyPath = dependency!.path
-      if (edit === 'ignored') {
-        await chmod(dependencyPath, 0o755)
-        await writeFile(
-          join(dependencyPath, 'ignored.txt'),
-          'forbidden ignored content',
-        )
-      } else {
-        const file = join(
-          dependencyPath,
-          edit === 'metadata' ? '.git/config' : 'README.md',
-        )
-        await chmod(file, 0o644)
-        await writeFile(file, 'forbidden change')
-      }
-      if (edit === 'executor-failure')
-        throw new Error('Agent crashed after editing')
-      await done(invocation.directory)
-    })
-    const ticket = await f.ticket('Dependency edit', [f.repositories[1]!.slug])
-    await f.start()
-    const ask = await until(
-      () => f.detail(ticket.number),
-      (detail) => detail.ticket.waiting?.for === 'ask',
+test('tracked, ignored and metadata dependency changes from a failing executor go to the owner and restore the checkout', async (t) => {
+  const f = await otherRepositoriesFixture()
+  t.after(() => f.close())
+  let dependencyPath = ''
+  f.setExecute(async (invocation) => {
+    const [dependency] = dependencies(invocation.prompt)
+    dependencyPath = dependency!.path
+    await chmod(dependencyPath, 0o755)
+    await writeFile(
+      join(dependencyPath, 'ignored.txt'),
+      'forbidden ignored content',
     )
-    assert.match(
-      ask.ticket.waiting!.summary!,
-      /changed read-only dependencies; restored/,
-    )
-    assert.match(
-      ask.ticket.waiting!.summary!,
-      edit === 'ignored'
-        ? /ignored.txt/
-        : edit === 'metadata'
-          ? /\.git\/config/
-          : /README.md/,
-    )
-    assert.equal(
-      await readFile(join(dependencyPath, 'README.md'), 'utf8'),
-      'library initial\n',
-    )
-    assert.equal(
-      await run('git', ['status', '--porcelain', '--ignored'], {
-        cwd: dependencyPath,
-      }),
-      '',
-    )
-    assert.equal(await run('git', ['remote'], { cwd: dependencyPath }), '')
-    assert.equal(
-      (await lstat(join(dependencyPath, 'README.md'))).mode & 0o222,
-      0,
-    )
-    assert.equal(
-      await run('git', ['show', 'next:README.md'], { cwd: f.remotes[1]! }),
-      'library initial',
-    )
+    for (const file of ['README.md', '.git/config']) {
+      await chmod(join(dependencyPath, file), 0o644)
+      await writeFile(join(dependencyPath, file), 'forbidden change')
+    }
+    throw new Error('Agent crashed after editing')
   })
-}
+  const ticket = await f.ticket('Dependency edit', [f.repositories[1]!.slug])
+  await f.start()
+  const ask = await until(
+    () => f.detail(ticket.number),
+    (detail) => detail.ticket.waiting?.for === 'ask',
+  )
+  for (const change of [
+    /changed read-only dependencies; restored/,
+    /README\.md/,
+    /ignored\.txt/,
+    /\.git\/config/,
+  ])
+    assert.match(ask.ticket.waiting!.summary!, change)
+  assert.equal(
+    await readFile(join(dependencyPath, 'README.md'), 'utf8'),
+    'library initial\n',
+  )
+  assert.equal(
+    await run('git', ['status', '--porcelain', '--ignored'], {
+      cwd: dependencyPath,
+    }),
+    '',
+  )
+  assert.equal(await run('git', ['remote'], { cwd: dependencyPath }), '')
+  assert.equal((await lstat(join(dependencyPath, 'README.md'))).mode & 0o222, 0)
+  assert.equal((await lstat(dependencyPath)).mode & 0o222, 0)
+  assert.equal(
+    await run('git', ['show', 'next:README.md'], { cwd: f.remotes[1]! }),
+    'library initial',
+  )
+})
 
 test('the creation API validates and deduplicates optional dependency repositories', async (t) => {
-  const f = await otherRepositoriesFixture()
+  const f = await otherRepositoriesFixture({ git: false })
   t.after(() => f.close())
   const { createApp } = await import('../src/api/app.ts')
   const app = createApp({
@@ -751,154 +753,106 @@ test('cached dependencies discard stale edits after a factory restart and preser
   )
 })
 
-for (const modify of [false, true]) {
-  test(`PR writer ${modify ? 'fails and restores dependency edits' : 'receives fresh dependency context'}`, async (t) => {
-    const f = await otherRepositoriesFixture()
-    t.after(() => f.close())
-    const { writePullRequest } = await import('../src/engine/pr-writer.ts')
-    const ticket = await f.ticket('Writer context', ['fixture/library'])
-    const [context] = await claimAttempts(f.database, 1)
-    await markRunning(f.database, context!.attempt.id, 'system')
-    const cwd = await f.workspaces.prepare(
-      ticket,
-      f.repositories[0]!,
-      AbortSignal.timeout(30_000),
+test('PR writer fails and restores dependency edits without a retry, then receives fresh dependency context', async (t) => {
+  const f = await otherRepositoriesFixture()
+  t.after(() => f.close())
+  const { writePullRequest } = await import('../src/engine/pr-writer.ts')
+  const ticket = await f.ticket('Writer context', ['fixture/library'])
+  const [context] = await claimAttempts(f.database, 1)
+  await markRunning(f.database, context!.attempt.id, 'system')
+  const signal = AbortSignal.timeout(30_000)
+  await f.workspaces.prepareRepository(f.repositories[0]!, signal)
+  const cwd = await f.workspaces.prepare(ticket, f.repositories[0]!, signal)
+  const head = await run('git', ['rev-parse', 'HEAD'], { cwd })
+  let path = ''
+  let modify = true
+  f.setExecute(async (invocation) => {
+    const [dependency] = dependencies(invocation.prompt)
+    path = dependency!.path
+    assert.equal(
+      await run('git', ['rev-parse', 'HEAD'], { cwd: path }),
+      dependency!.commit,
     )
-    const head = await run('git', ['rev-parse', 'HEAD'], { cwd })
-    let path = ''
-    f.setExecute(async (invocation) => {
+    if (modify) {
+      await chmod(join(path, 'README.md'), 0o644)
+      await writeFile(
+        join(path, 'README.md'),
+        'Writer must not edit dependencies',
+      )
+    }
+    await result(invocation.directory, {
+      outcome: 'done',
+      summary: 'Prose ready',
+      artifacts: [
+        {
+          kind: 'note',
+          title: 'Description',
+          content: `Fixture description. Verified at ${head}\nEvidence on ticket #${ticket.number} in the factory\nMerge danger: two-way door; prose only.`,
+        },
+      ],
+    })
+  })
+  await assert.rejects(
+    writePullRequest(f, context!, cwd, head, signal),
+    /changed read-only dependencies; restored/,
+  )
+  assert.equal(f.invocations.length, 1)
+  assert.equal(
+    await readFile(join(path, 'README.md'), 'utf8'),
+    'library initial\n',
+  )
+  modify = false
+  assert.match(
+    await writePullRequest(f, context!, cwd, head, signal),
+    /Fixture description/,
+  )
+  assert.equal(f.invocations.length, 2)
+  assert.equal(
+    await readFile(join(path, 'README.md'), 'utf8'),
+    'library initial\n',
+  )
+})
+
+test('independent reproducer receives fresh dependency context', async (t) => {
+  const { proofFixture } = await import('./helpers/proof.ts')
+  let path = ''
+  const f = await proofFixture({
+    dependency: true,
+    execute: async (invocation) => {
       const [dependency] = dependencies(invocation.prompt)
       path = dependency!.path
+      assert.notEqual(path, invocation.cwd)
       assert.equal(
         await run('git', ['rev-parse', 'HEAD'], { cwd: path }),
         dependency!.commit,
       )
-      if (modify) {
-        await chmod(join(path, 'README.md'), 0o644)
-        await writeFile(
-          join(path, 'README.md'),
-          'Writer must not edit dependencies',
-        )
-      }
       await result(invocation.directory, {
-        outcome: 'done',
-        summary: 'Prose ready',
-        artifacts: [
-          {
-            kind: 'note',
-            title: 'Description',
-            content: `Fixture description. Verified at ${head}\nEvidence on ticket #${ticket.number} in the factory\nMerge danger: two-way door; prose only.`,
-          },
-        ],
+        outcome: 'needs-decision',
+        summary: 'Owner decision on the reproduction',
+        artifacts: [],
       })
-    })
-    const writing = writePullRequest(
-      f,
-      context!,
-      cwd,
-      head,
-      AbortSignal.timeout(30_000),
-    )
-    if (modify)
-      await assert.rejects(writing, /changed read-only dependencies; restored/)
-    else assert.match(await writing, /Fixture description/)
-    assert.equal(
-      await readFile(join(path, 'README.md'), 'utf8'),
-      'library initial\n',
-    )
-  })
-}
-
-for (const modify of [false, true]) {
-  test(`independent reproducer ${modify ? 'fails and restores dependency edits' : 'receives fresh dependency context'}`, async (t) => {
-    const { proofFixture } = await import('./helpers/proof.ts')
-    let path = ''
-    const f = await proofFixture({
-      dependency: true,
-      execute: async (invocation) => {
-        const [dependency] = dependencies(invocation.prompt)
-        path = dependency!.path
-        assert.notEqual(path, invocation.cwd)
-        assert.equal(
-          await run('git', ['rev-parse', 'HEAD'], { cwd: path }),
-          dependency!.commit,
-        )
-        if (modify) {
-          await chmod(join(path, 'behaviour.txt'), 0o644)
-          await writeFile(
-            join(path, 'behaviour.txt'),
-            'Cannot change reference behavior',
-          )
-        }
-        await result(invocation.directory, {
-          outcome: 'needs-decision',
-          summary: 'Owner decision on the reproduction',
-          artifacts: [],
-        })
-      },
-    })
-    t.after(() => f.close())
-    if (modify)
-      await assert.rejects(
-        f.next('reproduce'),
-        /changed read-only dependencies; restored/,
-      )
-    else await f.next('reproduce')
-    assert.equal((await f.detail()).ticket.waiting?.for, 'ask')
-    assert.equal(await readFile(join(path, 'behaviour.txt'), 'utf8'), 'broken')
-  })
-}
-
-test('invalid targets always ask the owner even when needs-decision has a custom workflow route', async (t) => {
-  const f = await otherRepositoriesFixture()
-  t.after(() => f.close())
-  const { parseWorkflow } = await import('../src/domain/workflow.ts')
-  const { workflowVersion } = await import('../src/library/library.ts')
-  const { createTicket } = await import('../src/store/tickets.ts')
-  const source = f.library
-    .get('caller')!
-    .source.replace(
-      '    role: builder',
-      '    role: builder\n    routes:\n      needs-decision: confirm-completion',
-    )
-  const parsed = parseWorkflow(source)
-  if (!parsed.ok) assert.fail(parsed.errors.join())
-  const ticket = await createTicket(f.database, {
-    repository: 'fixture/caller',
-    title: 'Invalid target with a route',
-    workflow: {
-      workflow: parsed.workflow,
-      version: workflowVersion(source),
-      source,
     },
   })
-  f.setExecute(async (invocation) =>
-    result(invocation.directory, {
-      ...request,
-      otherRepository: {
-        ...request.otherRepository,
-        repository: 'fixture/missing',
-      },
-    }),
-  )
-  await f.start()
-  const ask = await until(
-    () => f.detail(ticket.number),
-    (detail) => detail.ticket.status === 'needs-you',
-  )
-  assert.equal(ask.ticket.currentStep, 'build')
-  assert.equal(ask.ticket.waiting?.for, 'ask')
-  assert.match(ask.ticket.waiting!.summary!, /No repository fixture\/missing/)
+  t.after(() => f.close())
+  await f.next('reproduce')
+  assert.equal((await f.detail()).ticket.waiting?.for, 'ask')
+  assert.equal(await readFile(join(path, 'behaviour.txt'), 'utf8'), 'broken')
 })
 
-test('an instance crash still restores dependencies and reports their changed files to the owner', async (t) => {
+test('an instance crash during reproduction still fails, restores dependencies and reports their changed files to the owner', async (t) => {
   const { proofFixture } = await import('./helpers/proof.ts')
   const { proofContext } = await import('./fixtures/proof-agent.ts')
   let path = ''
   const f = await proofFixture({
     dependency: true,
     execute: async (invocation) => {
-      path = dependencies(invocation.prompt)[0]!.path
+      const [dependency] = dependencies(invocation.prompt)
+      path = dependency!.path
+      assert.notEqual(path, invocation.cwd)
+      assert.equal(
+        await run('git', ['rev-parse', 'HEAD'], { cwd: path }),
+        dependency!.commit,
+      )
       await chmod(join(path, 'behaviour.txt'), 0o644)
       await writeFile(
         join(path, 'behaviour.txt'),

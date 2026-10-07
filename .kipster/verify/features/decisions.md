@@ -15,9 +15,9 @@ Choose Decisions in the header. Pending choices, when available, link to their t
 Use the APP_URL and EVIDENCE_DIR environment from [the guide](../README.md).
 Every command asserts the results and saves a screenshot, trace and JSON observation.
 
-| User action                                         | Exact command                              | Observable result                                                                          |
-| --------------------------------------------------- | ------------------------------------------ | ------------------------------------------------------------------------------------------ |
-| Open the decision ledger without an integration key | `node .kipster/verify/drive.mjs decisions` | Decisions loads with No pending decisions in the latest 100 outcomes and No decisions yet. |
+| User action                                         | Exact command                              | Observable result                                                                                  |
+| --------------------------------------------------- | ------------------------------------------ | -------------------------------------------------------------------------------------------------- |
+| Open the decision ledger without an integration key | `node .kipster/verify/drive.mjs decisions` | Decisions loads with No decisions yet. They appear here when a step decides how a ticket moves on. |
 
 ## Gotchas
 
