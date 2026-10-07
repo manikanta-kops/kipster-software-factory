@@ -9,9 +9,15 @@ import { fileURLToPath } from 'node:url'
 import { promisify } from 'node:util'
 import { after, before, describe, test } from 'node:test'
 import { seedDemo } from '../scripts/demo-data.ts'
-import { untestedReasons } from '../src/domain/task-testing.ts'
+import {
+  checkerVerdict,
+  uncheckedItems,
+  untestedReasons,
+} from '../src/domain/task-testing.ts'
+import { mergedTaskResult } from '../src/engine/tasks.ts'
 import {
   createRepository,
+  getRepository,
   listRepositories,
 } from '../src/store/repositories.ts'
 import { getMergeGate } from '../src/store/merge-gates.ts'
@@ -47,6 +53,7 @@ describe('demo data', () => {
       repositories.map((repository) => [repository.slug, repository.status]),
       [
         ['kipster/demo-shop', 'ready'],
+        ['kipster/docs-site', 'ready'],
         ['kipster/invalid-kit', 'ready'],
         ['kipster/legacy-api', 'failed'],
         ['kipster/website', 'pending'],
@@ -65,6 +72,10 @@ describe('demo data', () => {
       [tickets.done, 'done', null],
       [tickets.bundleFailed, 'queued', null],
       [tickets.bundlePending, 'needs-you', 'pull-request-merge'],
+      [tickets.checkedWithoutVerifyLead, 'needs-you', 'pull-request-merge'],
+      [tickets.checkedWithVerifyLead, 'needs-you', 'pull-request-merge'],
+      [tickets.checkedWithoutVerifyChild, 'done', null],
+      [tickets.checkedWithVerifyChild, 'done', null],
       [tickets.cancelled, 'cancelled', null],
     ] as const
     for (const [number, status, waitingFor] of expected) {
@@ -72,7 +83,7 @@ describe('demo data', () => {
       assert.equal(ticket.status, status, `#${number}`)
       assert.equal(ticket.waiting?.for ?? null, waitingFor, `#${number}`)
     }
-    assert.equal((await listTickets(demo.database)).length, 18)
+    assert.equal((await listTickets(demo.database)).length, 22)
   })
 
   test('retired quick-change keeps its stored workflow and completed plan', async () => {
@@ -193,7 +204,132 @@ describe('demo data', () => {
       'Unverified by test: Read the export docs',
     ])
     assert.equal(lead.tasks[1]?.status, 'merged')
-    assert.match(lead.tasks[1]?.result ?? '', /Unverified by test/)
+    assert.equal(
+      lead.tasks[1]?.result,
+      mergedTaskResult('f'.repeat(40), checkerVerdict(untested)),
+    )
+    assert.equal(
+      lead.tasks[1]?.result,
+      `Merged into the lead branch at ${'f'.repeat(40)}. Checker test passed with unverified items. Unverified by test: Read the export docs.`,
+    )
+  })
+
+  const steps = (
+    attempts: readonly { stepId: string; outcome: string | null }[],
+  ) => attempts.map((attempt) => [attempt.stepId, attempt.outcome])
+
+  async function checkedTicket(leadNumber: number, childNumber: number) {
+    const lead = await detail(leadNumber)
+    const child = await detail(childNumber)
+    const library = await builtInLibrary()
+    assert.equal(lead.ticket.lightsOut, true)
+    assert.equal(child.ticket.lightsOut, true)
+    assert.deepEqual(lead.workflow, library.get('lead')?.workflow)
+    assert.deepEqual(child.workflow, library.get('task')?.workflow)
+    assert.equal(child.parentTask?.parent.number, leadNumber)
+    assert.equal(lead.tasks[0]?.child?.number, childNumber)
+    assert.equal(lead.tasks[0]?.status, 'merged')
+    // The tester ran from real routing: nothing was skipped.
+    assert.deepEqual(child.ticket.skippedSteps, [])
+    assert.equal(child.ticket.status, 'done')
+    assert.deepEqual(steps(child.attempts), [
+      ['build', 'done'],
+      ['test', 'passed'],
+    ])
+    // The lead's done routed into its final check.
+    assert.deepEqual(steps(lead.attempts).slice(-6), [
+      ['run-tasks', 'reported'],
+      ['lead', 'done'],
+      ['final-test', 'passed'],
+      ['review', 'passed'],
+      ['maintain-pr', 'ready'],
+      ['merge', null],
+    ])
+    assert.equal(lead.ticket.waiting?.for, 'pull-request-merge')
+    return { lead, child }
+  }
+
+  test('a task in a repository without verify is still checked, and so is the final change', async () => {
+    const { lead, child } = await checkedTicket(
+      demo.tickets.checkedWithoutVerifyLead,
+      demo.tickets.checkedWithoutVerifyChild,
+    )
+    const repository = await getRepository(demo.database, 'kipster/docs-site')
+    assert.equal(repository?.kit.status, 'valid')
+    assert.equal(repository?.kit.capabilities.includes('verify'), false)
+    assert.equal(child.ticket.repository.slug, 'kipster/docs-site')
+    const check = child.attempts.at(-1)!
+    assert.deepEqual(
+      uncheckedItems(child).map((artifact) => [
+        artifact.attemptId,
+        artifact.scenario,
+        artifact.scenarioResult,
+      ]),
+      [[check.id, 'Open the rate limit page in a browser', 'unverified']],
+    )
+    assert.equal(
+      lead.tasks[0]?.result,
+      mergedTaskResult('2'.repeat(40), checkerVerdict(child)),
+    )
+    assert.equal(
+      lead.tasks[0]?.result,
+      `Merged into the lead branch at ${'2'.repeat(40)}. Checker test passed at ${'1'.repeat(40)} with unverified items. Unverified by test: Open the rate limit page in a browser.`,
+    )
+    assert.deepEqual(untestedReasons(lead), [
+      'Unverified by final-test: Open the rate limit page in a browser',
+    ])
+  })
+
+  test('a task in a repository with verify is checked as before', async () => {
+    const { lead, child } = await checkedTicket(
+      demo.tickets.checkedWithVerifyLead,
+      demo.tickets.checkedWithVerifyChild,
+    )
+    assert.equal(child.ticket.repository.slug, 'kipster/demo-shop')
+    const repository = await getRepository(demo.database, 'kipster/demo-shop')
+    assert.ok(repository?.kit.capabilities.includes('verify'))
+    assert.deepEqual(uncheckedItems(child), [])
+    assert.deepEqual(
+      child.artifacts.map((artifact) => artifact.scenarioResult),
+      ['passed'],
+    )
+    assert.equal(
+      lead.tasks[0]?.result,
+      mergedTaskResult('4'.repeat(40), checkerVerdict(child)),
+    )
+    assert.equal(
+      lead.tasks[0]?.result,
+      `Merged into the lead branch at ${'4'.repeat(40)}. Checker test passed at ${'3'.repeat(40)}.`,
+    )
+    assert.deepEqual(untestedReasons(lead), [])
+  })
+
+  test('the merge gate is untested only when the checker reported an unverified item', async () => {
+    const without = await detail(demo.tickets.checkedWithoutVerifyLead)
+    const withVerify = await detail(demo.tickets.checkedWithVerifyLead)
+    const untested = (await getMergeGate(demo.database, without.ticket.id))!
+      .latest
+    const checked = (await getMergeGate(demo.database, withVerify.ticket.id))!
+      .latest
+    const reason =
+      'Unverified by final-test: Open the rate limit page in a browser'
+    assert.deepEqual(untested.facts.untestedReasons, untestedReasons(without))
+    assert.deepEqual(untested.facts.untestedReasons, [reason])
+    assert.deepEqual(untested.needsOwner, [reason])
+    assert.deepEqual(untested.blockers, [])
+    assert.equal(untested.ready, true)
+    assert.deepEqual(checked.facts.untestedReasons, [])
+    assert.deepEqual(checked.needsOwner, [])
+    assert.deepEqual(checked.blockers, [])
+    assert.equal(checked.ready, true)
+    const sameInputs = (facts: typeof checked.facts) =>
+      JSON.parse(
+        JSON.stringify({ ...facts, untestedReasons: [] }).replaceAll(
+          facts.head,
+          'head',
+        ),
+      )
+    assert.deepEqual(sameInputs(untested.facts), sameInputs(checked.facts))
   })
 
   test('the plan waiting for approval is a markdown artifact', async () => {

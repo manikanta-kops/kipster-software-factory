@@ -355,8 +355,16 @@ async function integrate(
     merged.conflicts ? 'conflict' : 'merged',
     merged.conflicts
       ? `Conflicts with the lead branch; the system aborted the merge. Files: ${merged.conflicts.join(', ')}. Branch ${branch} keeps the work.`
-      : `Merged into the lead branch at ${merged.head}. ${await taskVerdict(options, task.child!.number)}`,
+      : mergedTaskResult(
+          merged.head,
+          await taskVerdict(options, task.child!.number),
+        ),
   )
+}
+
+/** A branch task's result once the system merged it into the lead's branch. */
+export function mergedTaskResult(head: string, verdict: string): string {
+  return `Merged into the lead branch at ${head}. ${verdict}`
 }
 
 async function taskVerdict(options: RunnerOptions, number: number) {

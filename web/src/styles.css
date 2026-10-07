@@ -1499,6 +1499,10 @@ button.more-toggle:hover {
   background: var(--red-wash);
   color: var(--red-ink);
 }
+.result-pill.unverified {
+  background: var(--amber-wash);
+  color: var(--amber);
+}
 button.small {
   min-height: 26px;
   padding: 0 10px;

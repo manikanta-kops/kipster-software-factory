@@ -551,6 +551,15 @@ pending and reported ready. Their merge gates come from `evaluateMergeGate` over
 the inspected checks. The served instance never calls GitHub, and the merge
 readiness card labels each check required or not required.
 
+Two lights-out leads show every task being checked. One is in `kipster/docs-site`,
+whose valid kit has no verify block; the other is in demo-shop. Their state comes
+from the real lifecycle: `claimAttempts` routes each task's build to its `test`
+and each lead's `done` to `final-test`. Each task's result is
+`mergedTaskResult` over `checkerVerdict` of the stored child, the same text
+`integrate` writes. Each lead's merge gate is `evaluateMergeGate` over identical
+facts plus `untestedReasons` of the stored lead, so only the docs-site gate lists
+the checker's unverified item. The agent results are synthetic.
+
 ## Independent proof (Slice 2B)
 
 Tester and reproducer steps use `engine/proof.ts`, separate from ordinary agent

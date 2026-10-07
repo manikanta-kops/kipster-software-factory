@@ -26,7 +26,7 @@ test('home separates attention, progress and finished tickets', async ({
       .locator('.today-summary')
       .filter({ hasText: 'Add a dark mode toggle' }),
   ).toContainText('Ready')
-  await page.getByText('Show finished (3)').click()
+  await page.getByText('Show finished (5)').click()
   await expect(
     page.locator('.finished-list').getByText('Add a dark mode toggle'),
   ).toBeVisible()

@@ -70,7 +70,8 @@ and 1280 px in light and dark themes and checks for horizontal page overflow.
 Screenshots are attached to Playwright test results.
 
 A ticket whose latest tester reported unverified items shows each as an
-**Unverified by** badge near its status. Tickets whose tester was skipped before
+**Unverified by** badge near its status. Scenario evidence counts them as
+unverified, separately from passed and failed scenarios. Tickets whose tester was skipped before
 every task was checked still show **Untested** with the missing capability and
 skipped step.
 

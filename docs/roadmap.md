@@ -150,8 +150,11 @@ Every task and the lead's final change are now always checked, replacing that
 skip. Testers in `task`, `task-pr` and `lead` no longer need `verify`: without a
 working kit app the tester checks the change in a disposable checkout. Untested
 now means the tester reported unverified items; the task report carries each
-checker's verdict. Live runs with real agents on a repository without `verify`
-remain unverified.
+checker's verdict. The verification demo seeds a checked lead and task with and
+without `verify` through the real routing, task result and merge gate code;
+`drive.mjs checked-without-verify`, `checked-with-verify` and `untested-gate`
+assert them in the browser. Live runs with real agents on a repository without
+`verify` remain unverified.
 
 ## Slice 6: The factory builds itself
 

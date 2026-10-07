@@ -183,7 +183,11 @@ different home. The demo includes valid/invalid kits and current/stale lead
 verdicts with recorded commits. Override with `npm run dev -- --home <directory>`.
 It also includes **Overnight report export (synthetic demo)**, a lights-out lead
 with a Decision log, a parked child with a recorded choice and a merged
-child whose checker left an item unverified. **Historical quick-change ticket** retains a completed plan from
+child whose checker left an item unverified. **Document the API rate limits
+(checked without verify)** and **Show stock levels on product pages (checked
+with verify)** are lights-out leads whose task ran build then test and whose
+final test ran; the first, in `kipster/docs-site` without a verify block, shows
+the unverified item in its task result and merge gate. **Historical quick-change ticket** retains a completed plan from
 the retired workflow and waits for plan approval. These are
 synthetic choices for UI inspection; no agents or real verification ran.
 
