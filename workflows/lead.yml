@@ -20,8 +20,8 @@ steps:
     action: run-tasks
     with:
       maxParallel: 3
-      maxTasks: 12
-    limit: 25
+      maxTasks: 20
+    limit: 50
     routes:
       reported: lead
 
@@ -37,9 +37,10 @@ steps:
   - id: review
     kind: agent
     role: reviewer
-    limit: 2
+    limit: 5
     routes:
       changes-needed: lead
+      limit: maintain-pr
 
   - id: maintain-pr
     kind: system

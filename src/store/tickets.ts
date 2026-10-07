@@ -1,7 +1,15 @@
+import { proposeLessons } from '../domain/lessons.ts'
+import { insertLessonProposals, listLessons } from './lessons.ts'
+import { summarizeTicket, type TicketSummary } from '../domain/summary.ts'
+import { getMergeGate } from './gate-records.ts'
 import {
   withPreparedArtifacts,
   type PreparedArtifact,
 } from './artifact-preparation.ts'
+import {
+  withoutSkippedSteps,
+  type SkippedStep,
+} from '../domain/task-testing.ts'
 import { listTicketLinks, listDependencies } from './ticket-links.ts'
 import { getTaskOfChild, listTasks, taskEvent } from './task-records.ts'
 import { type AgentChoice, runTasksParams } from '../domain/catalog.ts'
@@ -15,6 +23,7 @@ import {
   afterLinkedTicket,
   waitForOtherRepository,
   afterCancel,
+  autoApprovePlan,
   afterDecision,
   type StepResult,
   afterTypedDecision,
@@ -37,6 +46,7 @@ import {
   type Transition,
   waitForMerge,
 } from '../domain/lifecycle.ts'
+import { defaultLightsOut } from '../domain/records.ts'
 import type {
   Artifact,
   ArtifactKind,
@@ -66,6 +76,7 @@ import { listEvents, type NewEvent, recordEvents } from './events.ts'
 import { getRepository, getRepositoryById } from './repositories.ts'
 
 export interface NewTicket {
+  readonly lightsOut?: boolean
   /** The target repository's `owner/name`. */
   readonly repository: string
   /** The workflow version the ticket will keep for its whole life. */
@@ -175,7 +186,7 @@ export async function getTicketDetail(
   ])
   return {
     ticket,
-    workflow,
+    workflow: withoutSkippedSteps(workflow, ticket.skippedSteps ?? []),
     attempts,
     artifacts,
     events,
@@ -253,6 +264,7 @@ export async function createTicketInTransaction(
   connection: Connection,
   input: NewTicket,
   requireCapabilities = true,
+  isLeadTask = false,
 ): Promise<Ticket> {
   const { workflow, version, source } = input.workflow
   const title = input.title.trim()
@@ -271,7 +283,9 @@ export async function createTicketInTransaction(
       `${repository.slug} is ${repository.status}${repository.lastError ? ` (${repository.lastError})` : ''}; tickets can start once it is ready`,
     )
   }
-  if (requireCapabilities) checkCapabilities(workflow, repository)
+  const skippedSteps = requireCapabilities
+    ? checkCapabilities(workflow, repository, isLeadTask)
+    : []
   const dependencies: Repository[] = []
   for (const slug of input.dependencies ?? []) {
     const dependency = await getRepository(connection, slug)
@@ -299,12 +313,12 @@ export async function createTicketInTransaction(
     "SELECT nextval('ticket_numbers')::integer AS number",
   )
   const number = (rows[0] as { number: number }).number
-  const opening = startTicket(workflow)
+  const opening = startTicket(withoutSkippedSteps(workflow, skippedSteps))
   const status = ticketStatus({ status: opening.status, next: null })
   const inserted = await connection.query<{ id: number }>(
     `INSERT INTO tickets (number, repository_id, workflow_name, workflow_version,
-                            title, body, branch, current_step, status)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+                            title, body, branch, current_step, status, skipped_steps, lights_out)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
        RETURNING id`,
     [
       number,
@@ -316,6 +330,8 @@ export async function createTicketInTransaction(
       branchName(number, title),
       opening.stepId,
       status,
+      JSON.stringify(skippedSteps),
+      input.lightsOut ?? defaultLightsOut(workflow.name),
     ],
   )
   const ticketId = (inserted.rows[0] as { id: number }).id
@@ -338,6 +354,7 @@ export async function createTicketInTransaction(
     },
   ]
   await insertOpening(connection, ticketId, opening, events)
+  await refreshTicketSummary(connection, number, events)
   await recordEvents(connection, events)
   return (await getTicket(connection, number)) as Ticket
 }
@@ -989,7 +1006,13 @@ export async function cancelTicket(
     }
     const moved = await apply(connection, locked, transition, {}, events)
     await cancelTasks(connection, locked)
-    return moved
+    const summaryEvents: NewEvent[] = []
+    await refreshTicketSummary(connection, locked.number, summaryEvents)
+    await recordEvents(connection, summaryEvents)
+    return {
+      ...moved,
+      ticket: (await getTicket(connection, locked.number)) as Ticket,
+    }
   })
 }
 
@@ -1109,7 +1132,7 @@ async function cancelTasks(
     child_ticket_id: number | null
   }>(
     `SELECT id, key, child_ticket_id FROM tasks
-     WHERE ticket_id = $1 AND status IN ('pending', 'running', 'pr-ready')
+     WHERE ticket_id = $1 AND status IN ('pending', 'running', 'parked', 'pr-ready')
      ORDER BY id FOR UPDATE`,
     [lead.id],
   )
@@ -1164,8 +1187,9 @@ export async function lockTicket(
     number: number
     status: TicketStatus
     definition: Workflow
+    skipped_steps: SkippedStep[]
   }>(
-    `SELECT t.id, t.number, t.status, v.definition
+    `SELECT t.id, t.number, t.status, t.skipped_steps, v.definition
      FROM tickets t
      JOIN workflow_versions v
        ON v.name = t.workflow_name AND v.version = t.workflow_version
@@ -1184,7 +1208,7 @@ export async function lockTicket(
     id: row.id,
     number: row.number,
     status: row.status,
-    workflow: row.definition,
+    workflow: withoutSkippedSteps(row.definition, row.skipped_steps),
     attempts: await listAttempts(connection, row.id),
   }
 }
@@ -1277,6 +1301,34 @@ export async function apply(
     open === null
       ? null
       : await insertOpening(connection, locked.id, open, events)
+  if (
+    opened &&
+    autoApprovePlan(locked.workflow, closed, open) &&
+    (await getTicket(connection, locked.number))?.lightsOut
+  ) {
+    const summary = 'Plan auto-approved under lights-out.'
+    events.push({
+      ticketId: locked.id,
+      kind: 'decision.made',
+      data: {
+        attemptId: opened.id,
+        stepId: opened.stepId,
+        choice: 'approved',
+        autoApproved: true,
+        lightsOut: true,
+        summary,
+      },
+    })
+    const history = [...locked.attempts.slice(0, -1), closed, opened]
+    const approved = await apply(
+      connection,
+      { ...locked, attempts: history },
+      afterDecision(locked.workflow, history, { choice: 'approved' }),
+      { summary, executor: 'system' },
+      events,
+    )
+    return { ...approved, closed }
+  }
   await setTicketStatus(
     connection,
     locked,
@@ -1355,6 +1407,84 @@ export async function setTicketStatus(
       data: { from: locked.status, to: status },
     })
   }
+  await refreshTicketSummary(connection, locked.number, events)
+}
+
+/** Called only inside the lifecycle/gate transaction while holding the ticket lock. */
+export async function refreshTicketSummary(
+  connection: Connection,
+  number: number,
+  events: NewEvent[],
+): Promise<void> {
+  const ticket = await getTicket(connection, number)
+  if (!ticket || !['done', 'cancelled', 'needs-you'].includes(ticket.status))
+    return
+  const workflow = await loadWorkflow(
+    connection,
+    ticket.workflow.name,
+    ticket.workflow.version,
+  )
+  const attempts = await listAttempts(connection, ticket.id)
+  const artifacts = await listArtifacts(connection, ticket.id)
+  const tasks = await listTasks(connection, ticket.id)
+  const gate = await getMergeGate(connection, ticket.id)
+  const childErrors = await connection.query<{ id: number; error: string }>(
+    `SELECT a.id, a.error FROM attempts a JOIN tasks t ON t.child_ticket_id = a.ticket_id
+     WHERE t.ticket_id = $1 AND a.status = 'failed' AND a.error IS NOT NULL`,
+    [ticket.id],
+  )
+  await insertLessonProposals(
+    connection,
+    proposeLessons({
+      ticket,
+      workflow,
+      attempts,
+      artifacts,
+      existing: [
+        ...(await listLessons(connection, {
+          repositoryId: ticket.repository.id,
+        })),
+        ...(await listLessons(connection, { repositoryId: null })),
+      ],
+      failures: [
+        ...attempts
+          .filter((a) => a.status === 'failed' && a.error)
+          .map((a) => ({ id: a.id, error: a.error! })),
+        ...childErrors.rows,
+        ...tasks
+          .filter(
+            (task) =>
+              task.status === 'failed' &&
+              /^(?:Could not start:|Could not merge into the lead branch:)/.test(
+                task.result ?? '',
+              ),
+          )
+          .map((task) => ({ id: `task-${task.id}`, error: task.result! })),
+      ].map((a) => ({
+        key: String(a.id),
+        status: 'failed' as const,
+        result: a.error,
+      })),
+    }),
+    events,
+  )
+  const summary = summarizeTicket({
+    ticket,
+    workflow,
+    attempts,
+    artifacts,
+    tasks,
+    mergeGate: gate?.latest ?? null,
+  })
+  await connection.query(
+    'UPDATE tickets SET summary = $2, summary_at = now() WHERE id = $1',
+    [ticket.id, JSON.stringify(summary)],
+  )
+  events.push({
+    ticketId: ticket.id,
+    kind: 'ticket.summary',
+    data: { status: summary.status },
+  })
 }
 
 export async function insertArtifacts(
@@ -1367,24 +1497,34 @@ export async function insertArtifacts(
 ): Promise<void> {
   for (const artifact of artifacts) {
     const mediaType =
-      artifact.mediaType ??
+      (artifact.kind === 'decision' ? 'text/markdown' : artifact.mediaType) ??
       (artifact.content !== undefined
         ? 'text/markdown'
         : 'application/octet-stream')
     const { rows } = await connection.query<{ id: number }>(
-      `INSERT INTO artifacts (ticket_id, attempt_id, kind, title, content, path, media_type, scenario, scenario_result, observed_commit)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING id`,
+      `INSERT INTO artifacts (ticket_id, attempt_id, kind, title, content, path, media_type, scenario, scenario_result, observed_commit, decision, file)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12) RETURNING id`,
       [
         ticketId,
         attemptId,
         artifact.kind,
         artifact.title,
-        artifact.content ?? null,
+        artifact.kind === 'decision'
+          ? `Chose: ${artifact.chose}\n\nAlternative: ${artifact.alternative}\n\nReason: ${artifact.reason}`
+          : (artifact.content ?? null),
         artifact.path ?? null,
         mediaType,
         artifact.scenario ?? null,
         artifact.scenarioResult ?? null,
         observedCommit ?? null,
+        artifact.kind === 'decision'
+          ? JSON.stringify({
+              chose: artifact.chose,
+              alternative: artifact.alternative,
+              reason: artifact.reason,
+            })
+          : null,
+        artifact.file ?? null,
       ],
     )
     events.push({
@@ -1427,10 +1567,9 @@ async function loadContext(
     database,
     ticket.repository.id,
   )) as Repository
-  const workflow = await loadWorkflow(
-    database,
-    ticket.workflow.name,
-    ticket.workflow.version,
+  const workflow = withoutSkippedSteps(
+    await loadWorkflow(database, ticket.workflow.name, ticket.workflow.version),
+    ticket.skippedSteps ?? [],
   )
   return {
     attempt,
@@ -1457,6 +1596,10 @@ const TICKET_SELECT = `
   LEFT JOIN attempts w ON w.ticket_id = t.id AND w.status = 'waiting'`
 
 interface TicketRow {
+  summary: TicketSummary | null
+  summary_at: Date | null
+  skipped_steps: SkippedStep[]
+  lights_out: boolean
   id: number
   number: number
   repository_id: number
@@ -1481,6 +1624,10 @@ interface TicketRow {
 
 function toTicket(row: TicketRow): Ticket {
   return {
+    summary: row.summary,
+    summaryAt: iso(row.summary_at),
+    skippedSteps: row.skipped_steps,
+    lightsOut: row.lights_out,
     id: row.id,
     number: row.number,
     repository: { id: row.repository_id, slug: row.repository_slug },
@@ -1559,6 +1706,8 @@ const ARTIFACT_SELECT = `
   SELECT a.*, at.step_id FROM artifacts a JOIN attempts at ON at.id = a.attempt_id`
 
 interface ArtifactRow {
+  file: string | null
+  decision: Exclude<Artifact['decision'], undefined>
   observed_commit: string | null
   scenario_result: Exclude<Artifact['scenarioResult'], undefined>
   scenario: string | null
@@ -1578,6 +1727,8 @@ interface ArtifactRow {
 
 function toArtifact(row: ArtifactRow): Artifact {
   return {
+    ...(row.file ? { file: row.file } : {}),
+    decision: row.decision,
     mediaType: row.media_type,
     observedCommit: row.observed_commit,
     scenario: row.scenario,

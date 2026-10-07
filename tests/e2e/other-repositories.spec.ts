@@ -13,7 +13,7 @@ test('New ticket selects optional registered dependencies and shows them on the 
   await expect(
     page.getByRole('radio', { name: /large-feature|^phase / }),
   ).toHaveCount(0)
-  await page.getByRole('radio', { name: /^quick-change / }).check()
+  await page.getByRole('radio', { name: /^lead / }).check()
   await page
     .getByRole('group', { name: 'Read-only dependencies' })
     .getByRole('checkbox', { name: 'kipster/legacy-api' })

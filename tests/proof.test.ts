@@ -45,7 +45,7 @@ async function cleaned(f: Awaited<ReturnType<typeof proofFixture>>) {
 
 test('feature build → changes-needed → build → passed; isolated edits, evidence, approved scenarios and commit freshness', async (t) => {
   const f = await fixture(t, {
-    workflow: 'feature',
+    workflow: 'tested-change',
     script: {
       builder: [
         { commit: true, fixed: false },
@@ -166,7 +166,7 @@ async function resolveAskAfterReview(
 for (const rejection of ['unverified', 'title'] as const) {
   test(`a fresh proof retry receives ${rejection} validation failure and proves new instances`, async (t) => {
     const f = await fixture(t, {
-      workflow: 'feature',
+      workflow: 'tested-change',
       script: {
         builder: [{ commit: true, fixed: true }],
         tester: [{ proof: true }],
@@ -439,7 +439,7 @@ test('proof rejects prose-only success and retries with fresh instances', async 
 
 test('proof uses committed base instructions even when the ticket changes its kit and role', async (t) => {
   const f = await fixture(t, {
-    workflow: 'feature',
+    workflow: 'tested-change',
     script: {
       builder: [{ commit: true, fixed: true }],
       tester: [{ proof: true }],
@@ -496,7 +496,7 @@ test('base must still fail: an already-fixed base cannot produce a passing bug v
 
 test('the PR description includes the factory-pinned Verified at line', async (t) => {
   const f = await fixture(t, {
-    workflow: 'feature',
+    workflow: 'tested-change',
     script: {
       builder: [{ commit: true, fixed: true }],
       tester: [{ proof: true }],
@@ -529,7 +529,7 @@ test('the PR description includes the factory-pinned Verified at line', async (t
 
 test('a branch commit during proof rejects the verdict without changing its recorded tested SHA', async (t) => {
   const f: Awaited<ReturnType<typeof proofFixture>> = await fixture(t, {
-    workflow: 'feature',
+    workflow: 'tested-change',
     script: {
       builder: [{ commit: true, fixed: true }],
       tester: [{ proof: true }],

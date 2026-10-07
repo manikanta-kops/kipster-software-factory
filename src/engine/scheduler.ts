@@ -1,5 +1,5 @@
 import { pollLinkedTickets } from './ticket-links.ts'
-import { agentFor, pollTasks } from './tasks.ts'
+import { agentsFor, pollTasks } from './tasks.ts'
 import { listTaskWaits } from '../store/tasks.ts'
 import type { Library } from '../library/library.ts'
 import { invalidateMergeGate } from '../store/merge-gates.ts'
@@ -42,6 +42,7 @@ import {
   listTickets,
   listWaitingForMerge,
   markRunning,
+  addAttemptArtifacts,
   markWorktreeCleaned,
   type AttemptContext,
 } from '../store/tickets.ts'
@@ -138,18 +139,30 @@ export async function startScheduler(
     )
     try {
       controller.signal.throwIfAborted()
-      const agent =
+      const selections =
         step.kind === 'agent'
-          ? await agentFor(
+          ? await agentsFor(
               { database, config: attemptConfig },
               context,
               step.role,
             )
-          : null
-      await markRunning(database, attempt.id, agent?.cli ?? 'system', agent)
+          : { agents: [], notes: [] }
+      const agent = selections.agents[0] ?? null
+      const running = await markRunning(
+        database,
+        attempt.id,
+        agent?.cli ?? 'system',
+        agent,
+      )
+      if (selections.notes.length)
+        await addAttemptArtifacts(database, attempt.id, selections.notes)
       await runAttempt(
-        { ...runnerOptions, config: attemptConfig },
-        context,
+        {
+          ...runnerOptions,
+          config: attemptConfig,
+          attemptAgents: selections.agents,
+        },
+        { ...context, attempt: running },
         controller.signal,
       )
     } catch (error) {

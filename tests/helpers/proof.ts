@@ -21,7 +21,7 @@ import {
   markRunning,
 } from '../../src/store/tickets.ts'
 import { Workspaces } from '../../src/workspace/workspaces.ts'
-import { builtInWorkflow, createTestStore } from './store.ts'
+import { testWorkflow, createTestStore } from './store.ts'
 
 export async function proofFixture(
   input: {
@@ -105,7 +105,7 @@ export async function proofFixture(
   const ticket = await createTicket(store.database, {
     repository: repository.slug,
     ...(input.dependency ? { dependencies: ['fixture/reference'] } : {}),
-    workflow: await builtInWorkflow(input.workflow ?? 'bug'),
+    workflow: await testWorkflow(input.workflow ?? 'bug'),
     title: 'Checkout returns an error',
     body: 'POST /checkout with an empty JSON object returns HTTP 500 Checkout failed. Expected HTTP 200 Order placed. Prove the failure and fix.',
   })

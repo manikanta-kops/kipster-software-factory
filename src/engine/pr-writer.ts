@@ -1,3 +1,5 @@
+import { openReviewFindings } from '../domain/review.ts'
+import { untestedReasons } from '../domain/task-testing.ts'
 import { dependencySession } from './dependencies.ts'
 import { newEvidenceFile } from '../artifacts/storage.ts'
 import { scenarioIndex } from '../domain/evidence.ts'
@@ -50,10 +52,25 @@ export async function writePullRequest(
     ),
     head,
   )
+  const reasons = untestedReasons(detail)
+  const findings = openReviewFindings(detail)
+  const findingNotice = openFindingsNotice(findings)
+  const annotate = (body: string) => {
+    const withoutOldFindings = body.split('\n\n## Open review findings\n\n')[0]!
+    return withUntestedNotice(withoutOldFindings, reasons) + findingNotice
+  }
   const cached = await getPullRequestDescription(database, ticket.id, head)
-  if (cached?.trim()) return fitGitHubLimit(cached, ticket.number)
+  if (cached?.trim()) {
+    const body = annotate(cached)
+    if (body !== cached)
+      await savePullRequestDescription(database, ticket.id, head, body)
+    return fitGitHubLimit(body, ticket.number)
+  }
   const instructions = `Head commit: ${head}
 Ticket number: ${ticket.number}
+Maximum description length before the factory adds open findings: ${4000 - findingNotice.length}
+Open review findings: ${JSON.stringify(findings.map((finding) => ({ title: finding.title, file: finding.file, content: finding.content })))}
+Untested warnings: ${JSON.stringify(reasons)}
 Independent proof scenarios: ${JSON.stringify(scenarios)}
 Workflow has tester: ${detail.workflow.steps.some((s) => s.kind === 'agent' && s.role === 'tester')}
 Current evidence: ${JSON.stringify(evidence.map((a) => ({ title: a.title, scenario: a.scenario, result: a.scenarioResult, content: a.content })))}
@@ -76,6 +93,7 @@ Only evidence at this exact commit counts. If the workflow has no tester, state 
     await mkdir(directory, { recursive: true })
     const session = await dependencySession(options, detail, signal)
     const prompt = await buildPrompt({
+      database: options.database,
       dependencies: session.dependencies,
       step: {
         id: step.id,
@@ -130,8 +148,11 @@ Only evidence at this exact commit counts. If the workflow has no tester, state 
       await writeFile(join(directory, 'result-error.txt'), failure)
       continue
     }
-    const body = fitGitHubLimit(note!.content!, ticket.number)
-    await addAttemptArtifacts(database, attempt.id, [note!])
+    const description = annotate(note!.content!)
+    const body = fitGitHubLimit(description, ticket.number)
+    await addAttemptArtifacts(database, attempt.id, [
+      { ...note!, content: description },
+    ])
     await savePullRequestDescription(database, ticket.id, head, body)
     return body
   }
@@ -144,13 +165,21 @@ Only evidence at this exact commit counts. If the workflow has no tester, state 
   const more = detail.tasks.length
     ? 0
     : Number(await git(['rev-list', '--count', range])) - commits.length
-  const description = factoryDescription(detail, head, commits, more)
+  const description = annotate(factoryDescription(detail, head, commits, more))
   const body = fitGitHubLimit(description, ticket.number)
   await addAttemptArtifacts(database, attempt.id, [
     { kind: 'note', title: 'factory PR description', content: description },
   ])
   await savePullRequestDescription(database, ticket.id, head, body)
   return body
+}
+
+export function withUntestedNotice(
+  body: string,
+  reasons: readonly string[],
+): string {
+  const missing = reasons.filter((reason) => !body.includes(reason))
+  return missing.length ? `${body}\n\n${missing.join('\n\n')}` : body
 }
 
 export function fitGitHubLimit(
@@ -213,4 +242,23 @@ export function factoryDescription(
     `Verified at ${head}`,
     `Evidence on ticket #${detail.ticket.number} in the factory`,
   ].join('\n\n')
+}
+
+export function openFindingsNotice(
+  findings: readonly { title: string; file?: string | null }[],
+): string {
+  if (!findings.length) return ''
+  const lines: string[] = []
+  for (const finding of findings) {
+    const line = `- ${finding.title}${finding.file ? ` (${finding.file})` : ''}`
+      .replace(/\s+/g, ' ')
+      .slice(0, 400)
+    if (lines.join('\n').length + line.length > 1800) break
+    lines.push(line)
+  }
+  if (lines.length < findings.length)
+    lines.push(
+      `- ${findings.length - lines.length} further findings; see the factory ticket.`,
+    )
+  return `\n\n## Open review findings\n\n${lines.join('\n')}\n\nFull findings and corrections are recorded on the factory ticket.`
 }

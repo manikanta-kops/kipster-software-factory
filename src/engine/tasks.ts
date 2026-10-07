@@ -1,10 +1,20 @@
+import { untestedReasons } from '../domain/task-testing.ts'
 import type { AgentConfig } from '../config.ts'
 import { type RoleName, runTasksParams } from '../domain/catalog.ts'
 import { FactoryError } from '../domain/errors.ts'
 import { stepOf, type StepResult } from '../domain/lifecycle.ts'
 import type { LeadTask, Repository, Ticket } from '../domain/records.ts'
-import { resolveAgent } from '../domain/settings.ts'
-import { checkDelegation, delegateTarget } from '../domain/tasks.ts'
+import {
+  resolveAgent,
+  independentAgent,
+  describeAgent,
+} from '../domain/settings.ts'
+import type { ArtifactInput } from '../domain/lifecycle.ts'
+import {
+  checkDelegation,
+  delegateTarget,
+  repeatedFailures,
+} from '../domain/tasks.ts'
 import type { AgentStep } from '../domain/workflow.ts'
 import {
   BUILT_IN_WORKFLOWS,
@@ -26,21 +36,100 @@ import {
 } from '../store/tickets.ts'
 import type { RunnerOptions } from './runner.ts'
 
-/** The agent for a step of this ticket: a child ticket's task agent sets only its builder. */
-export async function agentFor(
+/** All selections for one attempt, computed from its settings snapshot before execution. */
+export async function agentsFor(
   options: Pick<RunnerOptions, 'database' | 'config'>,
   context: Pick<AttemptContext, 'ticket' | 'workflow'>,
   role: RoleName,
-): Promise<AgentConfig> {
-  const owned =
-    role === 'builder'
-      ? await getTaskOfChild(options.database, context.ticket.id)
-      : null
-  return resolveAgent(options.config, {
-    workflow: context.workflow.name,
+): Promise<{ agents: AgentConfig[]; notes: ArtifactInput[] }> {
+  const { config, database } = options
+  const workflow = context.workflow.name
+  const owned = await getTaskOfChild(database, context.ticket.id)
+  const original = resolveAgent(config, {
+    workflow,
     role,
     taskAgent: owned?.task.agent,
   })
+  if (!['reviewer', 'tester'].includes(role))
+    return { agents: [original], notes: [] }
+  const detail = (await getTicketDetail(database, context.ticket.number))!
+  const builderAgents = (item: TicketDetail) =>
+    item.attempts.flatMap((attempt) =>
+      attempt.agent &&
+      item.workflow.steps.some(
+        (step) =>
+          step.id === attempt.stepId &&
+          step.kind === 'agent' &&
+          step.role === 'builder',
+      )
+        ? [attempt.agent]
+        : [],
+    )
+  const builders = builderAgents(detail)
+  const children = await Promise.all(
+    detail.tasks.flatMap((task) =>
+      task.child ? [getTicketDetail(database, task.child.number)] : [],
+    ),
+  )
+  for (const child of children)
+    if (child) builders.push(...builderAgents(child))
+  if (!builders.length)
+    builders.push(
+      resolveAgent(config, {
+        workflow,
+        role: 'builder',
+        taskAgent: owned?.task.agent,
+      }),
+    )
+  const override = config.workflows?.[workflow]
+  const reviewers = override?.reviewers ?? config.agents.reviewers
+  const candidates = [
+    ...(role === 'reviewer' ? (override?.reviewers ?? []) : []),
+    ...(override?.roles?.[role] ? [override.roles[role]!] : []),
+    ...(config.agents.roles[role] ? [config.agents.roles[role]!] : []),
+    ...config.agents.reviewers,
+    ...config.agents.allowed,
+    config.agents.default,
+  ]
+  const isLead = context.workflow.steps.some(
+    (step) => step.kind === 'agent' && step.role === 'lead',
+  )
+  const originals =
+    role === 'reviewer' && isLead && reviewers.length ? reviewers : [original]
+  const notes: ArtifactInput[] = []
+  const agents = originals.map((agent) => {
+    const selection = independentAgent(agent, builders, candidates)
+    if (selection.replaced || !selection.independent)
+      notes.push({
+        kind: 'note',
+        title: selection.independent
+          ? `${role} agent replaced for independence`
+          : role === 'reviewer'
+            ? 'Review was not independent'
+            : 'Testing was not independent',
+        content: selection.independent
+          ? `Replaced ${describeAgent(agent)} with ${describeAgent(selection.agent)} because the original CLI and model match a builder of this change.`
+          : `Running ${describeAgent(agent)} despite matching a builder of this change. No configured candidate has a different CLI and model. The owner must merge this head.`,
+      })
+    return selection.agent
+  })
+  return { agents, notes }
+}
+
+/** Reuse the recorded selection for this attempt; writers in system steps resolve separately. */
+export async function agentFor(
+  options: Pick<RunnerOptions, 'database' | 'config'>,
+  context: Pick<AttemptContext, 'ticket' | 'workflow'> &
+    Partial<Pick<AttemptContext, 'attempt' | 'step'>>,
+  role: RoleName,
+): Promise<AgentConfig> {
+  if (
+    context.attempt?.agent &&
+    context.step?.kind === 'agent' &&
+    context.step.role === role
+  )
+    return context.attempt.agent
+  return (await agentsFor(options, context, role)).agents[0]!
 }
 
 async function libraryOf(options: RunnerOptions): Promise<Library> {
@@ -61,6 +150,7 @@ export async function leadContext(
     delegateTarget(context.workflow, context.step.id)?.with ?? {},
   )
   return {
+    repeatedFailure: repeatedFailures(detail.tasks),
     tasks: detail.tasks.map((task) => ({
       key: task.key,
       title: task.title,
@@ -140,7 +230,27 @@ export async function pollTasks(
   for (const task of detail.tasks) {
     signal.throwIfAborted()
     const child = task.child
-    if (!child || !['running', 'pr-ready'].includes(task.status)) continue
+    if (!child || !['running', 'parked', 'pr-ready'].includes(task.status))
+      continue
+    if (
+      detail.ticket.lightsOut &&
+      child.waiting?.askReason === 'needs-decision'
+    ) {
+      await updateTask(
+        database,
+        task.id,
+        'parked',
+        child.waiting.summary ?? 'Child needs a decision.',
+      )
+      continue
+    }
+    if (task.status === 'parked')
+      await updateTask(
+        database,
+        task.id,
+        'running',
+        'Child resumed after its decision.',
+      )
     if (child.status === 'done') {
       if (task.land === 'branch')
         await integrate(options, detail.ticket, repository, task, signal)
@@ -149,7 +259,7 @@ export async function pollTasks(
           database,
           task.id,
           'merged',
-          `Pull request merged: ${child.pullRequestUrl ?? 'unknown URL'}`,
+          `Pull request merged: ${child.pullRequestUrl ?? 'unknown URL'}${untestedTaskNote(task)}`,
         )
     } else if (child.status === 'cancelled')
       await updateTask(
@@ -245,8 +355,13 @@ async function integrate(
     merged.conflicts ? 'conflict' : 'merged',
     merged.conflicts
       ? `Conflicts with the lead branch; the system aborted the merge. Files: ${merged.conflicts.join(', ')}. Branch ${branch} keeps the work.`
-      : `Merged into the lead branch at ${merged.head}.`,
+      : `Merged into the lead branch at ${merged.head}.${untestedTaskNote(task)}`,
   )
+}
+
+function untestedTaskNote(task: LeadTask): string {
+  const reasons = untestedReasons({ ticket: task.child ?? {} })
+  return reasons.length ? ` Landed untested. ${reasons.join('; ')}.` : ''
 }
 
 async function childEnding(options: RunnerOptions, number: number) {

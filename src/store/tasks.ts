@@ -3,7 +3,11 @@
 import { FactoryError } from '../domain/errors.ts'
 import { afterResult, waitForTasks } from '../domain/lifecycle.ts'
 import type { LeadTask, TaskStatus, Ticket } from '../domain/records.ts'
-import { isActiveTask, REPORTED_TASK_STATUSES } from '../domain/tasks.ts'
+import {
+  isActiveTask,
+  REPORTED_TASK_STATUSES,
+  repeatedFailures,
+} from '../domain/tasks.ts'
 import { type Database, type Queryable, transaction } from './database.ts'
 import { type NewEvent, recordEvents } from './events.ts'
 import { TASK_SELECT, type TaskRow, taskEvent, toTask } from './task-records.ts'
@@ -66,7 +70,16 @@ export async function startTask(
     ])
     const task = rows[0]
     if (!task || task.status !== 'pending') return null
-    const ticket = await createTicketInTransaction(connection, child)
+    const parent = await connection.query<{ lights_out: boolean }>(
+      'SELECT lights_out FROM tickets WHERE id = $1',
+      [task.ticket_id],
+    )
+    const ticket = await createTicketInTransaction(
+      connection,
+      { ...child, lightsOut: parent.rows[0]!.lights_out },
+      true,
+      true,
+    )
     await connection.query(
       `UPDATE tasks SET status = 'running', child_ticket_id = $2, base_commit = $3, updated_at = now() WHERE id = $1`,
       [taskId, ticket.id, baseCommit],
@@ -87,8 +100,9 @@ export async function updateTask(
 ): Promise<boolean> {
   return transaction(database, async (connection) => {
     const { rows } = await connection.query<{ ticket_id: number; key: string }>(
-      `UPDATE tasks SET status = $2, result = coalesce($3, result), updated_at = now()
-       WHERE id = $1 AND status IN ('pending', 'running', 'pr-ready') AND status <> $2
+      `UPDATE tasks SET status = $2, result = coalesce($3, result), updated_at = now(),
+         reported_status = CASE WHEN status = 'parked' AND $2 = 'running' THEN NULL ELSE reported_status END
+       WHERE id = $1 AND status IN ('pending', 'running', 'parked', 'pr-ready') AND status <> $2
        RETURNING ticket_id, key`,
       [taskId, status, result],
     )
@@ -187,9 +201,13 @@ function taskReport(
   const line = (task: LeadTask) =>
     `- **${task.key}** (${task.land}) ${task.status}${task.child ? ` — ticket #${task.child.number}` : ''}${task.child?.pullRequestUrl ? `, ${task.child.pullRequestUrl}` : ''}${task.result ? `: ${task.result}` : ''}`
   const others = tasks.filter((task) => !changed.includes(task))
+  const repeated = repeatedFailures(tasks)
   return [
     changed.length ? `## Changed\n\n${changed.map(line).join('\n')}` : '',
     others.length ? `## Other tasks\n\n${others.map(line).join('\n')}` : '',
+    repeated.length
+      ? `## Repeated failure\n\n${repeated.map((group) => `- Same error ${group.count} times: ${group.tasks.join(', ')}. Classify the cause (task, plan or factory), record a decision artifact, and change the task or plan, or park that line of work and continue the rest. Do not retry with the same instructions.`).join('\n')}`
+      : '',
   ]
     .filter(Boolean)
     .join('\n\n')

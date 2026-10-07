@@ -61,7 +61,7 @@ owner still performs every merge.
 Proven live on factory-floor with required GitHub CI and real writer sessions:
 an unrelated README merge advanced protected `next`, triggering synchronization
 and fresh proof; a PR review comment reached the builder and produced a tested
-keyboard regression; a later bug merge advanced the base while feature CI was
+keyboard regression; a later bug merge advanced the base while planned-change CI was
 waiting, exposing and validating recovery from an obsolete merge wait. The
 factory detected owner merges and refreshed the repository's verify capability
 after the kit landed. CI waits also survived a deliberate safe server restart.
@@ -140,6 +140,62 @@ branch tasks two at a time, a report after each and a final `done`. Pull
 request tasks, testers inside tasks and Codex leads have not run live, nor on
 factory-floor.
 
+Tasks on the `task` and `task-pr` child workflows now skip a tester when its
+declared kit capabilities are missing, recording a durable **untested** marker.
+Task reports, ticket pages, task PRs and the lead's final PR make this explicit;
+the merge gate retains owner merging for merged untested tasks. Top-level
+workflows and reproducer steps still reject missing capabilities.
+
 ## Slice 6: The factory builds itself
 
 Factory work runs through the factory, then Kipster's does.
+
+Ticket lights-out now defaults on for new `lead` and `program-lead` tickets
+and is inherited by tasks. It system-approves a lead's plan, adds instructions
+to choose and record defaults, and shows typed agent choices on the ticket.
+A child that needs a decision parks locally, reports to the lead, and frees a
+parallel slot while siblings continue. The existing merge gate still leaves
+kit, CI, migrations and reviewer owner-review flags for the owner. Mode-specific
+role prompts now replace product questions with recorded defaults,
+require separate explained commits and owner review for necessary forbidden-path
+changes, and ask reproducers to record alternative attempts before giving up.
+Disabled tickets retain their default role wording. Leads in both modes now
+hear groups of repeated task failures with paths and run details removed. The
+engine refuses another task with the same whitespace-normalised instructions
+after two identical failures. The lead classifies task, plan or factory causes
+in a typed decision artifact, then changes the task or plan, or stops retrying
+that line while continuing the rest. Live overnight use with real agents remains
+unverified.
+Demo seeding includes synthetic lead and child decisions so the Decision log
+and child links, a parked question and a merged untested task can be inspected
+with the scheduler disabled.
+
+End-of-ticket summaries now persist on completion, cancellation and owner waits,
+with fact-based status, actions, activity, issues and unverified work. Ticket
+pages show the compact card; Today shows attention and completions from the last
+24 hours with links to details. Synthetic demo tickets cover Ready, Needs you
+and Blocked. Summary rewrites and legacy null reports have PostgreSQL coverage;
+phone/desktop reports have light/dark browser coverage. Real overnight use and
+owner morning checks remain unverified.
+
+### Lead review and independence (implemented)
+
+Reviewer and tester agents are checked against recorded builder CLI/model
+choices, including a lead's tasks. Settings provides global and per-workflow
+reviewer lists. Lead reviews run the list in parallel and combine the verdicts.
+Review `limit` controls rounds (default 5); the built-in lead publishes unresolved
+findings after round five and keeps the PR for the owner. Later lead rounds check
+earlier fixes; new findings on unchanged files become notes. An unavailable
+independent candidate is recorded and always requires owner merging.
+
+### Lessons (implemented)
+
+Ticket completion, cancellation and owner waits now propose one-line lessons
+from repeated reviewer finding titles, recorded failure groups and owner
+corrections. Today lets the owner accept or reject them; Repositories shows
+accepted repository and engine lessons and retires them with a reason. A scope
+can retain decisions without suggesting them again. Repository acceptance is
+capped at 30. Every fresh agent path writes its own accepted lessons file outside
+the repository and receives only a path pointer. Lessons do not change ticket
+routing. Real PostgreSQL and browser tests cover this slice; live use with real
+agents and cross-ticket review aggregation remain unverified/unimplemented.

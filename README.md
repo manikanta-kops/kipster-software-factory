@@ -79,10 +79,32 @@ Node.js and PostgreSQL. It links `kf` into `~/.local/bin` and runs `kf setup --s
   accepts only local socket connections;
 - starts the factory in the background, now and at login, and opens it.
 
-The built-in workflows (`feature`, `bug`, `quick-change`, `onboard-repo`, and
-`lead` with its `task` and `task-pr` task workflows) are ready immediately. Re-run the command, or `kf update`, to update; your
+The built-in workflows (`bug`, `lead` and `onboard-repo`) are ready immediately.
+`lead` covers planned features and small changes; its `task` and `task-pr`
+workflows are reserved for child tasks and hidden from New ticket. Re-run the
+command, or `kf update`, to update; your
 configuration, secrets and database are kept. `kf status`, `kf logs -f`,
 `kf stop` and `kf start` manage the background factory.
+
+New `lead` and `program-lead` tickets default to Lights-out: the system approves
+lead plans, agents choose and record sensible defaults, and a child needing a
+decision parks while siblings continue. New ticket lets you change the setting;
+children inherit it, and ticket pages show the Decision log. The merge gate
+still applies. Child `task` and `task-pr` tickets without a required verification
+capability skip the tester and carry an **Untested** warning. Their PRs and lead
+PRs containing merged untested tasks require owner merging. Settings can select
+parallel lead reviewers from claude and codex. Lead review has five rounds by
+default, then publishes unresolved findings for the owner. The engine replaces
+reviewers and testers whose CLI/model matches a builder when an independent
+candidate exists; otherwise it records the exception and requires owner merging.
+
+The factory suggests one-line lessons from repeated review findings, recorded
+failures and owner corrections when a ticket finishes or needs you. Accept or
+reject them in Today's Lessons group; accepted repository and engine lessons
+are available to every fresh agent step through a file outside the repository.
+Lessons never hold up tickets. Repositories lists accepted lessons with a
+Retire control and reason. A repository can have 30 accepted lessons; retire
+one before accepting another.
 
 ## Run from source
 
@@ -118,7 +140,7 @@ update settings; other configuration fields are retained. For scripts, use
 serve for a separate factory.
 
 Concurrency, the step timeout (120 minutes by default) and the agent for each
-role, globally or per workflow, are edited on the web app's Settings page and
+role and reviewer lists, globally or per workflow, are edited on the web app's Settings page and
 apply to steps that start afterwards, without a restart. `config.json` supplies
 their starting values until the first save; see
 [the architecture](docs/architecture.md#settings-page).
@@ -156,7 +178,12 @@ scheduler, including after a restart. Keep real runs in a separate checkout's
 `.local/` database. Development workspaces and evidence also live under
 `.local/factory/`. Demo media is generated there (synthetic images/video/logs,
 never real verification evidence); seed with `--home <directory>` when serving a
-different home. The demo includes valid/invalid kits and current/stale feature
+different home. The demo includes valid/invalid kits and current/stale lead
 verdicts with recorded commits. Override with `npm run dev -- --home <directory>`.
+It also includes **Overnight report export (synthetic demo)**, a lights-out lead
+with a Decision log, a parked child with a recorded choice and a merged
+untested child. **Historical quick-change ticket** retains a completed plan from
+the retired workflow and waits for plan approval. These are
+synthetic choices for UI inspection; no agents or real verification ran.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md). Licensed under [Apache-2.0](LICENSE).

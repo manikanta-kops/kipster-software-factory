@@ -179,6 +179,7 @@ export async function runProofAttempt(
       const cwd = instances.at(-1)!.checkout
       const session = await dependencySession(options, detail, signal)
       const prompt = await buildPrompt({
+        database: options.database,
         dependencies: session.dependencies,
         step,
         detail,

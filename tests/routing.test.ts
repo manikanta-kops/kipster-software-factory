@@ -9,8 +9,8 @@ function load(source: string): Workflow {
   return result.workflow
 }
 
-const feature = load(`
-name: feature
+const planned = load(`
+name: planned-change
 description: Plan, build, test and merge.
 steps:
   - id: plan
@@ -38,55 +38,55 @@ steps:
 
 describe('nextStep', () => {
   test('starts at the first step', () => {
-    assert.equal(firstStep(feature).id, 'plan')
+    assert.equal(firstStep(planned).id, 'plan')
   })
 
   test('a success outcome continues to the next step', () => {
-    assert.deepEqual(nextStep(feature, 'plan', 'done', 1), {
+    assert.deepEqual(nextStep(planned, 'plan', 'done', 1), {
       to: 'step',
       stepId: 'approve',
     })
   })
 
   test('success on the last step finishes the ticket', () => {
-    assert.deepEqual(nextStep(feature, 'merge', 'merged', 1), {
+    assert.deepEqual(nextStep(planned, 'merge', 'merged', 1), {
       to: 'finish',
     })
   })
 
   test('a routed outcome jumps to its target', () => {
-    assert.deepEqual(nextStep(feature, 'approve', 'changes-needed', 1), {
+    assert.deepEqual(nextStep(planned, 'approve', 'changes-needed', 1), {
       to: 'step',
       stepId: 'plan',
     })
   })
 
   test('rejected cancels the ticket unless routed', () => {
-    assert.deepEqual(nextStep(feature, 'approve', 'rejected', 1), {
+    assert.deepEqual(nextStep(planned, 'approve', 'rejected', 1), {
       to: 'cancel',
     })
   })
 
   test('needs-decision always pauses for a human', () => {
-    assert.deepEqual(nextStep(feature, 'build', 'needs-decision', 1), {
+    assert.deepEqual(nextStep(planned, 'build', 'needs-decision', 1), {
       to: 'ask',
       because: 'needs-decision',
     })
   })
 
   test('an unrouted non-success outcome pauses for a human', () => {
-    assert.deepEqual(nextStep(feature, 'build', 'needs-other-repo', 1), {
+    assert.deepEqual(nextStep(planned, 'build', 'needs-other-repo', 1), {
       to: 'ask',
       because: 'unrouted',
     })
   })
 
   test('sending back stops at the limit', () => {
-    assert.deepEqual(nextStep(feature, 'test', 'changes-needed', 1), {
+    assert.deepEqual(nextStep(planned, 'test', 'changes-needed', 1), {
       to: 'step',
       stepId: 'build',
     })
-    assert.deepEqual(nextStep(feature, 'test', 'changes-needed', 2), {
+    assert.deepEqual(nextStep(planned, 'test', 'changes-needed', 2), {
       to: 'ask',
       because: 'limit',
     })
@@ -171,22 +171,22 @@ steps:
 
   test('rejects outcomes the step cannot report', () => {
     assert.throws(
-      () => nextStep(feature, 'plan', 'passed', 1),
+      () => nextStep(planned, 'plan', 'passed', 1),
       /cannot report "passed"/,
     )
     assert.throws(
-      () => nextStep(feature, 'approve', 'needs-decision', 1),
+      () => nextStep(planned, 'approve', 'needs-decision', 1),
       /cannot report/,
     )
-    assert.throws(() => nextStep(feature, 'deploy', 'done', 1), /no step/)
+    assert.throws(() => nextStep(planned, 'deploy', 'done', 1), /no step/)
   })
 })
 
 describe('describeRoutes', () => {
   test('lists every outcome with its destination, including defaults', () => {
-    const testStep = feature.steps[3]
+    const testStep = planned.steps[3]
     assert.ok(testStep)
-    assert.deepEqual(describeRoutes(feature, testStep), [
+    assert.deepEqual(describeRoutes(planned, testStep), [
       { outcome: 'passed', next: { to: 'step', stepId: 'merge' } },
       { outcome: 'changes-needed', next: { to: 'step', stepId: 'build' } },
       {

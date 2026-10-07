@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { defaultLightsOut } from '../../../src/domain/records.ts'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import type { Repository, WorkflowSummary } from '../../../src/api/contract.ts'
 import { api } from '../api.ts'
@@ -28,13 +29,18 @@ export function NewTicket() {
   const client = useQueryClient()
   const [repository, setRepository] = useState('')
   const [workflow, setWorkflow] = useState('')
+  const [lightsOutChoice, setLightsOutChoice] = useState<boolean | null>(null)
+  const lightsOut = lightsOutChoice ?? defaultLightsOut(workflow)
   const [title, setTitle] = useState('')
   const [body, setBody] = useState('')
   const [dependencies, setDependencies] = useState<string[]>([])
+  const selectableWorkflows = workflows.data?.workflows.filter(
+    (item) => item.selectable !== false,
+  )
   const selectedRepository = repositories.data?.repositories.find(
     (item) => item.slug === repository,
   )
-  const selectedWorkflow = workflows.data?.workflows.find(
+  const selectedWorkflow = selectableWorkflows?.find(
     (item) => item.name === workflow,
   )
   const onboardWorkflow = workflows.data?.workflows.find(
@@ -42,9 +48,8 @@ export function NewTicket() {
   )
   const needsKit =
     selectedRepository &&
-    workflows.data?.workflows.some(
+    selectableWorkflows?.some(
       (item) =>
-        ['feature', 'bug'].includes(item.name) &&
         item.steps.some((step) => step.needs.includes('verify')) &&
         !selectedRepository.kit.capabilities.includes('verify'),
     )
@@ -83,6 +88,7 @@ export function NewTicket() {
               create.mutate({
                 repository,
                 workflow,
+                lightsOut,
                 title: title.trim(),
                 body,
                 ...(dependencies.length ? { dependencies } : {}),
@@ -135,7 +141,7 @@ export function NewTicket() {
                     repository,
                     workflow: 'onboard-repo',
                     title: `Verify the kit for ${repository}`,
-                    body: 'Prepare a repository kit and verify it so feature and bug workflows can run.',
+                    body: 'Prepare a repository kit and verify it so lead and bug workflows can run.',
                   })
                 }
               >
@@ -150,7 +156,7 @@ export function NewTicket() {
                 Choose a repository to see which workflows can run.
               </p>
             )}
-            {workflows.data?.workflows.map((item) => {
+            {selectableWorkflows?.map((item) => {
               const reason = unavailable(selectedRepository, item)
               return (
                 <label
@@ -205,6 +211,19 @@ export function NewTicket() {
                   ))}
               </fieldset>
             )}
+          <label className="workflow-choice">
+            <input
+              type="checkbox"
+              checked={lightsOut}
+              onChange={(event) => setLightsOutChoice(event.target.checked)}
+            />
+            <span>
+              Lights-out{' '}
+              <span className="muted">
+                Choose sensible defaults and keep working overnight.
+              </span>
+            </span>
+          </label>
           <label htmlFor="title">Title</label>
           <input
             id="title"
