@@ -1,5 +1,7 @@
 import { evaluateMergeGate, type MergeFacts } from '../src/domain/merge-gate.ts'
 import { checksResult } from '../src/engine/pull-requests.ts'
+import { mergedTaskResult } from '../src/engine/tasks.ts'
+import { checkerVerdict, untestedReasons } from '../src/domain/task-testing.ts'
 import type { run as runCommand } from '../src/executors/process.ts'
 import { inspectChecks } from '../src/github/checks.ts'
 import { saveMergeGate } from '../src/store/merge-gates.ts'
@@ -23,6 +25,7 @@ import { acquireSchedulerLock } from '../src/store/scheduler.ts'
 import {
   listTasks,
   parkForTasks,
+  reportTasks,
   startTask,
   updateTask,
 } from '../src/store/tasks.ts'
@@ -120,6 +123,10 @@ export interface DemoTickets {
   readonly uploadChild: number
   readonly bundleFailed: number
   readonly bundlePending: number
+  readonly checkedWithoutVerifyLead: number
+  readonly checkedWithoutVerifyChild: number
+  readonly checkedWithVerifyLead: number
+  readonly checkedWithVerifyChild: number
 }
 
 export async function seedDemo(
@@ -162,6 +169,10 @@ async function seedLocked(
       error: 'verify.ready: must be a local http URL with {port}',
       capabilities: [],
     },
+  })
+  const docs = await createRepository(database, { slug: 'kipster/docs-site' })
+  await markRepositoryReady(database, docs.id, {
+    kit: { status: 'valid', error: null, capabilities: ['setup'] },
   })
   await createRepository(database, { slug: 'kipster/website' })
   const legacy = await createRepository(database, {
@@ -573,7 +584,7 @@ async function seedLocked(
       },
       {
         key: 'export-notes',
-        title: 'Document report exports (synthetic untested demo)',
+        title: 'Document report exports (synthetic unverified demo)',
         instructions:
           'Document CSV exports in the repository without a verify capability.',
         land: 'branch',
@@ -622,7 +633,7 @@ async function seedLocked(
       repository: 'kipster/invalid-kit',
       workflow: taskWorkflow,
       title: notesTask!.title,
-      body: 'Synthetic untested task: no agents, code changes or verification ran.',
+      body: 'Synthetic task with an unverified item: no agents, code changes or verification ran.',
     },
     null,
   )
@@ -632,12 +643,234 @@ async function seedLocked(
     summary:
       'Synthetic documentation task finished without a verify capability.',
   })
+  await run(lightsOutUntestedChild, {
+    outcome: 'passed',
+    summary:
+      'Synthetic checker: read the change without an app; one item stays unverified.',
+    artifacts: [
+      {
+        kind: 'evidence',
+        title: 'Export docs not viewed in a browser (synthetic demo)',
+        content: 'Synthetic: no app was started and nothing ran.',
+        scenario: 'Read the export docs',
+        scenarioResult: 'unverified',
+      },
+    ],
+  })
   await updateTask(
     database,
     notesTask!.id,
     'merged',
-    'Synthetic merged task. Untested: no verify capability (skipped test). No real merge ran.',
+    mergedTaskResult(
+      'f'.repeat(40),
+      checkerVerdict(
+        (await getTicketDetail(database, lightsOutUntestedChild))!,
+      ),
+    ),
   )
+
+  // Every task and the final change are checked, with or without the kit's app.
+  // Routing, task results and gates come from the real lifecycle and engine code.
+  const checkedLead = async (input: {
+    repository: string
+    title: string
+    task: { key: string; title: string }
+    commits: { task: string; lead: string }
+    pull: number
+    checks: { summary: string; artifacts: ArtifactInput[] }
+  }) => {
+    const lead = (
+      await createTicket(database, {
+        repository: input.repository,
+        workflow: leadWorkflow,
+        lightsOut: true,
+        title: input.title,
+        body: 'Synthetic lights-out demo of the checker on every task and the final change. No real agents, code or verification ran.',
+      })
+    ).number
+    await run(lead, {
+      outcome: 'plan-ready',
+      summary: 'Prepared the synthetic plan for automatic approval.',
+      artifacts: [
+        { kind: 'plan', title: 'Plan', content: planFor(input.task.title) },
+      ],
+    })
+    await run(lead, {
+      outcome: 'delegate',
+      summary: 'Delegated one synthetic task.',
+      tasks: [
+        {
+          key: input.task.key,
+          title: input.task.title,
+          instructions: `Synthetic demo task: ${input.task.title}.`,
+          land: 'branch',
+        },
+      ],
+    })
+    const tasks = await run(lead, undefined, 'system')
+    await parkForTasks(database, tasks.attempt.id)
+    const [task] = await listTasks(database, tasks.ticket.id)
+    const checked = (await startTask(
+      database,
+      task!.id,
+      {
+        repository: input.repository,
+        workflow: taskWorkflow,
+        title: task!.title,
+        body: 'Synthetic child task: no agents, code changes or verification ran.',
+      },
+      null,
+    ))!.number
+    await run(
+      checked,
+      { outcome: 'done', summary: 'Synthetic builder committed the change.' },
+      'claude-code',
+      input.commits.task,
+    )
+    const test = await run(
+      checked,
+      { outcome: 'passed', ...input.checks },
+      'codex',
+      input.commits.task,
+    )
+    if (test.attempt.stepId !== 'test')
+      throw new Error(
+        `Expected #${checked} to be checked, not ${test.attempt.stepId}`,
+      )
+    await updateTask(
+      database,
+      task!.id,
+      'merged',
+      mergedTaskResult(
+        input.commits.lead,
+        checkerVerdict((await getTicketDetail(database, checked))!),
+      ),
+    )
+    await reportTasks(database, tasks.attempt.id)
+    await run(
+      lead,
+      { outcome: 'done', summary: 'The task landed on the lead branch.' },
+      'claude-code',
+      input.commits.lead,
+    )
+    const final = await run(
+      lead,
+      {
+        outcome: 'passed',
+        ...input.checks,
+        summary: `Final check of the whole change. ${input.checks.summary}`,
+      },
+      'codex',
+      input.commits.lead,
+    )
+    if (final.attempt.stepId !== 'final-test')
+      throw new Error(
+        `Expected #${lead}'s final check, not ${final.attempt.stepId}`,
+      )
+    await run(
+      lead,
+      { outcome: 'passed', summary: 'Reviewed the checked commit.' },
+      'codex',
+      input.commits.lead,
+    )
+    await run(
+      lead,
+      { outcome: 'ready', summary: 'Opened the pull request; CI is green.' },
+      'system',
+      input.commits.lead,
+    )
+    await openPullRequestAndWait(lead, input.pull)
+    // Identical gate facts; only what the latest checker reported differs.
+    const detail = (await getTicketDetail(database, lead))!
+    const head = input.commits.lead
+    const checker = { status: 'finished', outcome: 'passed', commit: head }
+    await saveMergeGate(
+      database,
+      detail.ticket.id,
+      evaluateMergeGate(
+        {
+          untestedReasons: untestedReasons(detail),
+          head,
+          localHead: head,
+          base: 'c'.repeat(40),
+          behind: 0,
+          tester: checker,
+          hasTester: true,
+          hasReviewer: true,
+          reviewer: checker,
+          reproducer: null,
+          hasReproducer: false,
+          ci: 'passed',
+          checks: [
+            {
+              name: 'Demo repository checks',
+              state: 'passed',
+              required: true,
+              url: '',
+            },
+          ],
+          feedback: [],
+          buildWork: false,
+          state: 'OPEN',
+          draft: false,
+          mergeable: 'MERGEABLE',
+          paths: [],
+          migrationGlobs: [],
+          trustedKitError: null,
+          approvedUnverified: null,
+        },
+        new Date().toISOString(),
+      ),
+    )
+    return { lead, child: checked }
+  }
+  const withoutVerify = await checkedLead({
+    repository: 'kipster/docs-site',
+    title: 'Document the API rate limits (checked without verify)',
+    task: {
+      key: 'rate-limit-page',
+      title: 'Write the rate limit page (checked without verify)',
+    },
+    commits: { task: '1'.repeat(40), lead: '2'.repeat(40) },
+    pull: 46,
+    checks: {
+      summary:
+        'Synthetic checker: the kit has no verify block, so it read the diff and ran the tests in a disposable checkout. One item stays unverified.',
+      artifacts: [
+        {
+          kind: 'evidence',
+          title: 'Rate limit page not opened (synthetic demo)',
+          content:
+            'Synthetic: no app was started and nothing ran. The checker could not open the page in a browser.',
+          scenario: 'Open the rate limit page in a browser',
+          scenarioResult: 'unverified',
+        },
+      ],
+    },
+  })
+  const withVerify = await checkedLead({
+    repository: DEMO_REPOSITORY,
+    title: 'Show stock levels on product pages (checked with verify)',
+    task: {
+      key: 'stock-badge',
+      title: 'Add the stock badge (checked with verify)',
+    },
+    commits: { task: '3'.repeat(40), lead: '4'.repeat(40) },
+    pull: 47,
+    checks: {
+      summary:
+        "Synthetic checker: drove the kit's running app; every scenario passed.",
+      artifacts: [
+        {
+          kind: 'evidence',
+          title: 'Stock badge on a product page (synthetic demo)',
+          content: 'Synthetic: observed In stock: 12 on the product page.',
+          scenario: 'A product page shows its stock level',
+          scenarioResult: 'passed',
+        },
+      ],
+    },
+  })
 
   const retired = parseUpload(RETIRED_QUICK_CHANGE)
   if (!retired.ok) {
@@ -888,6 +1121,10 @@ async function seedLocked(
     uploadChild,
     bundleFailed,
     bundlePending,
+    checkedWithoutVerifyLead: withoutVerify.lead,
+    checkedWithoutVerifyChild: withoutVerify.child,
+    checkedWithVerifyLead: withVerify.lead,
+    checkedWithVerifyChild: withVerify.child,
   }
 }
 

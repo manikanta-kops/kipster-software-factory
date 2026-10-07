@@ -26,6 +26,9 @@ const scenarios = [
   'stale',
   'ci-failed',
   'ci-pending',
+  'checked-without-verify',
+  'checked-with-verify',
+  'untested-gate',
   'decisions',
   'responsive',
 ]
@@ -94,6 +97,34 @@ const maintainRun = () =>
   page.locator('.attempt-entry').filter({
     has: page.getByRole('heading', { name: 'maintain-pr', exact: false }),
   })
+const withoutVerifyTitle =
+  'Document the API rate limits (checked without verify)'
+const withVerifyTitle =
+  'Show stock levels on product pages (checked with verify)'
+const runEntry = (name) =>
+  page.locator('.attempt-entry').filter({
+    has: page.getByRole('heading', { name, exact: true }),
+  })
+const mergeGate = () => page.getByRole('region', { name: 'Merge gate' })
+// The lead's final check, its merged task's result, then the task's own build and test.
+const checkedLead = async (title, taskKey, result) => {
+  await openFromToday(title)
+  await expect(runEntry('final-test tester')).toContainText('passed')
+  await expect(runEntry('final-test tester')).toContainText(
+    'Final check of the whole change.',
+  )
+  const tasks = page.getByRole('region', { name: 'Tasks' })
+  await tasks.locator('.finished-tasks-toggle').click()
+  await tasks.getByRole('button', { name: taskKey, exact: false }).click()
+  await expect(tasks.locator('.task-result')).toHaveText(result)
+  await page.screenshot({
+    path: join(evidence, `${scenario}-lead.png`),
+    fullPage: true,
+  })
+  await tasks.locator('a.task-child').click()
+  await expect(runEntry('build builder')).toContainText('done')
+  await expect(runEntry('test tester')).toContainText('passed')
+}
 let result = 'failed'
 try {
   switch (scenario) {
@@ -488,6 +519,50 @@ try {
       await expect(maintainRun()).toContainText('CI passed.')
       break
     }
+    case 'checked-without-verify':
+      await checkedLead(
+        withoutVerifyTitle,
+        'rate-limit-page',
+        `Merged into the lead branch at ${'2'.repeat(40)}. Checker test passed at ${'1'.repeat(40)} with unverified items. Unverified by test: Open the rate limit page in a browser.`,
+      )
+      await expect(page.locator('.ticket-meta')).toContainText(
+        'Unverified by test: Open the rate limit page in a browser',
+      )
+      await expect(
+        page.getByRole('region', { name: 'Scenario evidence' }),
+      ).toContainText('1 unverified')
+      break
+    case 'checked-with-verify':
+      await checkedLead(
+        withVerifyTitle,
+        'stock-badge',
+        `Merged into the lead branch at ${'4'.repeat(40)}. Checker test passed at ${'3'.repeat(40)}.`,
+      )
+      await expect(page.locator('.ticket-meta')).not.toContainText('Unverified')
+      await expect(
+        page.getByRole('region', { name: 'Scenario evidence' }),
+      ).toContainText('1 passed')
+      break
+    case 'untested-gate':
+      await openFromToday(withoutVerifyTitle)
+      await expect(mergeGate().getByRole('heading')).toHaveText(
+        'Ready to merge',
+      )
+      await expect(mergeGate()).toContainText(
+        'Needs you: Unverified by final-test: Open the rate limit page in a browser',
+      )
+      await expect(mergeGate()).not.toContainText('Untested workflow')
+      await page.screenshot({
+        path: join(evidence, `${scenario}-unverified.png`),
+        fullPage: true,
+      })
+      await openFromToday(withVerifyTitle)
+      await expect(mergeGate().getByRole('heading')).toHaveText(
+        'Ready to merge',
+      )
+      await expect(mergeGate()).not.toContainText('Needs you')
+      await expect(mergeGate()).not.toContainText('Unverified')
+      break
     case 'decisions':
       await go('/decisions')
       await expect(heading('Decisions')).toBeVisible()

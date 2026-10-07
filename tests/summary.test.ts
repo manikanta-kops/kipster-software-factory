@@ -277,31 +277,19 @@ test('untested work, scenarios, decisions, retries and task failures use structu
       attempts: [
         { ...attempt, status: 'interrupted', outcome: null },
         { ...attempt, id: 2 },
+        { ...attempt, id: 3, stepId: 'final-test', outcome: 'passed' },
       ],
       tasks: [
         task,
         { ...task, id: 2, key: 'db', status: 'conflict' },
-        {
-          ...task,
-          id: 3,
-          key: 'docs',
-          child: {
-            id: 3,
-            number: 3,
-            status: 'done',
-            branch: 'child',
-            currentStep: 'build',
-            pullRequestUrl: null,
-            waiting: null,
-            skippedSteps: [{ stepId: 'test', missingCapabilities: ['verify'] }],
-          },
-        },
+        { ...task, id: 3, key: 'docs' },
       ],
       artifacts: [
         artifact,
         {
           ...artifact,
           id: 2,
+          attemptId: 3,
           kind: 'evidence',
           stepId: 'final-test',
           scenario: prose,
@@ -316,7 +304,11 @@ test('untested work, scenarios, decisions, retries and task failures use structu
     summary.happened,
     /2 tasks merged.*1 conflict.*1 retry.*1 decision recorded.*6h 12m/,
   )
-  assert.equal(summary.unverified.length, 3)
+  assert.deepEqual(summary.unverified, [
+    'Untested: no verify capability (skipped test)',
+    '1 item the checker could not verify',
+    '1 scenario unverified at the current commit',
+  ])
   assert.ok(summary.issues.includes('Task db: conflict'))
   assert.ok(!JSON.stringify(summary).includes(prose))
 })

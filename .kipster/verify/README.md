@@ -31,8 +31,8 @@ as demo; demo databases also reject scheduler startup. Startup never runs setup.
 
 There is no sign-in or test-user account in this app. Use the seeded local
 owner UI directly. Repository slugs and PR/commit links are fictional fixtures.
-The seed includes demo-shop (valid kit), invalid-kit, website (pending) and
-legacy-api (failed), with tickets covering approval, asks, queued/running work,
+The seed includes demo-shop (valid kit), docs-site (valid kit without verify),
+invalid-kit, website (pending) and legacy-api (failed), with tickets covering approval, asks, queued/running work,
 finished work, current/stale proof and owner merge waits. It also uploads
 synthetic-review, which a running ticket and a lead's running child task use.
 Discover ticket IDs through the supplied API or the UI; do not assume numbers. Seeder output is in

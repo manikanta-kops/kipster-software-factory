@@ -85,7 +85,7 @@ Any other key is an error. Step ids `finish`, `cancel` and `ask` are reserved.
 | ------------ | -------------------------------------------------------------------------- | -------------------------------- |
 | `planner`    | Writes a plan with acceptance scenarios. Never commits.                    | `done`                           |
 | `builder`    | The only author of product code. Implements, fixes conflicts and feedback. | `done`, `needs-other-repo`       |
-| `tester`     | Runs the real app at the exact commit and returns a verdict with evidence. | `passed`, `changes-needed`       |
+| `tester`     | Checks the exact commit, in the running app when the kit starts one.       | `passed`, `changes-needed`       |
 | `reproducer` | Proves a reported bug on the base branch before any fix.                   | `reproduced`, `not-reproduced`   |
 | `reviewer`   | Reads the diff once for serious problems the tester cannot see.            | `passed`, `changes-needed`       |
 | `writer`     | Writes the pull request description.                                       | `done`                           |
@@ -105,19 +105,21 @@ Role notes:
   runtimes and in-scope kit changes themselves, and name any check they could
   not run in their summary instead of stopping. The owner reviews on the pull
   request.
-- `tester` and `reproducer` start the app from the repository kit. Always give
-  them `needs: [verify]`. Without it the file validates, but tickets on
+- A `tester` always runs. When the repository kit has `verify` and the app
+  starts, the factory starts it at the exact commit and the tester drives it.
+  Otherwise the tester gets only a disposable checkout and works out how to
+  check the change itself: it reads the diff, installs, runs the tests and may
+  start the app. A failed app start is told to the tester; it does not fail
+  the step. Give a feature tester no `needs`, so it runs on every repository.
+- A `reproducer` and a bug `tester` (see below) need the running app. Always
+  give them `needs: [verify]`. Without it the file validates, but tickets on
   repositories without a verify kit fail at that step instead of being refused
   at creation.
-- Exception: a child ticket running `task` or `task-pr` skips a `tester`
-  whose declared needs are missing from the kit. The catalog defines this
-  rule; there is no step field. The ticket stores the skipped step and says
-  **untested**. Routing continues at the next retained step in file order,
-  including routes that targeted the skipped tester. Top-level tickets,
-  other workflows and reproducers still reject missing declared needs.
-  Task reports and PR descriptions say untested; a lead's final PR includes
-  merged untested tasks. The merge gate requires the owner for these PRs
-  even if the lead's final tester passes.
+- A tester returns `passed` when nothing it checked failed. Each scenario it
+  could not prove is reported as unverified; that is not `changes-needed`.
+  Unverified items mean **untested**: the merge gate, the PR description and
+  the ticket list them, and the merge gate requires the owner. A lead's task
+  report carries each task's checker verdict: passed, or its unverified items.
 - When a workflow contains any `reproducer` step, every `tester` in it is a
   bug tester. It fails unless a reproduction succeeded first, and the merge
   gate requires that reproduction. So never mix bug and feature paths in one
@@ -256,7 +258,7 @@ cannot report `needs-decision` or declare `needs`.
 | Capability | The repository kit provides                   | Needed by                     |
 | ---------- | --------------------------------------------- | ----------------------------- |
 | `setup`    | An install or setup command.                  | steps that must install first |
-| `verify`   | A way to start the app and check it is ready. | `tester`, `reproducer`        |
+| `verify`   | A way to start the app and check it is ready. | `reproducer`, bug `tester`    |
 
 A ticket cannot start on a repository whose kit lacks a capability the
 workflow needs. List only what a step really uses, so the workflow works on
@@ -303,7 +305,8 @@ explicitly says otherwise, and then say which rule you broke and why.
 
 - **Prove, do not claim.** A workflow that changes product code should have a
   `tester` before `maintain-pr`. Without one, a ready merge gate still requires
-  the owner with the reason `Untested workflow`.
+  the owner with the reason `Untested workflow`. When the tester reports
+  unverified items, the owner merges too.
 - **Nothing judges its own work.** Testing and review are separate steps from
   building.
 - **Reproduce before fixing.** Bug workflows start with a `reproducer`.
@@ -410,7 +413,6 @@ steps:
   - id: final-test
     kind: agent
     role: tester
-    needs: [verify]
     instructions: Test the whole change against the ticket and the approved plan, not one task.
     limit: 3
     routes:
@@ -453,7 +455,6 @@ steps:
   - id: test
     kind: agent
     role: tester
-    needs: [verify]
     limit: 3
     routes:
       changes-needed: build
@@ -471,7 +472,6 @@ steps:
   - id: test
     kind: agent
     role: tester
-    needs: [verify]
     limit: 3
     routes:
       changes-needed: build
@@ -539,7 +539,6 @@ steps:
   - id: test
     kind: agent
     role: tester
-    needs: [verify]
     limit: 3
     routes:
       changes-needed: build
@@ -603,7 +602,7 @@ Before you hand it over, check:
       `limit` with a `limit` set (or a reviewer with the default limit).
 - [ ] Every route target is a step id or `finish`, `cancel`, `ask`.
 - [ ] Every backwards route sits on a step with a `limit`.
-- [ ] `tester` and `reproducer` steps have `needs: [verify]`.
+- [ ] `reproducer` steps and bug `tester` steps have `needs: [verify]`.
 - [ ] Every `decide` option is routed.
 - [ ] A workflow with a `reproducer` has no path that reaches a `tester`
       without reproducing first.

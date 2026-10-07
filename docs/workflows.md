@@ -112,13 +112,17 @@ does not cancel linked tickets.
 
 ## Lead tasks
 
-Only child tickets running `task` or `task-pr` may skip a tester whose declared
-capabilities are missing. The catalog defines this exception; no step field
-enables it. The ticket durably records the skip as **untested**, and routes
-continue at the next step in file order. Routes targeting the skipped tester
-also continue there. Top-level tickets, other workflows and reproducers still
-require every declared capability. Untested task PRs and lead PRs containing
-merged untested tasks require owner merging.
+Every task and the lead's final change are checked by another agent. The
+built-in `task`, `task-pr` and `lead` testers declare no `needs`, so they run on
+every repository. When the kit's verify instructions start the app, the tester
+drives it; otherwise the tester checks the change itself in a disposable
+checkout. A tester reports what it could not prove as artifacts with
+`scenarioResult: unverified`; those are the ticket's **untested** reasons, and
+the merge gate requires the owner for them. A task merged into the lead's branch
+records the checker's verdict (passed, or its unverified items) in the task
+report. Tickets that skipped a tester before this keep their stored skipped
+steps and still read as untested. Reproducers and bug testers still require
+`verify`.
 
 A `lead` step's `delegate` must route to a `run-tasks` step, which runs the
 tasks as child tickets and reports `reported` each time one finishes, fails,

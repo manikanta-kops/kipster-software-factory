@@ -336,8 +336,7 @@ The database records successful removal (or an already absent worktree), so
 subsequent passes and restarts skip it. The cache and step metadata are retained; recorded files are owned by the per-ticket evidence store. `maintain-pr` synchronizes branches
 with the fetched base and watches CI (Slice 3). Kit
 capabilities are refreshed from committed default-branch blobs after each cache
-fetch; workflows needing missing capabilities remain gated by the store, except
-for the child-task tester rule below.
+fetch; workflows needing missing capabilities remain gated by the store.
 
 ### Prompt and result contract
 
@@ -552,6 +551,15 @@ pending and reported ready. Their merge gates come from `evaluateMergeGate` over
 the inspected checks. The served instance never calls GitHub, and the merge
 readiness card labels each check required or not required.
 
+Two lights-out leads show every task being checked. One is in `kipster/docs-site`,
+whose valid kit has no verify block; the other is in demo-shop. Their state comes
+from the real lifecycle: `claimAttempts` routes each task's build to its `test`
+and each lead's `done` to `final-test`. Each task's result is
+`mergedTaskResult` over `checkerVerdict` of the stored child, the same text
+`integrate` writes. Each lead's merge gate is `evaluateMergeGate` over identical
+facts plus `untestedReasons` of the stored lead, so only the docs-site gate lists
+the checker's unverified item. The agent results are synthetic.
+
 ## Independent proof (Slice 2B)
 
 Tester and reproducer steps use `engine/proof.ts`, separate from ordinary agent
@@ -575,6 +583,16 @@ startup logs. A `changes-needed` result requires findings naming Scenario,
 Observed, Expected and an attached Evidence filename. These checks enforce the
 shape and provenance of evidence; judging whether it proves the scenario remains
 the independent agent's job.
+
+A feature tester always runs. When the trusted kit has no verify block, or its
+setup or start fails, the factory gives the tester a disposable checkout of the
+exact commit without an app (`instances[].url` is null) and adds `app:
+{started: false, reason, suggestedCommands}` to the context. A failed start is
+recorded on the attempt as logs and a note, not a finding, and does not fail the
+step. The tester works out how to check the change itself and still attaches
+nonempty file evidence from its evidenceDir. Reproducers and bug testers still
+require a started app. A passing tester may report scenarios it could not prove
+with `scenarioResult: unverified`; a passing proof still rejects `failed`.
 
 A reproducer returns `reproduced` or `not-reproduced`, with a `Reproduction steps`
 note containing exact actions, inputs, observations and evidence. The note is
@@ -684,7 +702,7 @@ latest independent tester at the PR head when the workflow has a tester, the cur
 for bug workflows, no base commits missing from that head, green required CI (or
 explicitly no checks) with no failed non-required check, no unconsumed owner feedback or current change request,
 no queued/running work, and an open, non-draft, conflict-free PR. Unknown facts
-and failed observations block. Untested workflows have a needs-owner reason, without a readiness blocker. Hard
+and failed observations block. Untested workflows have a needs-owner reason, without a readiness blocker, as does each item the latest tester reported unverified. Hard
 path rules are separate from readiness: the kit, CI and migrations always need
 human review. Custom migration globs only add rules and are loaded from the
 fetched default-branch kit. Rename/deletion paths are included. Missing kits use
@@ -947,13 +965,16 @@ same transaction. A child ticket shows its lead and task; a lead ticket shows
 each task with its child, status, result and pull request. The API adds
 `tasks` and `parentTask` to ticket responses.
 
-Child tickets using `task` or `task-pr` skip tester steps whose declared needs
-are missing. Migration 013 stores the skipped steps and missing capabilities on
-the ticket; execution removes them and routes to the next retained step, even
-after restart. Top-level tickets and other roles retain capability rejection.
-The ticket, task report, PR description and merge gate say **untested**; a lead's
-final PR also carries the warning for merged untested tasks. These warnings
-require owner merging even if the lead's final tester passes.
+Every task is checked. The built-in `task`, `task-pr` and `lead` testers have no
+`needs`, so they run without a verify capability (see Independent proof).
+**Untested** means the latest tester reported unverified items:
+`domain/task-testing.ts:untestedReasons` reads them from its artifacts. The
+ticket page, PR description and merge gate list them, and they require owner
+merging. A task merged into the lead's branch, or whose pull request merged,
+records the checker's verdict (passed at a commit, or its unverified items) in
+its result, which the lead's Task report carries. Migration 013's
+`skipped_steps` is no longer written; tickets that skipped a tester before keep
+it and still show it as untested; an unfinished one now runs its tester too.
 
 ### Lights-out and agent choices
 

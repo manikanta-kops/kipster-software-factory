@@ -69,9 +69,11 @@ plan/log fixture. Fixture endpoints exist only in `tests/e2e/server.ts`.
 and 1280 px in light and dark themes and checks for horizontal page overflow.
 Screenshots are attached to Playwright test results.
 
-A task whose tester was skipped shows **Untested** near its status, including
-the missing capability and skipped step. Lead tickets also show this warning
-for merged untested tasks. These warnings persist independently of verdicts.
+A ticket whose latest tester reported unverified items shows each as an
+**Unverified by** badge near its status. Scenario evidence counts them as
+unverified, separately from passed and failed scenarios. Tickets whose tester was skipped before
+every task was checked still show **Untested** with the missing capability and
+skipped step.
 
 Uploaded workflows show Remove on the Workflows page. It asks for confirmation,
 then calls `DELETE /api/workflows/:name`; a refusal shows the server's message
