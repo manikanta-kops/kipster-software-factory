@@ -403,10 +403,14 @@ parsed for routing. Logs survive failures and cancellation.
 ### System actions and verification
 
 `maintain-pr` requires a clean worktree. Workspace preparation fetches origin;
-the action pins and merges `origin/<defaultBranch>` into the ticket branch.
-It never rebases or force-pushes. A conflict is aborted and reports `conflict`
-with a finding listing the files for the builder. After a clean merge, a prior
-tester or reviewer execution must be a passing verdict for the exact resulting HEAD;
+the action pins `origin/<defaultBranch>`, then fetches the remote ticket branch
+if it exists. Commits missing locally are merged into the ticket branch before
+merging the pinned base. It never rebases or force-pushes. An outside-commit
+conflict is aborted and reports `needs-decision`, naming the outside commits
+(short SHA, subject and author) and conflicting files. A base conflict is aborted
+and reports `conflict` with a finding listing the files for the builder.
+After clean merges, a prior tester or reviewer execution must be a passing verdict
+for the exact resulting HEAD;
 otherwise `base-moved` routes back to testing, or review when there is no tester.
 This check also catches a restart
 after the merge committed but before its outcome was recorded. Workflows without
@@ -435,8 +439,9 @@ stop publication; aborts and infrastructure failures propagate.
 Full plans, logs and prior review rounds remain in the factory timeline.
 
 The action pushes normally, creates or updates the branch PR through `gh`, and
-persists its URL. Existing closed/merged PRs are reused. It parks as
-`pull-request-checks`, recording the pushed commit and waiting timestamp, and
+persists its URL. Only an open PR is reused; if only closed or merged PRs exist,
+it creates a new one. It parks as `pull-request-checks`, recording the pushed commit
+and waiting timestamp, and
 immediately takes one check snapshot. Pending checks are subsequently polled
 without an executor slot. The GitHub adapter queries the exact SHA via `gh api`,
 paginates checks, and checks branch protection/rulesets for required checks not
