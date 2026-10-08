@@ -327,7 +327,7 @@ describe('the planned-change lifecycle', () => {
     )
     assert.match(
       moved.ticket.waiting?.summary ?? '',
-      /review reported changes-needed after 2 runs/,
+      /review reported changes-needed after 2 send-backs/,
     )
   })
 

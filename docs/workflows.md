@@ -185,10 +185,16 @@ running or waiting for a decision.
 
 ## Limits
 
-`limit: n` caps how many times a step may send the ticket back to itself or an
-earlier step. When the step has run `n` times and would send it back again, the
-`limit` route applies instead (default: `ask`). Forward routes are never
-limited.
+`limit: n` counts only finished reports of the step with the same outcome that
+would send the ticket back to itself or an earlier step, including the current
+report. On the nth such report, the `limit` route applies instead (default:
+`ask`). Passing reports, other outcomes, interrupted attempts and asks do not
+consume that outcome's limit. Forward routes are never limited.
+`maintain-pr` exempts `base-moved` from step limits: base synchronization has its
+own `with.maxBaseSyncs` bound. Its `ci-failed` and `conflict` outcomes each have
+an independent counter. The built-in workflows give `maintain-pr` a limit of 3;
+`task-pr` cancels at the limit, while `lead`, `bug` and `onboard-repo` ask.
+Give backward failure routes a limit so a lasting failure cannot loop forever.
 
 ### Ticket lights-out setting
 
@@ -221,13 +227,16 @@ The paired reviewer shares the tester's scheduler slot and timeout. Both
 verdicts must match the pinned branch head. Both passes continue after review; a correction
 wake carries both results and findings, only after both finish.
 
-Each joined round counts one finished run for each step, even when it passes.
+Each joined round retains both step results. Only matching send-back outcomes
+count toward each step's limit; passing re-tests consume no limit.
 Existing numeric limits and `limit` routes apply independently. When results
 route differently, asks/cancellation win over backward correction routes, then
 forward routes; the tester wins ties. A tester at its third failing round still
 asks unless configured otherwise. A lead review at its fifth failing round
 continues to `maintain-pr` when the tester passes; its unresolved findings still
-prevent auto-merge. Execution errors wait for the sibling, then ask at testing.
+prevent auto-merge. Execution errors wait for the sibling. If the survivor
+reports `changes-needed`, its route and limit apply and the crashed side stays
+failed with no verdict. Otherwise the pair asks at testing.
 Cancellation interrupts both; crash recovery retries the whole pair once.
 New branch commits invalidate both verdicts. Route `base-moved` to the tester
 so that base synchronization starts a fresh pair.
@@ -252,7 +261,7 @@ owner to merge that head.
 
 Review rounds use the existing step `limit`, defaulting to 5 when omitted.
 Reviewers may therefore have a `limit` route without an explicit numeric limit;
-other steps still require one. Finished runs include the current round, so
+other steps still require one. Matching send-backs include the current round, so
 `limit: 5` permits exactly five failing rounds before taking the limit route.
 The built-in lead routes `changes-needed` to `lead` and `limit` to `maintain-pr`:
 open findings are published in the PR description and prevent auto-merge.
@@ -264,3 +273,15 @@ fixes. Findings may include optional `file`, a repository-relative path. A new
 finding on a file unchanged since round one's commit becomes a note; earlier
 findings, changed files and missing-file findings remain serious. Notes do not
 route back to the lead.
+
+## Partial results and evidence
+
+A file artifact that cannot be retained becomes a note naming the file and
+reason; the other artifacts and the step result are kept. The tester evidence
+sweep keeps the newest 50 undeclared files by modification time per evidence
+directory and adds one note with the omitted count. Declared artifacts and
+instance logs are retained separately and do not consume this cap.
+
+A failed or cancelled child task's report names its local branch and head
+commit so the lead can reuse its work. The factory does not push that branch.
+If the local branch is unavailable, the report says the head is unavailable.
