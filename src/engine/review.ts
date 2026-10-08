@@ -12,7 +12,12 @@ import {
   type TicketDetail,
 } from '../store/tickets.ts'
 import { dependencySession } from './dependencies.ts'
-import { buildPrompt, openSession, readResult } from './prompt.ts'
+import {
+  agentResultError,
+  buildPrompt,
+  openSession,
+  readResult,
+} from './prompt.ts'
 import type { RunnerOptions } from './runner.ts'
 import type { Verdict } from './parallel-final.ts'
 
@@ -119,16 +124,21 @@ export async function runReviewAttempt(
         try {
           result = await readResult(directory, 'reviewer', options.home)
         } catch (error) {
-          resultValidationError = String(error)
+          const failure = await agentResultError(
+            error,
+            executionError,
+            log,
+            retry === 1
+              ? 'Invalid or missing result.json'
+              : 'Invalid or missing result.json after two runs',
+          )
+          resultValidationError = failure.message
           await writeFile(
             join(directory, 'result-error.txt'),
             resultValidationError,
           )
           if (retry === 1) continue
-          throw new Error(
-            `Invalid or missing result.json after two runs: ${String(error)}`,
-            { cause: error },
-          )
+          throw failure
         }
         if (executionError) throw executionError
         const artifacts: ArtifactInput[] = result.artifacts.map((artifact) => {

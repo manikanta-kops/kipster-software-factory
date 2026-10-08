@@ -1,7 +1,7 @@
 import { acceptedLessons } from '../store/lessons.ts'
 import type { Database } from '../store/database.ts'
 import type { DependencyCheckout } from '../workspace/dependencies.ts'
-import { readFile, realpath, stat, writeFile, rm } from 'node:fs/promises'
+import { open, readFile, realpath, stat, writeFile, rm } from 'node:fs/promises'
 import { dirname, join, resolve, relative, isAbsolute, sep } from 'node:path'
 import { roles, type RoleName } from '../domain/catalog.ts'
 import { addAttemptArtifacts, type TicketDetail } from '../store/tickets.ts'
@@ -208,8 +208,6 @@ export async function readResult(
   const raw: unknown = JSON.parse(
     await readFile(resolve(directory, 'result.json'), 'utf8'),
   )
-  if (!raw || typeof raw !== 'object' || !('artifacts' in raw))
-    throw new Error('result.json requires artifacts')
   const result = parseStepResult(raw)
   if (result.ownerReview && role !== 'reviewer')
     throw new Error('Only a reviewer can request ownerReview')
@@ -238,6 +236,50 @@ export async function readResult(
   for (const artifact of result.artifacts)
     if (artifact.path) await artifactPath(home, artifact.path)
   return result
+}
+
+export async function agentResultError(
+  resultError: unknown,
+  executionError: unknown,
+  log: string,
+  message: string,
+): Promise<Error> {
+  let tail = ''
+  if (executionError) {
+    // Agent output is streamed to disk; read only a bounded tail even for long runs.
+    const file = await open(log, 'r').catch(() => null)
+    if (file) {
+      try {
+        const { size } = await file.stat()
+        const buffer = Buffer.alloc(Math.min(size, 4096))
+        const { bytesRead } = await file.read(
+          buffer,
+          0,
+          buffer.length,
+          Math.max(0, size - buffer.length),
+        )
+        tail = buffer
+          .subarray(0, bytesRead)
+          .toString('utf8')
+          .trimEnd()
+          .split('\n')
+          .slice(-40)
+          .join('\n')
+      } catch {
+        // A missing diagnostic must not hide the process or result failure.
+      } finally {
+        await file.close()
+      }
+    }
+  }
+  return new Error(
+    [
+      ...(executionError ? [String(executionError)] : []),
+      ...(tail ? [`Agent output (last lines):\n${tail}`] : []),
+      `${message}: ${String(resultError)}`,
+    ].join('\n\n'),
+    { cause: executionError ?? resultError },
+  )
 }
 export async function artifactPath(
   home: string,

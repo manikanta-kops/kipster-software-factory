@@ -6,6 +6,8 @@ export default defineConfig({
   testDir: 'tests/e2e',
   outputDir: process.env['KSF_E2E_OUTPUT_DIR'] ?? 'test-results',
   fullyParallel: true,
+  // Each test seeds a PostgreSQL database; bound setup contention within its timeout.
+  workers: 2,
   forbidOnly: Boolean(process.env['CI']),
   retries: 0,
   use: {

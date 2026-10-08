@@ -33,7 +33,12 @@ import type { AgentExecutor } from '../executors/cli.ts'
 import { run } from '../executors/process.ts'
 import type { Workspaces } from '../workspace/workspaces.ts'
 import type { GitHub } from '../github/github.ts'
-import { buildPrompt, openSession, readResult } from './prompt.ts'
+import {
+  agentResultError,
+  buildPrompt,
+  openSession,
+  readResult,
+} from './prompt.ts'
 
 export interface RunnerOptions {
   database: Database
@@ -246,15 +251,24 @@ async function executeAttempt(
   }
   if (step.kind === 'agent') {
     const selected = await agentFor(options, context, step.role)
-    const lead =
-      step.role === 'lead'
-        ? await leadContext(options, { ...context, repository }, detail)
-        : undefined
     const before = await git(['rev-parse', 'HEAD'])
     const trusted = await loadTrustedInstructions(cwd, base, step.role, signal)
     let resultValidationError: string | undefined
     for (let retry = 0; retry < 2; retry++) {
       signal.throwIfAborted()
+      const currentDetail =
+        step.role === 'lead'
+          ? await getTicketDetail(database, ticket.number)
+          : detail
+      if (!currentDetail) throw new Error(`Missing ticket #${ticket.number}`)
+      const lead =
+        step.role === 'lead'
+          ? await leadContext(
+              options,
+              { ...context, repository },
+              currentDetail,
+            )
+          : undefined
       const directory = join(
         home,
         'steps',
@@ -263,12 +277,12 @@ async function executeAttempt(
         String(retry + 1),
       )
       await mkdir(directory, { recursive: true })
-      const session = await dependencySession(options, detail, signal)
+      const session = await dependencySession(options, currentDetail, signal)
       const prompt = await buildPrompt({
         database: options.database,
         dependencies: session.dependencies,
         step,
-        detail,
+        detail: currentDetail,
         directory,
         diff,
         home,
@@ -308,17 +322,29 @@ async function executeAttempt(
             ? await leadResultProblem(options, context, result)
             : null
         if (problem) throw new Error(problem)
+        if (step.role === 'builder' && result.outcome === 'done') {
+          const uncommitted = await git(['status', '--porcelain'])
+          if (uncommitted)
+            throw new Error(
+              `Builder left uncommitted changes:\n${uncommitted}\nCommit these files or remove them before reporting done.`,
+            )
+        }
       } catch (error) {
-        resultValidationError = String(error)
+        const failure = await agentResultError(
+          error,
+          executionError,
+          log,
+          retry === 0
+            ? 'Invalid or missing result.json'
+            : 'Invalid or missing result.json after two runs',
+        )
+        resultValidationError = failure.message
         await writeFile(
           join(directory, 'result-error.txt'),
           resultValidationError,
         )
         if (retry === 0) continue
-        throw new Error(
-          `Invalid or missing result.json after two runs: ${String(error)}`,
-          { cause: error },
-        )
+        throw failure
       }
       if (executionError) throw executionError
       if (
@@ -339,12 +365,6 @@ async function executeAttempt(
             `${step.role} changed the worktree; preserved for human inspection`,
           )
       }
-      if (
-        step.role === 'builder' &&
-        result.outcome === 'done' &&
-        (await git(['status', '--porcelain']))
-      )
-        throw new Error('Builder left uncommitted changes')
       if (result.outcome === 'needs-other-repo') {
         await requestOtherRepository(
           options,
