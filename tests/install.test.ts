@@ -20,6 +20,7 @@ import {
   managedCluster,
   stopCluster,
 } from '../src/store/cluster.ts'
+import { until } from './helpers/timing.ts'
 
 const cli = fileURLToPath(new URL('../src/cli.ts', import.meta.url))
 
@@ -125,6 +126,10 @@ test('setup without a database URL creates a private PostgreSQL that serve start
     serve.once('exit', resolve),
   )
   t.after(() => serve.kill('SIGKILL'))
+  await until(
+    async () => output,
+    (value) => value.includes('running at'),
+  )
   assert.ok(await waitForFactory(port, 60_000), output)
   assert.equal(isClusterRunning(cluster), true)
   serve.kill('SIGTERM')

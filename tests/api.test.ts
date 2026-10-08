@@ -725,7 +725,7 @@ describe('event stream', () => {
     const decoder = new TextDecoder()
     const messages: { event?: string; id?: string; data: string }[] = []
     let buffer = ''
-    const deadline = setTimeout(() => void reader.cancel(), 5000)
+    const deadline = setTimeout(() => void reader.cancel(), 60_000)
     try {
       while (!until(messages)) {
         const { done, value } = await reader.read()

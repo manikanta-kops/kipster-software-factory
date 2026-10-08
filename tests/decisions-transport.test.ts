@@ -7,6 +7,7 @@ import {
   typeSafeError,
 } from '../src/decider/typesafe.ts'
 import { facts } from './helpers/decisions.ts'
+import { controlledTimer } from './helpers/timing.ts'
 
 const sentinel = 'test-only-key-not-a-real-credential'
 const options = {
@@ -27,6 +28,8 @@ for (const [scenario, attempts, message] of [
   ],
 ] as const) {
   test(`TypeSafe ${scenario} makes ${attempts} request(s) and reports only a safe error`, async (t) => {
+    const deadline =
+      scenario === 'timeout' ? controlledTimer(t, 60_123) : undefined
     const received: {
       url: string | undefined
       method: string | undefined
@@ -42,7 +45,10 @@ for (const [scenario, attempts, message] of [
         authorization: req.headers.authorization,
         body: JSON.parse(text),
       })
-      if (scenario === 'timeout') return
+      if (deadline) {
+        deadline.expire()
+        return
+      }
       res.setHeader('content-type', 'application/json')
       if (typeof scenario === 'number') {
         res.writeHead(scenario)
@@ -71,7 +77,6 @@ for (const [scenario, attempts, message] of [
     await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
     const address = server.address()
     assert.ok(address && typeof address !== 'string')
-    // Counted at the client: a timed-out attempt may never reach a loaded server.
     let requests = 0
     const error = await askTypeSafe(
       sentinel,
@@ -81,7 +86,7 @@ for (const [scenario, attempts, message] of [
       AbortSignal.timeout(30_000),
       {
         baseURL: `http://127.0.0.1:${address.port}`,
-        timeout: scenario === 'timeout' ? 30 : 10_000,
+        timeout: scenario === 'timeout' ? 60_123 : 10_000,
         retry: { backoffInitialMs: 1, backoffMaxMs: 2 },
         fetch: (input, init) => {
           requests++
@@ -98,7 +103,7 @@ for (const [scenario, attempts, message] of [
     const reason = typeSafeError(error)
     assert.equal(reason, message)
     assert.equal(reason.includes(sentinel), false)
-    if (scenario !== 'timeout') assert.equal(received.length, attempts)
+    assert.equal(received.length, attempts)
     for (const request of received) {
       assert.equal(request.url, '/v1/systemone')
       assert.equal(request.method, 'POST')

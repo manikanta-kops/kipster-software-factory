@@ -9,6 +9,7 @@ import {
   linkOtherRepository,
   markRunning,
 } from '../src/store/tickets.ts'
+import { until } from './helpers/timing.ts'
 
 test('linked result evidence is copied before its ticket lock, cleaned on rollback and retained once across replays', async (t) => {
   const f = await otherRepositoriesFixture()
@@ -52,11 +53,10 @@ test('linked result evidence is copied before its ticket lock, cleaned on rollba
       'a'.repeat(40),
     )
   const recording = link()
-  const deadline = Date.now() + 3000
-  while (!(await readdir(directory).catch(() => [])).length) {
-    assert.ok(Date.now() < deadline, 'Copy waited for the ticket lock')
-    await new Promise((resolve) => setTimeout(resolve, 10))
-  }
+  await until(
+    () => readdir(directory).catch(() => []),
+    (entries) => entries.length > 0,
+  )
   await connection.query('ROLLBACK')
   connection.release()
   await assert.rejects(recording, /fixture link rollback/)
