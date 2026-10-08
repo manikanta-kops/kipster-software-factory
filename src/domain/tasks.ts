@@ -309,3 +309,8 @@ export function replacements(
   }
   return replaced
 }
+
+/** Local branch provenance lets the lead reuse work even after the child's worktree is removed. */
+export function keptTaskWork(branch: string, head: string | null): string {
+  return `Branch ${branch} keeps the work. Head commit: ${head ?? 'unavailable'}.`
+}

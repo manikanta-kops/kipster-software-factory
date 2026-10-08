@@ -101,24 +101,23 @@ export function createGitHub(command: typeof run = run): GitHub {
           pr.headRepositoryOwner.login.toLowerCase() ===
           repository.split('/')[0]?.toLowerCase(),
       )
-      const existing = matching.find((pr) => pr.state === 'OPEN') ?? matching[0]
+      const existing = matching.find((pr) => pr.state === 'OPEN')
       if (existing) {
-        if (existing.state === 'OPEN')
-          await command(
-            'gh',
-            [
-              'pr',
-              'edit',
-              existing.url,
-              '--repo',
-              repository,
-              '--title',
-              title,
-              '--body-file',
-              '-',
-            ],
-            { cwd, signal, input: body },
-          )
+        await command(
+          'gh',
+          [
+            'pr',
+            'edit',
+            existing.url,
+            '--repo',
+            repository,
+            '--title',
+            title,
+            '--body-file',
+            '-',
+          ],
+          { cwd, signal, input: body },
+        )
         return existing
       }
       const url = await command(

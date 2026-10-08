@@ -48,11 +48,21 @@ function attempt(
   status: AttemptState['status'],
   extra: Partial<AttemptState> = {},
 ): AttemptState {
-  return { stepId, status, waitingFor: null, next: null, ...extra }
+  return {
+    stepId,
+    status,
+    outcome: null,
+    waitingFor: null,
+    next: null,
+    ...extra,
+  }
 }
 
 const finished = (stepId: string, next: Next) =>
-  attempt(stepId, 'finished', { next })
+  attempt(stepId, 'finished', {
+    next,
+    outcome: stepId === 'review' ? 'changes-needed' : 'done',
+  })
 const humanWaiting = (stepId: string) =>
   attempt(stepId, 'waiting', { waitingFor: 'human' })
 const askWaiting = (stepId: string) =>
@@ -333,7 +343,7 @@ describe('limits', () => {
       waitingFor: 'ask',
       askReason: 'limit',
       summary:
-        'review reported changes-needed after 2 runs, reaching its limit of 2.',
+        'review reported changes-needed after 2 send-backs, reaching its limit of 2.',
     })
   })
 

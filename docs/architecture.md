@@ -28,8 +28,10 @@ The catalog in `src/domain/catalog.ts` is the single list of each.
   requests or merge.
 - **Nothing judges its own work.** The tester never wrote the change, and its
   edits are discarded.
-- **Every loop is bounded.** A step with a `limit` stops sending the ticket
-  back once it reaches the limit.
+- **Every loop is bounded.** A step's `limit` counts only matching send-back
+  outcomes, including the current report, and stops on the nth. Passing runs
+  do not consume it. `maintain-pr` bounds `ci-failed` and `conflict` separately;
+  `base-moved` uses the separate `maxBaseSyncs` bound.
 - **A verdict belongs to one commit.** New commits or a moved base branch void
   it.
 - **Every integration is optional.** The factory works without it. A missing
@@ -386,27 +388,38 @@ directory and follows log retention:
 }
 ```
 
-All three keys are required; a passed reviewer may also supply the typed
+Outcome and summary are required; omitted artifacts default to an empty list.
+A passed reviewer may also supply the typed
 `ownerReview` field described below. Outcomes must belong to the role's catalog contract
 or be `needs-decision`. Summary is nonempty. Artifacts use the existing lifecycle
 schema: kind (`plan`, `comment`, `finding`, `evidence`, `log`, `note`), title, and
 exactly one of Markdown `content` or a `path` to an existing file under the
 factory home. Symlink escapes are rejected. File artifacts are copied into `evidence/<ticket-id>/` before recording, so scratch and worktree cleanup cannot erase evidence.
 Artifact titles and scenario labels over 200 characters are shortened, not
-rejected. A successful planner must include a plan artifact. Missing or invalid results
+rejected. NUL bytes are stripped from all result string values before validation
+and storage. A successful planner must include a plan artifact. Missing or invalid results
 get one fresh CLI retry in a separate directory with the previous validation
 failure in its prompt; proof retries still receive fresh instances and must
 capture new evidence. A second invalid result fails
-the attempt and opens a human ask. Timeouts fail immediately. Chat text is never
+the attempt and opens a human ask. When the agent process fails without a valid
+result, diagnostics lead with the process error and the last 40 lines (at most
+4 KiB) of its log, followed by the result problem. A builder reporting done with
+uncommitted files gets the same retry, naming those files and asking it to commit
+or remove them. Each lead run, including a retry, rebuilds its context from current
+task and pull request state. Timeouts fail immediately. Chat text is never
 parsed for routing. Logs survive failures and cancellation.
 
 ### System actions and verification
 
 `maintain-pr` requires a clean worktree. Workspace preparation fetches origin;
-the action pins and merges `origin/<defaultBranch>` into the ticket branch.
-It never rebases or force-pushes. A conflict is aborted and reports `conflict`
-with a finding listing the files for the builder. After a clean merge, a prior
-tester or reviewer execution must be a passing verdict for the exact resulting HEAD;
+the action pins `origin/<defaultBranch>`, then fetches the remote ticket branch
+if it exists. Commits missing locally are merged into the ticket branch before
+merging the pinned base. It never rebases or force-pushes. An outside-commit
+conflict is aborted and reports `needs-decision`, naming the outside commits
+(short SHA, subject and author) and conflicting files. A base conflict is aborted
+and reports `conflict` with a finding listing the files for the builder.
+After clean merges, a prior tester or reviewer execution must be a passing verdict
+for the exact resulting HEAD;
 otherwise `base-moved` routes back to testing, or review when there is no tester.
 This check also catches a restart
 after the merge committed but before its outcome was recorded. Workflows without
@@ -435,8 +448,9 @@ stop publication; aborts and infrastructure failures propagate.
 Full plans, logs and prior review rounds remain in the factory timeline.
 
 The action pushes normally, creates or updates the branch PR through `gh`, and
-persists its URL. Existing closed/merged PRs are reused. It parks as
-`pull-request-checks`, recording the pushed commit and waiting timestamp, and
+persists its URL. Only an open PR is reused; if only closed or merged PRs exist,
+it creates a new one. It parks as `pull-request-checks`, recording the pushed commit
+and waiting timestamp, and
 immediately takes one check snapshot. Pending checks are subsequently polled
 without an executor slot. The GitHub adapter queries the exact SHA via `gh api`,
 paginates checks, and checks branch protection/rulesets for required checks not
@@ -980,7 +994,10 @@ scheduler tick, `engine/tasks.ts` advances each parked lead:
   The child's merge poll merges only after the lead chose `merge`, and then
   only under the usual auto-merge policy; `leave-open` leaves it for the
   owner. A merged child makes the task `merged`.
-- A cancelled child makes the task `failed`, with its last summary.
+- A cancelled child makes the task `failed`, with its last summary, local
+  branch name and head commit, so the lead can reuse the work. Integration
+  failures also name the branch and head; unavailable heads are explicit.
+  This reporting never pushes the child branch.
 - Pending tasks start in order while fewer than `maxParallel` run. A branch
   task's child branch starts from the lead's current head, recorded as
   `baseCommit`, and its prompts compare against it. A pull request task starts
@@ -1078,13 +1095,16 @@ like the configured reviewer list. Sessions, attempts, step directories and logs
 remain separate. Testers use disposable running instances when available,
 otherwise they check the change in a disposable checkout. Dependency checkouts are prepared once and shared read-only. Both verdicts must match the
 pinned branch head, and routing waits for both sessions, even on execution errors.
-A failure asks at the tester cursor; cancellation and recovery interrupt both,
+If one side crashes and the survivor reports `changes-needed`, its route and
+limits apply, while the crashed side is recorded as failed with no verdict.
+Other failures ask at the tester cursor; cancellation and recovery interrupt both,
 and recovery retries the whole pair once. New commits reject stale results;
 `base-moved` returns to testing and starts both again. A correction wake contains
 both summaries and findings.
 
-Both steps count one finished run per joined round, including passing runs,
-under the existing limits. Nonpassing routes take priority over passing routes;
+Both step results are kept per joined round. Each limit counts only finished
+reports matching the current send-back outcome, including the current report;
+passing re-tests do not consume it. Nonpassing routes take priority over passing routes;
 asks/cancellation take priority over correction loops, which take priority over
 forward limit routes. Ties use the tester's route. Thus a third failing tester
 round still asks by default, and a fifth failing review with a passing tester
@@ -1098,7 +1118,7 @@ reviewer must pass at the same head. Findings and per-reviewer verdict notes nam
 the agent; passing reviewers' owner-review reasons are retained. A serious
 finding routes back to the lead. The built-in review has `limit: 5` and routes
 `limit` to `maintain-pr`. Review steps without an explicit limit default to five
-finished rounds, counting the current run. Explicit limits on other workflows
+matching send-back reports, counting the current report. Explicit limits on other workflows
 remain unchanged. The final unresolved round publishes the open findings in the
 PR description; its nonpassing verdict prevents auto-merge. Publication accepts
 that exhausted verdict only at its reviewed head; a moved base still requires

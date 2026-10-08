@@ -573,29 +573,38 @@ export async function startParallelReview(
   })
 }
 
+export type ParallelCompletion = {
+  completion: { headCommit: string; reproductionAttemptId?: number }
+} & ({ result: StepResult } | { error: string })
+
 export async function completeParallelAttempts(
   database: Database,
   testerId: number,
   reviewerId: number,
-  tested: {
-    result: StepResult
-    completion: { headCommit: string; reproductionAttemptId?: number }
-  },
-  reviewed: { result: StepResult; completion: { headCommit: string } },
+  tested: ParallelCompletion,
+  reviewed: ParallelCompletion,
 ): Promise<Moved> {
-  const testerResult = parseStepResult(tested.result)
-  const reviewerResult = parseStepResult(reviewed.result)
+  const testerResult =
+    'result' in tested ? parseStepResult(tested.result) : null
+  const reviewerResult =
+    'result' in reviewed ? parseStepResult(reviewed.result) : null
+  const error =
+    'error' in tested
+      ? tested.error
+      : 'error' in reviewed
+        ? reviewed.error
+        : undefined
   if (tested.completion.headCommit !== reviewed.completion.headCommit)
     throw new Error('Parallel verdicts disagree on the commit')
   return withPreparedArtifacts(
     database,
     testerId,
-    testerResult.artifacts,
+    testerResult?.artifacts ?? [],
     (testerArtifacts) =>
       withPreparedArtifacts(
         database,
         reviewerId,
-        reviewerResult.artifacts,
+        reviewerResult?.artifacts ?? [],
         (reviewerArtifacts) =>
           transaction(database, async (connection) => {
             const locked = await lockByAttempt(connection, testerId)
@@ -615,6 +624,7 @@ export async function completeParallelAttempts(
               [...locked.attempts.slice(0, -1), reviewer],
               testerResult,
               reviewerResult,
+              error,
             )
             const events: NewEvent[] = []
             await insertArtifacts(
@@ -632,33 +642,43 @@ export async function completeParallelAttempts(
               events,
             )
             await connection.query(
-              `UPDATE attempts SET status = 'finished', outcome = $2, summary = $3, next = $4,
-           owner_review = $5, finished_at = now() WHERE id = $1`,
+              `UPDATE attempts SET status = $6, outcome = $2, summary = $3, next = $4,
+           owner_review = $5, error = $7, finished_at = now() WHERE id = $1`,
               [
                 reviewerId,
-                reviewerResult.outcome,
-                reviewerResult.summary,
+                reviewerResult?.outcome ?? null,
+                reviewerResult?.summary ?? null,
                 JSON.stringify(transition.close.next),
-                reviewerResult.ownerReview
+                reviewerResult?.ownerReview
                   ? JSON.stringify(reviewerResult.ownerReview)
                   : null,
+                reviewerResult ? 'finished' : 'failed',
+                'error' in reviewed ? reviewed.error : null,
               ],
             )
             events.push({
               ticketId: locked.id,
-              kind: 'attempt.finished',
+              kind: reviewerResult ? 'attempt.finished' : 'attempt.failed',
               data: {
                 attemptId: reviewerId,
                 stepId: reviewer.stepId,
-                outcome: reviewerResult.outcome,
+                outcome: reviewerResult?.outcome ?? null,
                 next: transition.close.next,
+                ...('error' in reviewed ? { error: reviewed.error } : {}),
               },
             })
             return apply(
               connection,
               locked,
               transition,
-              { summary: testerResult.summary, ...tested.completion },
+              {
+                summary: testerResult?.summary ?? null,
+                ...tested.completion,
+                ...('error' in tested ? { error: tested.error } : {}),
+                ...(testerResult?.ownerReview
+                  ? { ownerReview: testerResult.ownerReview }
+                  : {}),
+              },
               events,
             )
           }),
