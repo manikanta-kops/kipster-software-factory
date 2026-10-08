@@ -1091,8 +1091,8 @@ test('saved settings reach steps that start later without a restart', async (t) 
   )
   assert.match(timedOut.attempts[0]!.error!, /timed out after 0\.01 minutes/)
   assert.match(timedOut.attempts[0]!.headCommit!, /^[0-9a-f]{40}$/)
-  await assertDead(join(f.invocations[2]!, 'pid'))
-  await assertDead(join(f.invocations[2]!, 'descendant.pid'))
+  await assertDead(await pidOf(join(f.invocations[2]!, 'pid')))
+  await assertDead(await pidOf(join(f.invocations[2]!, 'descendant.pid')))
 
   await saveSettings(f.store.database, {
     ...saved,
