@@ -478,7 +478,7 @@ test('bug test/review join routes back to fix with both results', async (t) => {
   )
 })
 
-test('paired limits retain each finished run and choose stops/corrections before forward exhaustion', async () => {
+test('paired limits retain each send-back and choose stops/corrections before forward exhaustion', async () => {
   const workflow = (await builtInWorkflow('lead')).workflow
   const tester = workflow.steps.find((s) => s.id === 'final-test')!
   assert.equal(parallelReviewer(workflow, tester)!.id, 'review')
@@ -486,9 +486,21 @@ test('paired limits retain each finished run and choose stops/corrections before
     ...Array.from(
       { length: rounds - 1 },
       () =>
-        ({ stepId, status: 'finished', waitingFor: null, next: null }) as const,
+        ({
+          stepId,
+          status: 'finished',
+          outcome: 'changes-needed',
+          waitingFor: null,
+          next: null,
+        }) as const,
     ),
-    { stepId, status: 'running', waitingFor: null, next: null } as const,
+    {
+      stepId,
+      status: 'running',
+      outcome: null,
+      waitingFor: null,
+      next: null,
+    } as const,
   ]
   const pass = { outcome: 'passed', summary: 'Passed', artifacts: [] }
   const fail = { ...pass, outcome: 'changes-needed' }

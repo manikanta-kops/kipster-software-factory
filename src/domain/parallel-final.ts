@@ -1,4 +1,9 @@
-import { afterResult, type AttemptState, type StepResult } from './lifecycle.ts'
+import {
+  afterFailure,
+  afterResult,
+  type AttemptState,
+  type StepResult,
+} from './lifecycle.ts'
 import { nextStep } from './routing.ts'
 import type { Step, Workflow } from './workflow.ts'
 
@@ -21,9 +26,26 @@ export function afterParallelResults(
   workflow: Workflow,
   testerHistory: readonly AttemptState[],
   reviewerHistory: readonly AttemptState[],
-  tester: StepResult,
-  reviewer: StepResult,
+  tester: StepResult | null,
+  reviewer: StepResult | null,
+  error = 'Missing paired verdict',
 ) {
+  if (!tester || !reviewer) {
+    const survivor = tester ?? reviewer
+    const failure = afterFailure(testerHistory, error)
+    const tested = tester
+      ? afterResult(workflow, testerHistory, tester)
+      : failure
+    const chosen =
+      survivor?.outcome === 'changes-needed'
+        ? afterResult(
+            workflow,
+            tester ? testerHistory : reviewerHistory,
+            survivor,
+          )
+        : failure
+    return { ...chosen, close: { ...tested.close, next: chosen.close.next } }
+  }
   const tested = afterResult(workflow, testerHistory, tester)
   const reviewed = afterResult(workflow, reviewerHistory, reviewer)
   const candidates = [

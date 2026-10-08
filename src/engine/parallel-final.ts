@@ -7,6 +7,7 @@ import {
   startParallelReview,
   type AttemptContext,
   type TicketDetail,
+  type ParallelCompletion,
 } from '../store/tickets.ts'
 import { dependencySession } from './dependencies.ts'
 import { runProofAttempt } from './proof.ts'
@@ -62,17 +63,31 @@ export async function runParallelFinal(
         result.value.result.artifacts,
       )
   }
-  const failed = results.find((result) => result.status === 'rejected')
-  if (failed?.status === 'rejected') throw failed.reason
-  const tested = results[0]!
-  const reviewed = results[1]!
-  if (tested.status !== 'fulfilled' || reviewed.status !== 'fulfilled')
-    throw new Error('Missing paired verdict')
   signal.throwIfAborted()
+  const failed = results.find((result) => result.status === 'rejected')
+  if (
+    failed?.status === 'rejected' &&
+    !results.some(
+      (result) =>
+        result.status === 'fulfilled' &&
+        result.value.result.outcome === 'changes-needed',
+    )
+  )
+    throw failed.reason
+  const verdicts: ParallelCompletion[] = results.map((result) =>
+    result.status === 'fulfilled'
+      ? { ...result.value, result: { ...result.value.result, artifacts: [] } }
+      : {
+          error:
+            result.reason instanceof Error
+              ? result.reason.message
+              : String(result.reason),
+          completion: { headCommit: head },
+        },
+  )
   if (
     (await run('git', ['rev-parse', 'HEAD'], { cwd, signal })) !== head ||
-    tested.value.completion.headCommit !== head ||
-    reviewed.value.completion.headCommit !== head
+    verdicts.some((verdict) => verdict.completion.headCommit !== head)
   )
     throw new Error(
       'Ticket branch moved during final checks; verdicts are stale',
@@ -81,8 +96,8 @@ export async function runParallelFinal(
     options.database,
     context.attempt.id,
     attempt.id,
-    { ...tested.value, result: { ...tested.value.result, artifacts: [] } },
-    { ...reviewed.value, result: { ...reviewed.value.result, artifacts: [] } },
+    verdicts[0]!,
+    verdicts[1]!,
   )
   return true
 }
