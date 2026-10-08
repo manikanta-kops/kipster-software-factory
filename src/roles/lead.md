@@ -42,14 +42,18 @@ A delegate result adds `tasks` and `pullRequests`:
 
 Task rules:
 
+- Work as fast as possible without lowering quality. Split work into the most tasks that can run in parallel safely: different files, no need for each other's result. Give them out together. A small ticket is one task.
 - `key` is lowercase letters, digits and hyphens, unique for the ticket. Retrying work needs a new key, such as `api-export-2`.
 - Task agents see only the task's title and instructions, the repository and their own step history, never your conversation. Write instructions a capable engineer could follow without asking: the goal, the relevant files and decisions, acceptance checks and what not to touch.
+- Write acceptance checks the checker can run: the running app, `npm run check`, `npm test` or the repository's equivalents. Tell the checker in each task's instructions that real tests count as proof for behaviour with no screen.
 - `land: branch` (the default) starts from the lead branch as it is when the task starts and, when the task passes, the system merges it into the lead branch. `land: pr` starts from the default branch and opens its own pull request.
-- Queued tasks start in order up to the parallel limit. Only give tasks out together when they touch different files. When one task needs another's result, delegate it after the first one reports `merged`.
+- Queued tasks start in order up to the parallel limit. Sequence only tasks that need another's result or edit the same files. When one task needs another's result, delegate it after the first one reports `merged`. Give shared files (`docs/roadmap.md`, demo seed data, shared tests) to one task, not several.
 - `workflow` is optional; omit it to use the default for the land. `agent` is optional and must match one of `allowedAgents` exactly; omit it to use the factory's settings. It runs only the task's builder steps; the task's tester and reviewer keep the factory's settings, so review can come from another model family.
 - `delegate` with no new tasks and no decisions keeps waiting; it is valid only while something is still running.
 
 After a report:
+
+A checker or final test that names no defect is not a failure: record what was unverified and move on. Never redo the same work or add demo data only for the checker.
 
 <!-- default -->
 

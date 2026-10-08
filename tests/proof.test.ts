@@ -20,6 +20,7 @@ import { scenarioIndex } from '../src/domain/evidence.ts'
 import { untestedReasons } from '../src/domain/task-testing.ts'
 import { getMergeGate } from '../src/store/merge-gates.ts'
 import { proofFixture } from './helpers/proof.ts'
+import { until } from './helpers/timing.ts'
 
 async function fixture(
   t: TestContext,
@@ -41,7 +42,13 @@ async function cleaned(f: Awaited<ReturnType<typeof proofFixture>>) {
     for (const instance of proofContext(invocation.prompt).instances) {
       await assert.rejects(access(instance.checkout))
       await assert.rejects(
-        fetch(`${instance.url}/health`, { signal: AbortSignal.timeout(500) }),
+        fetch(`${instance.url}/health`, {
+          signal: AbortSignal.timeout(60_000),
+        }),
+        (error: unknown) =>
+          error instanceof TypeError &&
+          (error.cause as NodeJS.ErrnoException | undefined)?.code ===
+            'ECONNREFUSED',
       )
       assert.ok(
         !rows.some(
@@ -342,19 +349,16 @@ test('not-reproduced asks the owner and does not start a fix', async (t) => {
 })
 
 async function testerDroveApp(f: Awaited<ReturnType<typeof proofFixture>>) {
-  // Generous under parallel load; it only bounds a hang.
-  const end = Date.now() + 60_000
-  while (true) {
-    const invocation = f.invocations.at(-1)!
-    try {
-      if (invocation.prompt.startsWith('You are an independent tester')) {
-        await access(join(invocation.directory, 'observations.json'))
-        return
-      }
-    } catch {}
-    assert.ok(Date.now() < end, 'agent did not drive app')
-    await new Promise((resolve) => setTimeout(resolve, 20))
-  }
+  await until(async () => {
+    const invocation = f.invocations.findLast((candidate) =>
+      candidate.prompt.startsWith('You are an independent tester'),
+    )
+    if (!invocation) return false
+    return access(join(invocation.directory, 'observations.json')).then(
+      () => true,
+      () => false,
+    )
+  }, Boolean)
 }
 
 for (const mode of ['failure', 'timeout', 'cancel', 'crash'] as const) {
@@ -388,11 +392,10 @@ for (const mode of ['failure', 'timeout', 'cancel', 'crash'] as const) {
       try {
         await testerDroveApp(f)
         await cancelTicket(f.store.database, { ticketNumber: f.ticket.number })
-        const end = Date.now() + 60_000
-        while ((await f.detail()).ticket.status === 'running') {
-          assert.ok(Date.now() < end, 'scheduler did not stop the step')
-          await new Promise((resolve) => setTimeout(resolve, 20))
-        }
+        await until(
+          () => f.detail(),
+          (detail) => detail.ticket.status !== 'running',
+        )
       } finally {
         await scheduler.close()
         await events.close()
@@ -466,7 +469,11 @@ test('base must still fail: an already-fixed base cannot produce a passing bug v
   const tested = await f.next('test')
   assert.equal(tested.outcome, 'changes-needed')
   assert.equal(
-    proofContext(f.invocations.at(-1)!.prompt).instances[0]!.commit,
+    proofContext(
+      f.invocations.findLast((invocation) =>
+        invocation.prompt.startsWith('You are an independent tester'),
+      )!.prompt,
+    ).instances[0]!.commit,
     base,
   )
   await cleaned(f)
@@ -547,7 +554,9 @@ test('bug reproduced on base → fixed → tester proves failing base and passin
   assert.equal(tested.headCommit, fixed.headCommit)
   assert.equal(tested.reproductionAttemptId, reproduced.id)
   assert.match(tested.summary!, new RegExp(`base ${f.base}`))
-  const invocation = f.invocations.at(-1)!
+  const invocation = f.invocations.findLast((candidate) =>
+    candidate.prompt.startsWith('You are an independent tester'),
+  )!
   const instances = proofContext(invocation.prompt).instances
   assert.deepEqual(
     instances.map((i) => i.commit),

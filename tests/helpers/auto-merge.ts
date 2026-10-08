@@ -152,9 +152,9 @@ export async function autoMergeFixture(
         },
   })
   const workspaces = new Workspaces(home)
-  const signal = AbortSignal.timeout(30_000)
-  await workspaces.prepareRepository(repository, signal)
-  const cwd = await workspaces.prepare(ticket, repository, signal)
+  const operationSignal = () => AbortSignal.timeout(60_000)
+  await workspaces.prepareRepository(repository, operationSignal())
+  const cwd = await workspaces.prepare(ticket, repository, operationSignal())
   let head = await commit(
     cwd,
     settings.path ?? 'ui.ts',
@@ -272,12 +272,12 @@ export async function autoMergeFixture(
   }
   if (settings.tester !== false) await pass()
   if (settings.reviewer !== false) await pass()
-  await runAttempt(options, await next(), signal)
+  await runAttempt(options, await next(), operationSignal())
   if (
     (await getTicketDetail(store.database, ticket.number))!.ticket
       .currentStep === 'merge'
   )
-    await runAttempt(options, await next(), signal)
+    await runAttempt(options, await next(), operationSignal())
   return {
     root,
     source,
@@ -288,7 +288,9 @@ export async function autoMergeFixture(
     repository,
     ticket,
     options,
-    signal,
+    get signal() {
+      return operationSignal()
+    },
     commit,
     pass,
     next,

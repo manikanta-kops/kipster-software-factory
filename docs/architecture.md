@@ -91,8 +91,11 @@ flowchart LR
 
 ## Ticket lifecycle
 
-A ticket runs one step at a time as a series of **attempts**; the database
-allows at most one open (pending, running or waiting) attempt per ticket.
+A ticket has one lifecycle cursor, represented by a scheduled **attempt**.
+An adjacent tester/reviewer pair runs concurrently: the tester owns the cursor
+and the reviewer has a separate linked running attempt. Migration 018 permits
+that one sibling while retaining one open cursor per ticket. Both remain running
+until the join records their verdicts and opens one next attempt atomically.
 `src/domain/lifecycle.ts` decides every move and `src/store/tickets.ts` applies
 it, with its artifacts and events, in one transaction.
 
@@ -1048,6 +1051,28 @@ then default. The scheduler records the selection once; execution and proof
 reuse it. Replacements appear as ticket notes in the timeline. If no candidate
 is independent, execution continues with the original and a note, and the
 commit-bound gate requires owner merging for that verdict.
+
+A tester immediately followed by a reviewer, with success continuing to that
+reviewer, runs as one concurrent pair. This includes `lead`'s
+`final-test`/`review`, `bug`'s and `task-pr`'s `test`/`review`, and any
+owner-defined workflow of that shape. The reviewer does not see that round's
+tester evidence. The paired reviewer shares the tester's scheduler slot and timeout,
+like the configured reviewer list. Sessions, attempts, step directories and logs
+remain separate. Testers use disposable running instances when available,
+otherwise they check the change in a disposable checkout. Dependency checkouts are prepared once and shared read-only. Both verdicts must match the
+pinned branch head, and routing waits for both sessions, even on execution errors.
+A failure asks at the tester cursor; cancellation and recovery interrupt both,
+and recovery retries the whole pair once. New commits reject stale results;
+`base-moved` returns to testing and starts both again. A correction wake contains
+both summaries and findings.
+
+Both steps count one finished run per joined round, including passing runs,
+under the existing limits. Nonpassing routes take priority over passing routes;
+asks/cancellation take priority over correction loops, which take priority over
+forward limit routes. Ties use the tester's route. Thus a third failing tester
+round still asks by default, and a fifth failing review with a passing tester
+still publishes unresolved findings through `maintain-pr`. Both passes continue
+after review. The stored verdicts remain separate for publication and merge gates.
 
 A lead's final review runs every configured reviewer in parallel against one
 commit, in separate indexed step directories with separate retained logs. Other

@@ -660,6 +660,30 @@ waiting but cannot report `done`. Owner retry or move resumes the child; its
 finish is reported normally. Cancelling the lead cancels parked children too.
 With lights-out off, the original approval and reporting behaviour applies.
 
+## Concurrent testing and review
+
+A tester immediately followed by a reviewer runs alongside that reviewer when
+its `passed` route continues there (implicitly or explicitly). No step field is
+needed. This applies to the built-in `lead`, `bug` and `task-pr` workflows,
+and to any owner-defined workflow of that shape. The reviewer does not see
+that round's tester evidence. The tester uses the running disposable app when
+available, otherwise it checks the change in a disposable checkout. All
+configured lead reviewers run as separate sessions. Each step has its own attempt, directories and logs.
+The paired reviewer shares the tester's scheduler slot and timeout. Both
+verdicts must match the pinned branch head. Both passes continue after review; a correction
+wake carries both results and findings, only after both finish.
+
+Each joined round counts one finished run for each step, even when it passes.
+Existing numeric limits and `limit` routes apply independently. When results
+route differently, asks/cancellation win over backward correction routes, then
+forward routes; the tester wins ties. A tester at its third failing round still
+asks unless configured otherwise. A lead review at its fifth failing round
+continues to `maintain-pr` when the tester passes; its unresolved findings still
+prevent auto-merge. Execution errors wait for the sibling, then ask at testing.
+Cancellation interrupts both; crash recovery retries the whole pair once.
+New branch commits invalidate both verdicts. Route `base-moved` to the tester
+so that base synchronization starts a fresh pair.
+
 ## Reviewer lists, independence and rounds
 
 Settings accepts global `agents.reviewers` (default `[]`) and optional

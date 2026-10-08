@@ -418,6 +418,21 @@ test('pull request tasks are checked in their checkout and wait for the lead: me
   })
   const lead = await f.lead()
   await f.start()
+  for (const key of ['keep', 'park']) {
+    await until(
+      () => f.detail(lead.number),
+      (detail) =>
+        detail.tasks.some(
+          (task) =>
+            task.key === key && ['pr-ready', 'left-open'].includes(task.status),
+        ),
+    )
+    await until(
+      () => f.detail(lead.number),
+      (detail) =>
+        detail.tasks.some((task) => task.key === key && task.decision !== null),
+    )
+  }
   const decided = await until(
     () => f.detail(lead.number),
     (detail) =>
@@ -798,7 +813,9 @@ test("a lead's branch task is built, checked and merged with the checker's verdi
       ['test', 'passed'],
     ],
   )
-  const checked = child.attempts[1]!.headCommit!
+  const checked = child.attempts.find(
+    (attempt) => attempt.stepId === 'test',
+  )!.headCommit!
   assert.match(
     task.result!,
     new RegExp(
@@ -826,7 +843,7 @@ test("a lead's branch task is built, checked and merged with the checker's verdi
   assert.deepEqual(untestedReasons(done), expected)
   const snapshot = await until(
     () => getMergeGate(f.database, done.ticket.id),
-    (gate) => gate !== null,
+    (gate) => gate?.latest.ready === true,
   )
   assert.deepEqual(
     snapshot!.latest.needsOwner.filter((reason) =>

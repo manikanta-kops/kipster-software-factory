@@ -22,6 +22,7 @@ import {
 } from '../src/verification/harness.ts'
 import type { Kit } from '../src/kit/kit.ts'
 import { createTestStore } from './helpers/store.ts'
+import { until, controlledTimeout } from './helpers/timing.ts'
 
 async function fixture(t: TestContext) {
   const root = await mkdtemp(join(tmpdir(), 'verification-test-'))
@@ -67,7 +68,7 @@ async function fixture(t: TestContext) {
       ready: 'http://127.0.0.1:{port}/health',
       ports: 2,
       database: 'postgres',
-      timeoutSeconds: 5,
+      timeoutSeconds: 60,
     },
   }
   return {
@@ -208,25 +209,43 @@ test('harness runs exact detached commit, setup/check, isolated ports/database a
   )
 })
 
-// A crash must end the start command before the deadline; under parallel test
-// load Node can take over 300 ms just to start the fixture. The timeout's shell
-// logs before starting Node, so a log line exists well before its deadline.
-for (const [mode, expected, timeoutSeconds] of [
-  ['timeout', 'ready', 3],
-  ['crash', 'start', 30],
+for (const [mode, expected] of [
+  ['timeout', 'ready'],
+  ['crash', 'start'],
 ] as const) {
   test(`harness ${mode} names the stage and cleans checkout/database`, async (t) => {
     const f = await fixture(t)
-    f.kit.verify!.start = `${mode === 'timeout' ? 'echo fixture start; exec ' : ''}${process.execPath} app.ts {port} {databaseUrl} ${mode}`
-    f.kit.verify!.timeoutSeconds = timeoutSeconds
+    f.kit.verify!.start = `${process.execPath} app.ts {port} {databaseUrl} ${mode}`
+    const deadline =
+      mode === 'timeout' ? controlledTimeout(t, 60_000) : undefined
     let failure: VerificationError | undefined
-    try {
-      await startVerification(f)
-      assert.fail('should fail')
-    } catch (error) {
+    const starting = startVerification(f)
+    const failed = assert.rejects(starting, (error: unknown) => {
       assert.ok(error instanceof VerificationError)
       failure = error
+      return true
+    })
+    if (deadline) {
+      await until(async () => {
+        const entries = await readdir(join(f.home, 'verification')).catch(
+          () => [],
+        )
+        const logs = await Promise.all(
+          entries
+            .filter((name) => name.startsWith('evidence-'))
+            .map((name) =>
+              readFile(
+                join(f.home, 'verification', name, 'start.log'),
+                'utf8',
+              ).catch(() => ''),
+            ),
+        )
+        return logs.some((log) => log.includes('fixture not ready'))
+      }, Boolean)
+      deadline.expire()
     }
+    await failed
+    assert.ok(failure)
     assert.equal(failure.stage, expected)
     assert.match((await verificationFinding(failure)).content!, /fixture/)
     assert.ok(

@@ -8,6 +8,7 @@ export async function dependencySession(
   detail: TicketDetail,
   signal: AbortSignal,
 ) {
+  if (options.preparedSession) return options.preparedSession
   const dependencies = await prepareDependencies(
     options.workspaces,
     detail.ticket,

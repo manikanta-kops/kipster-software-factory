@@ -221,7 +221,13 @@ for (const scenario of ['unchanged', 'kept'] as const) {
       })
     })
     const ticket = await f.lead()
+    const expected = 2
     await f.start()
+    for (let review = 1; review <= expected; review++)
+      await until(
+        async () => round,
+        (observedRound) => observedRound >= review,
+      )
     const detail = await until(
       async () => {
         if (f.errors.length) throw new Error(f.errors.map(String).join('\n'))
