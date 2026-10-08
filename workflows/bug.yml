@@ -29,6 +29,7 @@ steps:
   - id: maintain-pr
     kind: system
     action: maintain-pr
+    limit: 3
     routes:
       conflict: fix
       ci-failed: fix

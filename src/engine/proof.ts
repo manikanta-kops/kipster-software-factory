@@ -457,8 +457,9 @@ async function validateProof(
 async function capturedEvidence(
   instance: Instance,
   declared: ReadonlySet<string>,
+  maxFiles = 50,
 ): Promise<ArtifactInput[]> {
-  const artifacts: ArtifactInput[] = []
+  const files: { path: string; mtime: number }[] = []
   for (const entry of await readdir(instance.evidenceDir, {
     recursive: true,
     withFileTypes: true,
@@ -470,12 +471,22 @@ async function capturedEvidence(
       instance.logs.some((log) => log.path === path)
     )
       continue
-    artifacts.push({
+    files.push({ path, mtime: (await lstat(path)).mtimeMs })
+  }
+  files.sort((a, b) => b.mtime - a.mtime || a.path.localeCompare(b.path))
+  const artifacts: ArtifactInput[] = files
+    .slice(0, maxFiles)
+    .map(({ path }) => ({
       kind: 'evidence',
       title: `${instance.surface} ${instance.commit.slice(0, 7)}: ${relative(instance.evidenceDir, path)}`,
       path,
+    }))
+  if (files.length > maxFiles)
+    artifacts.push({
+      kind: 'note',
+      title: 'Evidence capture limit',
+      content: `${instance.surface} ${instance.commit}: kept the newest ${maxFiles} undeclared evidence files by modification time; left out ${files.length - maxFiles} files. Declared artifacts and instance logs are kept separately.`,
     })
-  }
   return artifacts
 }
 

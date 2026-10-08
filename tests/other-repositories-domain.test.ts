@@ -17,7 +17,13 @@ const parsed = parseWorkflow(
 if (!parsed.ok) throw new Error(parsed.errors.join())
 const workflow = parsed.workflow
 const running: AttemptState[] = [
-  { stepId: 'build', status: 'running', waitingFor: null, next: null },
+  {
+    stepId: 'build',
+    status: 'running',
+    outcome: null,
+    waitingFor: null,
+    next: null,
+  },
 ]
 const waiting: AttemptState[] = [
   { ...running[0]!, status: 'waiting', waitingFor: 'other-repo' },

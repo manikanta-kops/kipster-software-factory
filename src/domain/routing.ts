@@ -24,7 +24,7 @@ export function firstStep(workflow: Workflow): Step {
 /**
  * Resolves the next move for a ticket.
  *
- * `runs` counts how many times the current step has run, including this one.
+ * `sendBacks` counts finished reports with this outcome, including this one.
  * Unrouted outcomes follow fixed defaults: the step's success outcome continues
  * to the next step (or finishes after the last one), `rejected` cancels, and
  * anything else pauses the ticket for a human.
@@ -33,7 +33,7 @@ export function nextStep(
   workflow: Workflow,
   stepId: string,
   outcome: string,
-  runs: number,
+  sendBacks: number,
 ): Next {
   const index = indexOf(workflow, stepId)
   const step = workflow.steps[index] as Step
@@ -45,7 +45,12 @@ export function nextStep(
   const sendsBack =
     target.to === 'step' && indexOf(workflow, target.stepId) <= index
   const limit = stepLimit(step)
-  if (sendsBack && limit !== undefined && runs >= limit) {
+  if (
+    sendsBack &&
+    !stepContract(step).limitExemptOutcomes?.includes(outcome) &&
+    limit !== undefined &&
+    sendBacks >= limit
+  ) {
     const limitRoute = step.routes[LIMIT]
     return limitRoute === undefined
       ? { to: 'ask', because: 'limit' }

@@ -28,8 +28,10 @@ The catalog in `src/domain/catalog.ts` is the single list of each.
   requests or merge.
 - **Nothing judges its own work.** The tester never wrote the change, and its
   edits are discarded.
-- **Every loop is bounded.** A step with a `limit` stops sending the ticket
-  back once it reaches the limit.
+- **Every loop is bounded.** A step's `limit` counts only matching send-back
+  outcomes, including the current report, and stops on the nth. Passing runs
+  do not consume it. `maintain-pr` bounds `ci-failed` and `conflict` separately;
+  `base-moved` uses the separate `maxBaseSyncs` bound.
 - **A verdict belongs to one commit.** New commits or a moved base branch void
   it.
 - **Every integration is optional.** The factory works without it. A missing
@@ -981,7 +983,10 @@ scheduler tick, `engine/tasks.ts` advances each parked lead:
   The child's merge poll merges only after the lead chose `merge`, and then
   only under the usual auto-merge policy; `leave-open` leaves it for the
   owner. A merged child makes the task `merged`.
-- A cancelled child makes the task `failed`, with its last summary.
+- A cancelled child makes the task `failed`, with its last summary, local
+  branch name and head commit, so the lead can reuse the work. Integration
+  failures also name the branch and head; unavailable heads are explicit.
+  This reporting never pushes the child branch.
 - Pending tasks start in order while fewer than `maxParallel` run. A branch
   task's child branch starts from the lead's current head, recorded as
   `baseCommit`, and its prompts compare against it. A pull request task starts
@@ -1079,13 +1084,16 @@ like the configured reviewer list. Sessions, attempts, step directories and logs
 remain separate. Testers use disposable running instances when available,
 otherwise they check the change in a disposable checkout. Dependency checkouts are prepared once and shared read-only. Both verdicts must match the
 pinned branch head, and routing waits for both sessions, even on execution errors.
-A failure asks at the tester cursor; cancellation and recovery interrupt both,
+If one side crashes and the survivor reports `changes-needed`, its route and
+limits apply, while the crashed side is recorded as failed with no verdict.
+Other failures ask at the tester cursor; cancellation and recovery interrupt both,
 and recovery retries the whole pair once. New commits reject stale results;
 `base-moved` returns to testing and starts both again. A correction wake contains
 both summaries and findings.
 
-Both steps count one finished run per joined round, including passing runs,
-under the existing limits. Nonpassing routes take priority over passing routes;
+Both step results are kept per joined round. Each limit counts only finished
+reports matching the current send-back outcome, including the current report;
+passing re-tests do not consume it. Nonpassing routes take priority over passing routes;
 asks/cancellation take priority over correction loops, which take priority over
 forward limit routes. Ties use the tester's route. Thus a third failing tester
 round still asks by default, and a fifth failing review with a passing tester
@@ -1099,7 +1107,7 @@ reviewer must pass at the same head. Findings and per-reviewer verdict notes nam
 the agent; passing reviewers' owner-review reasons are retained. A serious
 finding routes back to the lead. The built-in review has `limit: 5` and routes
 `limit` to `maintain-pr`. Review steps without an explicit limit default to five
-finished rounds, counting the current run. Explicit limits on other workflows
+matching send-back reports, counting the current report. Explicit limits on other workflows
 remain unchanged. The final unresolved round publishes the open findings in the
 PR description; its nonpassing verdict prevents auto-merge. Publication accepts
 that exhausted verdict only at its reviewed head; a moved base still requires

@@ -23,7 +23,7 @@ import {
   type TicketStatus,
   type WaitingFor,
 } from './records.ts'
-import { firstStep, type Next, nextStep } from './routing.ts'
+import { firstStep, type Next, nextStep, stepLimit } from './routing.ts'
 import {
   missingCapabilities,
   routeKeys,
@@ -173,6 +173,7 @@ export const stepResultSchema = z
 export interface AttemptState {
   readonly stepId: string
   readonly status: AttemptStatus
+  readonly outcome: string | null
   readonly waitingFor: WaitingFor | null
   readonly next: Next | null
 }
@@ -235,6 +236,21 @@ export function runsOf(
       attempt.stepId === stepId &&
       attempt.status === 'finished' &&
       attempt.waitingFor !== 'ask',
+  ).length
+}
+
+/** Earlier finished reports matching this send-back outcome; API run counts stay separate. */
+export function sendBacksOf(
+  attempts: readonly AttemptState[],
+  stepId: string,
+  outcome: string,
+): number {
+  return attempts.filter(
+    (attempt) =>
+      attempt.stepId === stepId &&
+      attempt.status === 'finished' &&
+      attempt.waitingFor !== 'ask' &&
+      attempt.outcome === outcome,
   ).length
 }
 
@@ -669,7 +685,7 @@ function route(
   outcome: string,
   summary: string,
 ): Transition {
-  const runs = runsOf(history, step.id) + 1
+  const runs = sendBacksOf(history, step.id, outcome) + 1
   const next = nextStep(workflow, step.id, outcome, runs)
   const close: Closing = { status: 'finished', outcome, next }
   switch (next.to) {
@@ -701,7 +717,7 @@ function askSummary(
     case 'needs-decision':
       return `${step.id} needs a decision: ${summary}`
     case 'limit':
-      return `${step.id} reported ${outcome} after ${runs} runs, reaching its limit of ${step.limit}.`
+      return `${step.id} reported ${outcome} after ${runs} send-backs, reaching its limit of ${stepLimit(step)}.`
     case 'routed':
       return `${step.id} reported ${outcome}, which this workflow sends to you.`
     default:
