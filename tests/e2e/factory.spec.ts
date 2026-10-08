@@ -6,27 +6,24 @@ test('home separates attention, progress and finished tickets', async ({
   factory,
 }) => {
   await page.goto(factory.url)
-  await expect(
-    page.getByRole('heading', { name: 'Ticket summaries', exact: true }),
-  ).toBeVisible()
   await expect(page.locator('output.status')).toHaveText('Live')
+  await expect(page.getByText('Ticket summaries')).toHaveCount(0)
+  const needs = page.getByRole('region', { name: 'Needs you', exact: true })
+  const card = (title: string) =>
+    needs.locator('.decision').filter({
+      has: page.getByRole('link', { name: title, exact: true }),
+    })
   await expect(
-    page
-      .locator('.today-summary')
-      .filter({ hasText: 'Validate email addresses on sign-up' }),
-  ).toContainText('Blocked')
-  await expect(
-    page
-      .locator('.today-summary')
-      .filter({ hasText: 'Show order totals in the header' })
-      .getByRole('link', { name: /View details/ }),
-  ).toBeVisible()
-  await expect(
-    page
-      .locator('.today-summary')
-      .filter({ hasText: 'Add a dark mode toggle' }),
-  ).toContainText('Ready')
-  await page.getByText('Show finished (5)').click()
+    card('Validate email addresses on sign-up').locator('.summary-status'),
+  ).toHaveText('Blocked')
+  const merge = card('Show order totals in the header')
+  await expect(merge.locator('.summary-status')).toHaveText(/^Needs you · \d+$/)
+  await expect(merge.locator('.decision-happened')).toContainText(
+    'steps completed',
+  )
+  // Finished and ready needs nothing; it stays in the collapsed list.
+  await expect(card('Add a dark mode toggle')).toHaveCount(0)
+  await page.getByText('Show finished (2)').click()
   await expect(
     page.locator('.finished-list').getByText('Add a dark mode toggle'),
   ).toBeVisible()
@@ -46,7 +43,7 @@ test('home filters by repository and kind of work', async ({
     },
   })
   await page.reload()
-  const needs = page.getByRole('region', { name: 'Ticket summaries' })
+  const needs = page.getByRole('region', { name: 'Needs you', exact: true })
   await expect(
     needs.getByRole('link', {
       name: 'Validate email addresses on sign-up',

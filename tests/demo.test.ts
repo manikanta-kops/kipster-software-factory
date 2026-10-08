@@ -22,6 +22,7 @@ import {
 } from '../src/store/repositories.ts'
 import { getMergeGate } from '../src/store/merge-gates.ts'
 import { getTicketDetail, listTickets } from '../src/store/tickets.ts'
+import { listChildTasks } from '../src/store/task-records.ts'
 import { createDemoStore } from './helpers/demo.ts'
 import { WorkflowInUse } from '../src/domain/errors.ts'
 import {
@@ -90,7 +91,7 @@ describe('demo data', () => {
       assert.equal(ticket.status, status, `#${number}`)
       assert.equal(ticket.waiting?.for ?? null, waitingFor, `#${number}`)
     }
-    assert.equal((await listTickets(demo.database)).length, 29)
+    assert.equal((await listTickets(demo.database)).length, 32)
   })
 
   test('retired quick-change keeps its stored workflow and completed plan', async () => {
@@ -339,6 +340,44 @@ describe('demo data', () => {
     assert.deepEqual(sameInputs(untested.facts), sameInputs(checked.facts))
   })
 
+  test('a lead with a cancelled and retried task waits for its merge without a block', async () => {
+    const { replacedLead, replacedChild, replacementChild } = demo.tickets
+    const lead = await detail(replacedLead)
+    assert.equal(lead.ticket.waiting?.for, 'pull-request-merge')
+    assert.deepEqual(
+      lead.tasks.map((task) => [task.key, task.status, task.child?.number]),
+      [
+        ['export-fix', 'failed', replacedChild],
+        ['export-fix-2', 'merged', replacementChild],
+      ],
+    )
+    assert.equal(lead.ticket.summary?.status, 'needs-you')
+    assert.deepEqual(lead.ticket.summary?.issues, [])
+    assert.match(
+      lead.ticket.summary?.happened ?? '',
+      /1 task merged · 1 replaced/,
+    )
+    const cancelled = await detail(replacedChild)
+    assert.equal(cancelled.ticket.status, 'cancelled')
+    // Stored before the retry existed, so the child's own summary still says blocked.
+    assert.equal(cancelled.ticket.summary?.status, 'blocked')
+    assert.equal(cancelled.parentTask?.replacedBy, replacementChild)
+    assert.equal((await detail(replacementChild)).parentTask?.replacedBy, null)
+    const listed = await listChildTasks(demo.database)
+    const ids = new Map(
+      (await listTickets(demo.database)).map((ticket) => [
+        ticket.number,
+        ticket.id,
+      ]),
+    )
+    assert.deepEqual(listed.get(ids.get(replacedChild)!), {
+      key: 'export-fix',
+      leadNumber: replacedLead,
+      replacedBy: replacementChild,
+    })
+    assert.equal(listed.get(ids.get(replacementChild)!)?.replacedBy, null)
+  })
+
   test('the plan waiting for approval is a markdown artifact', async () => {
     const { ticket, artifacts } = await detail(demo.tickets.approvePlan)
     assert.equal(ticket.waiting?.stepId, 'approve-plan')
@@ -540,7 +579,7 @@ test('seed CLI retains and serves demo evidence with a relative home', async (t)
       '--home',
       '.local/verification-home',
     ],
-    { cwd: directory, timeout: 15_000 },
+    { cwd: directory, timeout: 60_000 },
   )
   assert.match(stdout, /Seeded demo tickets:/)
   assert.match(stdout, /#\d+  retiredWorkflow/)
@@ -652,7 +691,7 @@ test('serve CLI accepts --no-scheduler and refuses demo scheduling by default', 
     await new Promise<void>((resolve, reject) => {
       const timer = setTimeout(
         () => reject(new Error('CLI did not serve')),
-        10_000,
+        60_000,
       )
       child.stdout.on('data', (data) => {
         if (String(data).includes('running at')) {

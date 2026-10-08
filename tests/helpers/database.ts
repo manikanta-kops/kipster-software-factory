@@ -1,3 +1,4 @@
+import { until } from './timing.ts'
 import { randomUUID } from 'node:crypto'
 import { Client } from 'pg'
 
@@ -24,14 +25,16 @@ export async function createTestDatabase(): Promise<TestDatabase> {
       withAdmin(adminUrl, async (client) => {
         // pool.end() resolves before the server closes its backends; forcing the drop
         // while they exit would hand the closed clients an unhandled termination error.
-        for (let tries = 0; tries < 100; tries++) {
-          const { rows } = await client.query<{ count: number }>(
-            'SELECT count(*)::integer AS count FROM pg_stat_activity WHERE datname = $1',
-            [name],
-          )
-          if (rows[0]?.count === 0) break
-          await new Promise((resolve) => setTimeout(resolve, 20))
-        }
+        await until(
+          async () => {
+            const { rows } = await client.query<{ count: number }>(
+              'SELECT count(*)::integer AS count FROM pg_stat_activity WHERE datname = $1',
+              [name],
+            )
+            return rows[0]?.count
+          },
+          (count) => count === 0,
+        )
         await client.query(`DROP DATABASE ${name} WITH (FORCE)`)
       }),
   }

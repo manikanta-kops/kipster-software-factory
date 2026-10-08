@@ -22,7 +22,7 @@ import type {
 } from '../../../src/api/contract.ts'
 import { untestedReasons } from '../../../src/domain/task-testing.ts'
 import { describeAgent } from '../../../src/domain/settings.ts'
-import { isFinalTask } from '../../../src/domain/tasks.ts'
+import { isFinalTask, replacements } from '../../../src/domain/tasks.ts'
 import { api } from '../api.ts'
 import {
   attention,
@@ -116,7 +116,10 @@ export function TicketPage({
       </header>
       {ticket.summary &&
         ['done', 'cancelled', 'needs-you'].includes(ticket.status) && (
-          <TicketSummaryCard summary={ticket.summary} />
+          <TicketSummaryCard
+            summary={ticket.summary}
+            replacedBy={query.data.parentTask?.replacedBy}
+          />
         )}
       <div className="ticket-primary" id="ticket-details" tabIndex={-1}>
         {awaitingAction ? (
@@ -415,6 +418,7 @@ function Tasks({ detail }: { detail: TicketResponse }) {
   if (!tasks.length && !parentTask) return null
   const active = tasks.filter((task) => !isFinalTask(task.status))
   const finished = tasks.filter((task) => isFinalTask(task.status))
+  const replaced = replacements(tasks)
   return (
     <section className="steps-card tasks-card" aria-label="Tasks">
       {parentTask && (
@@ -447,7 +451,10 @@ function Tasks({ detail }: { detail: TicketResponse }) {
           </h2>
           <div className="task-progress" aria-hidden="true">
             {tasks.map((task) => (
-              <i key={task.id} className={task.status} />
+              <i
+                key={task.id}
+                className={replaced.has(task.key) ? 'replaced' : task.status}
+              />
             ))}
           </div>
           {active.length > 0 ? (
@@ -457,7 +464,10 @@ function Tasks({ detail }: { detail: TicketResponse }) {
                   <div className="task-row">
                     <div className="task-head">
                       <span className={`task-dot ${task.status}`} />
-                      <TaskName task={task} />
+                      <TaskName
+                        task={task}
+                        replacedBy={replaced.get(task.key)}
+                      />
                     </div>
                     <ChildLink task={task} />
                   </div>
@@ -471,7 +481,9 @@ function Tasks({ detail }: { detail: TicketResponse }) {
               All tasks finished
             </p>
           )}
-          {finished.length > 0 && <FinishedTasks tasks={finished} />}
+          {finished.length > 0 && (
+            <FinishedTasks tasks={finished} replaced={replaced} />
+          )}
           {active.length > 0 && (
             <p className="muted task-note">
               Cancelling this ticket cancels its unfinished tasks.
@@ -491,12 +503,28 @@ const FINISHED_ORDER: readonly TaskStatus[] = [
   'cancelled',
 ]
 
-function FinishedTasks({ tasks }: { tasks: readonly LeadTask[] }) {
+function FinishedTasks({
+  tasks,
+  replaced,
+}: {
+  tasks: readonly LeadTask[]
+  replaced: ReadonlyMap<string, number>
+}) {
   const [open, setOpen] = useState(false)
-  const tallies = FINISHED_ORDER.map((status) => ({
-    status,
-    count: tasks.filter((task) => task.status === status).length,
-  })).filter((tally) => tally.count > 0)
+  const tallies = [
+    ...FINISHED_ORDER.map((status) => ({
+      status: status as TaskStatus | 'replaced',
+      label: taskStatusLabel(status).toLowerCase(),
+      count: tasks.filter(
+        (task) => task.status === status && !replaced.has(task.key),
+      ).length,
+    })),
+    {
+      status: 'replaced' as const,
+      label: 'replaced',
+      count: tasks.filter((task) => replaced.has(task.key)).length,
+    },
+  ].filter((tally) => tally.count > 0)
   return (
     <div className="finished-tasks">
       <button
@@ -511,7 +539,7 @@ function FinishedTasks({ tasks }: { tasks: readonly LeadTask[] }) {
         <span className="finished-tasks-tallies">
           {tallies.map((tally) => (
             <span key={tally.status} className={`tally ${tally.status}`}>
-              {tally.count} {taskStatusLabel(tally.status).toLowerCase()}
+              {tally.count} {tally.label}
             </span>
           ))}
         </span>
@@ -519,7 +547,11 @@ function FinishedTasks({ tasks }: { tasks: readonly LeadTask[] }) {
       {open && (
         <ul className="task-list finished" aria-label="Finished tasks">
           {tasks.map((task) => (
-            <FinishedTask key={task.id} task={task} />
+            <FinishedTask
+              key={task.id}
+              task={task}
+              replacedBy={replaced.get(task.key)}
+            />
           ))}
         </ul>
       )}
@@ -527,7 +559,13 @@ function FinishedTasks({ tasks }: { tasks: readonly LeadTask[] }) {
   )
 }
 
-function FinishedTask({ task }: { task: LeadTask }) {
+function FinishedTask({
+  task,
+  replacedBy,
+}: {
+  task: LeadTask
+  replacedBy: number | undefined
+}) {
   const [open, setOpen] = useState(false)
   return (
     <li className={open ? 'open' : undefined}>
@@ -539,7 +577,7 @@ function FinishedTask({ task }: { task: LeadTask }) {
           onClick={() => setOpen(!open)}
         >
           <Icon name="chevronRight" size={12} stroke={2.2} />
-          <TaskName task={task} />
+          <TaskName task={task} replacedBy={replacedBy} />
         </button>
         <ChildLink task={task} />
       </div>
@@ -548,13 +586,21 @@ function FinishedTask({ task }: { task: LeadTask }) {
   )
 }
 
-function TaskName({ task }: { task: LeadTask }) {
+function TaskName({
+  task,
+  replacedBy,
+}: {
+  task: LeadTask
+  replacedBy: number | undefined
+}) {
   return (
     <>
       <span className="task-key">{task.key}</span>
       <span className="task-title">{task.title}</span>
-      <span className={`badge ${task.status}`}>
-        {taskStatusLabel(task.status)}
+      <span className={`badge ${replacedBy ? 'replaced' : task.status}`}>
+        {replacedBy
+          ? `Replaced by #${replacedBy}`
+          : taskStatusLabel(task.status)}
       </span>
     </>
   )

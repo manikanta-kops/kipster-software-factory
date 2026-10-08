@@ -1,4 +1,8 @@
 import { proposeLessons } from '../domain/lessons.ts'
+import {
+  afterParallelResults,
+  parallelReviewer,
+} from '../domain/parallel-final.ts'
 import { insertLessonProposals, listLessons } from './lessons.ts'
 import { summarizeTicket, type TicketSummary } from '../domain/summary.ts'
 import { getMergeGate } from './gate-records.ts'
@@ -10,7 +14,12 @@ import type { SkippedStep } from '../domain/task-testing.ts'
 import { listTicketLinks, listDependencies } from './ticket-links.ts'
 import { getTaskOfChild, listTasks, taskEvent } from './task-records.ts'
 import { type AgentChoice, runTasksParams } from '../domain/catalog.ts'
-import { delegateTarget, taskWorkflowName } from '../domain/tasks.ts'
+import {
+  delegateTarget,
+  isFinalTask,
+  replacements,
+  taskWorkflowName,
+} from '../domain/tasks.ts'
 import type { DecisionInput } from '../domain/decisions.ts'
 import { insertDecision, finishDecision } from './decisions.ts'
 // Tickets and their attempts and artifacts. Every write locks the ticket row, asks the
@@ -190,7 +199,16 @@ export async function getTicketDetail(
     dependencies,
     links,
     tasks,
-    parentTask: parent?.parent ?? null,
+    parentTask: parent
+      ? {
+          ...parent.parent,
+          replacedBy: isFinalTask(parent.task.status)
+            ? (replacements(
+                await listTasks(database, parent.task.ticketId),
+              ).get(parent.task.key) ?? null)
+            : null,
+        }
+      : null,
   }
 }
 
@@ -354,7 +372,7 @@ export async function createTicketInTransaction(
 
 /**
  * Claims up to `limit` pending attempts, oldest first, so no other scheduler takes
- * them. A ticket has at most one open attempt, so no two claimed attempts share a ticket.
+ * them. Paired reviewers start with their tester; only the lifecycle cursor is claimable.
  */
 export async function claimAttempts(
   database: Database,
@@ -488,6 +506,147 @@ export async function completeAttempt(
           events,
         )
       }),
+  )
+}
+
+export async function startParallelReview(
+  database: Database,
+  testerId: number,
+  agent: AgentChoice,
+  headCommit: string,
+): Promise<Attempt> {
+  return transaction(database, async (connection) => {
+    const locked = await lockByAttempt(connection, testerId)
+    const tester = openAttemptOf(locked, testerId)
+    const reviewer = parallelReviewer(
+      locked.workflow,
+      stepOf(locked.workflow, tester.stepId),
+    )
+    if (tester.status !== 'running' || !reviewer)
+      throw new FactoryError('conflict', 'No running final test to pair')
+    await connection.query(
+      'UPDATE attempts SET head_commit = $2 WHERE id = $1',
+      [testerId, headCommit],
+    )
+    const { rows } = await connection.query<AttemptRow>(
+      `INSERT INTO attempts (ticket_id, step_id, status, parallel_parent_id, executor, agent, head_commit, started_at)
+       VALUES ($1, $2, 'running', $3, $4, $5, $6, now()) RETURNING *`,
+      [
+        locked.id,
+        reviewer.id,
+        testerId,
+        agent.cli,
+        JSON.stringify(agent),
+        headCommit,
+      ],
+    )
+    const attempt = toAttempt(rows[0]!)
+    await recordEvents(connection, [
+      {
+        ticketId: locked.id,
+        kind: 'attempt.started',
+        data: {
+          attemptId: attempt.id,
+          stepId: attempt.stepId,
+          executor: agent.cli,
+          agent,
+        },
+      },
+    ])
+    return attempt
+  })
+}
+
+export async function completeParallelAttempts(
+  database: Database,
+  testerId: number,
+  reviewerId: number,
+  tested: {
+    result: StepResult
+    completion: { headCommit: string; reproductionAttemptId?: number }
+  },
+  reviewed: { result: StepResult; completion: { headCommit: string } },
+): Promise<Moved> {
+  const testerResult = parseStepResult(tested.result)
+  const reviewerResult = parseStepResult(reviewed.result)
+  if (tested.completion.headCommit !== reviewed.completion.headCommit)
+    throw new Error('Parallel verdicts disagree on the commit')
+  return withPreparedArtifacts(
+    database,
+    testerId,
+    testerResult.artifacts,
+    (testerArtifacts) =>
+      withPreparedArtifacts(
+        database,
+        reviewerId,
+        reviewerResult.artifacts,
+        (reviewerArtifacts) =>
+          transaction(database, async (connection) => {
+            const locked = await lockByAttempt(connection, testerId)
+            openAttemptOf(locked, testerId)
+            const { rows } = await connection.query<AttemptRow>(
+              "SELECT * FROM attempts WHERE id = $1 AND parallel_parent_id = $2 AND status = 'running'",
+              [reviewerId, testerId],
+            )
+            if (!rows[0])
+              throw new AttemptMovedOn('Parallel review is no longer running')
+            const reviewer = toAttempt(rows[0])
+            if (reviewer.headCommit !== tested.completion.headCommit)
+              throw new Error('Parallel verdict is stale')
+            const transition = afterParallelResults(
+              locked.workflow,
+              locked.attempts,
+              [...locked.attempts.slice(0, -1), reviewer],
+              testerResult,
+              reviewerResult,
+            )
+            const events: NewEvent[] = []
+            await insertArtifacts(
+              connection,
+              locked.id,
+              testerId,
+              testerArtifacts,
+              events,
+            )
+            await insertArtifacts(
+              connection,
+              locked.id,
+              reviewerId,
+              reviewerArtifacts,
+              events,
+            )
+            await connection.query(
+              `UPDATE attempts SET status = 'finished', outcome = $2, summary = $3, next = $4,
+           owner_review = $5, finished_at = now() WHERE id = $1`,
+              [
+                reviewerId,
+                reviewerResult.outcome,
+                reviewerResult.summary,
+                JSON.stringify(transition.close.next),
+                reviewerResult.ownerReview
+                  ? JSON.stringify(reviewerResult.ownerReview)
+                  : null,
+              ],
+            )
+            events.push({
+              ticketId: locked.id,
+              kind: 'attempt.finished',
+              data: {
+                attemptId: reviewerId,
+                stepId: reviewer.stepId,
+                outcome: reviewerResult.outcome,
+                next: transition.close.next,
+              },
+            })
+            return apply(
+              connection,
+              locked,
+              transition,
+              { summary: testerResult.summary, ...tested.completion },
+              events,
+            )
+          }),
+      ),
   )
 }
 
@@ -1201,7 +1360,15 @@ export async function lockTicket(
     number: row.number,
     status: row.status,
     workflow: row.definition,
-    attempts: await listAttempts(connection, row.id),
+    // The paired reviewer is execution history, not a second lifecycle cursor.
+    attempts: (
+      await connection.query<AttemptRow>(
+        `SELECT * FROM attempts WHERE ticket_id = $1 AND
+       (parallel_parent_id IS NULL OR status NOT IN ('pending', 'running', 'waiting'))
+       ORDER BY coalesce(parallel_parent_id, id), (parallel_parent_id IS NULL)::integer`,
+        [row.id],
+      )
+    ).rows.map(toAttempt),
   }
 }
 
@@ -1256,6 +1423,24 @@ export async function apply(
 ): Promise<Moved> {
   const current = locked.attempts.at(-1) as Attempt
   const { close, open } = transition
+  const siblings = await connection.query<AttemptRow>(
+    `UPDATE attempts SET status = 'interrupted', next = $2, finished_at = now()
+     WHERE parallel_parent_id = $1 AND status = 'running' RETURNING *`,
+    [
+      current.id,
+      close.next?.to === 'cancel' ? JSON.stringify(close.next) : null,
+    ],
+  )
+  for (const sibling of siblings.rows)
+    events.push({
+      ticketId: locked.id,
+      kind: 'attempt.interrupted',
+      data: {
+        attemptId: sibling.id,
+        stepId: sibling.step_id,
+        next: close.next,
+      },
+    })
   const { rows } = await connection.query<AttemptRow>(
     `UPDATE attempts
      SET status = $2, outcome = $3, next = $4, summary = coalesce($5, summary),
@@ -1408,18 +1593,9 @@ export async function refreshTicketSummary(
   number: number,
   events: NewEvent[],
 ): Promise<void> {
-  const ticket = await getTicket(connection, number)
-  if (!ticket || !['done', 'cancelled', 'needs-you'].includes(ticket.status))
-    return
-  const workflow = await loadWorkflow(
-    connection,
-    ticket.workflow.name,
-    ticket.workflow.version,
-  )
-  const attempts = await listAttempts(connection, ticket.id)
-  const artifacts = await listArtifacts(connection, ticket.id)
-  const tasks = await listTasks(connection, ticket.id)
-  const gate = await getMergeGate(connection, ticket.id)
+  const facts = await summaryFacts(connection, number)
+  if (!facts) return
+  const { ticket, workflow, attempts, artifacts, tasks } = facts
   const childErrors = await connection.query<{ id: number; error: string }>(
     `SELECT a.id, a.error FROM attempts a JOIN tasks t ON t.child_ticket_id = a.ticket_id
      WHERE t.ticket_id = $1 AND a.status = 'failed' AND a.error IS NOT NULL`,
@@ -1460,14 +1636,7 @@ export async function refreshTicketSummary(
     }),
     events,
   )
-  const summary = summarizeTicket({
-    ticket,
-    workflow,
-    attempts,
-    artifacts,
-    tasks,
-    mergeGate: gate?.latest ?? null,
-  })
+  const summary = summarizeTicket(facts)
   await connection.query(
     'UPDATE tickets SET summary = $2, summary_at = now() WHERE id = $1',
     [ticket.id, JSON.stringify(summary)],
@@ -1477,6 +1646,26 @@ export async function refreshTicketSummary(
     kind: 'ticket.summary',
     data: { status: summary.status },
   })
+}
+
+/** What a summary is computed from, for a ticket in a state that has one. */
+async function summaryFacts(connection: Queryable, number: number) {
+  const ticket = await getTicket(connection, number)
+  if (!ticket || !['done', 'cancelled', 'needs-you'].includes(ticket.status))
+    return null
+  const gate = await getMergeGate(connection, ticket.id)
+  return {
+    ticket,
+    workflow: await loadWorkflow(
+      connection,
+      ticket.workflow.name,
+      ticket.workflow.version,
+    ),
+    attempts: await listAttempts(connection, ticket.id),
+    artifacts: await listArtifacts(connection, ticket.id),
+    tasks: await listTasks(connection, ticket.id),
+    mergeGate: gate?.latest ?? null,
+  }
 }
 
 export async function insertArtifacts(

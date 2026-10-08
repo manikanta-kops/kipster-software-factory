@@ -182,9 +182,13 @@ with the scheduler disabled.
 
 End-of-ticket summaries now persist on completion, cancellation and owner waits,
 with fact-based status, actions, activity, issues and unverified work. Ticket
-pages show the compact card; Today shows attention and completions from the last
-24 hours with links to details. Synthetic demo tickets cover Ready, Needs you
-and Blocked. Summary rewrites and legacy null reports have PostgreSQL coverage;
+pages show the compact card; Today gives each owner ticket one row and folds a
+lead's sub-tasks under it. Owner rows that need the owner and factory-merge rows
+carry the pill and activity line; queued and running rows keep their live line,
+and the collapsed Finished list has no pill. A task retried under the next key
+reads "Replaced by #N" and no longer blocks its lead; the link is derived when
+read, with no stored column. Synthetic demo tickets cover Ready, Needs you,
+Blocked and a replaced task. Legacy null reports have PostgreSQL coverage;
 phone/desktop reports have light/dark browser coverage. Real overnight use and
 owner morning checks remain unverified.
 
@@ -193,6 +197,12 @@ owner morning checks remain unverified.
 Reviewer and tester agents are checked against recorded builder CLI/model
 choices, including a lead's tasks. Settings provides global and per-workflow
 reviewer lists. Lead reviews run the list in parallel and combine the verdicts.
+The `lead`, `bug` and `task-pr` workflows run testing and review concurrently
+on one commit whenever a tester's passed route goes straight to the next
+reviewer step. Any owner-defined workflow of that shape does the same. The
+reviewer does not see that round's tester evidence and shares the tester's
+scheduler slot and timeout. The pair routes once with both results (waking the
+lead once) and restarts both on a new commit.
 Review `limit` controls rounds (default 5); the built-in lead publishes unresolved
 findings after round five and keeps the PR for the owner. Later lead rounds check
 earlier fixes; new findings on unchanged files become notes. An unavailable

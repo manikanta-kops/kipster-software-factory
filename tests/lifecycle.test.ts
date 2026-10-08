@@ -664,20 +664,35 @@ describe('step results', () => {
     }
   })
 
-  test('artifact titles are at most 200 characters', () => {
+  test('long artifact titles and scenario labels are shortened, never rejected', () => {
     const result = (title: string) => ({
       outcome: 'passed',
       summary: 'Proved',
-      artifacts: [{ kind: 'evidence', title, content: 'HTTP 200' }],
+      artifacts: [
+        { kind: 'evidence', title, scenario: title, content: 'HTTP 200' },
+        {
+          kind: 'decision',
+          title,
+          chose: 'A',
+          alternative: 'B',
+          reason: 'C',
+        },
+      ],
     })
-    assert.equal(
-      parseStepResult(result('x'.repeat(200))).artifacts[0]!.title.length,
-      200,
+    const exact = 'x'.repeat(200)
+    assert.deepEqual(
+      parseStepResult(result(exact)).artifacts.map((a) => a.title),
+      [exact, exact],
     )
+    const long = parseStepResult(result('y'.repeat(5000))).artifacts
+    for (const text of [long[0]!.title, long[0]!.scenario, long[1]!.title]) {
+      assert.equal(text!.length, 200)
+      assert.ok(text!.endsWith('…'))
+    }
     rejects(
-      () => parseStepResult(result('x'.repeat(201))),
+      () => parseStepResult(result('  ')),
       'invalid',
-      /artifacts\.0\.title: Too big/,
+      /artifacts\.0\.title/,
     )
   })
 

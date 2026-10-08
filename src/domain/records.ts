@@ -309,4 +309,6 @@ export interface ParentTask {
   readonly land: 'branch' | 'pr'
   readonly status: TaskStatus
   readonly parent: Pick<Ticket, 'id' | 'number' | 'title' | 'status'>
+  /** The child ticket number of the later task that retried this one, when it ended without landing. */
+  readonly replacedBy?: number | null
 }

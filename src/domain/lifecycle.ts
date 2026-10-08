@@ -69,12 +69,20 @@ export const agentDecisionSchema = z.strictObject({
   reason: z.string().trim().min(1).max(10000),
 }) satisfies z.ZodType<AgentDecision>
 
+// A long label is shortened rather than failing the step: it is display text, and
+// rejecting it throws away the agent's whole session.
+const label = z
+  .string()
+  .trim()
+  .min(1)
+  .transform((text) => (text.length > 200 ? `${text.slice(0, 199)}…` : text))
+
 const contentArtifactSchema = z
   .strictObject({
     scenarioResult: z
       .enum(['passed', 'failed', 'unverified', 'reproduced'])
       .optional(),
-    scenario: z.string().trim().min(1).max(200).optional(),
+    scenario: label.optional(),
     file: z
       .string()
       .min(1)
@@ -89,7 +97,7 @@ const contentArtifactSchema = z
       )
       .optional(),
     kind: z.enum(ARTIFACT_KINDS.filter((kind) => kind !== 'decision')),
-    title: z.string().trim().min(1).max(200),
+    title: label,
     content: z.string().max(MAX_ARTIFACT_CONTENT).optional(),
     path: z.string().min(1).optional(),
   })
@@ -103,7 +111,7 @@ export const artifactInputSchema = z.discriminatedUnion('kind', [
   contentArtifactSchema,
   agentDecisionSchema.extend({
     kind: z.literal('decision'),
-    title: z.string().trim().min(1).max(200),
+    title: label,
   }),
 ])
 

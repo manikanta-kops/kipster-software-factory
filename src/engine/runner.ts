@@ -1,3 +1,4 @@
+import { runParallelFinal } from './parallel-final.ts'
 import { runReviewAttempt } from './review.ts'
 import { DependencyChangedError } from '../workspace/dependencies.ts'
 import { dependencySession } from './dependencies.ts'
@@ -43,6 +44,11 @@ export interface RunnerOptions {
   decisions?: DecisionDependencies
   execute: AgentExecutor
   attemptAgents?: import('../domain/catalog.ts').AgentChoice[]
+  parallelFinal?: boolean
+  preparedSession?: {
+    dependencies: readonly import('../workspace/dependencies.ts').DependencyCheckout[]
+    execute: AgentExecutor
+  }
   library?: import('../library/library.ts').Library
 }
 export async function runAttempt(
@@ -192,8 +198,20 @@ async function executeAttempt(
     }
     return
   }
+  if (
+    options.parallelFinal &&
+    (await runParallelFinal(
+      options,
+      { ...context, repository },
+      detail,
+      cwd,
+      diff,
+      signal,
+    ))
+  )
+    return
   if (step.kind === 'agent' && ['tester', 'reproducer'].includes(step.role)) {
-    await runProofAttempt(
+    const verdict = await runProofAttempt(
       options,
       { ...context, repository },
       detail,
@@ -201,10 +219,29 @@ async function executeAttempt(
       diff,
       signal,
     )
+    await completeAttempt(
+      database,
+      attempt.id,
+      verdict.result,
+      verdict.completion,
+    )
     return
   }
   if (step.kind === 'agent' && step.role === 'reviewer') {
-    await runReviewAttempt(options, context, detail, cwd, diff, signal)
+    const verdict = await runReviewAttempt(
+      options,
+      context,
+      detail,
+      cwd,
+      diff,
+      signal,
+    )
+    await completeAttempt(
+      database,
+      attempt.id,
+      verdict.result,
+      verdict.completion,
+    )
     return
   }
   if (step.kind === 'agent') {

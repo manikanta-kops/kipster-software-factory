@@ -432,3 +432,49 @@ test('PostgreSQL lifecycle writes on parks, rewrites on completion, and leaves o
     await store.close()
   }
 })
+
+test('a replaced task is reported as replaced, not as an issue or a block', async () => {
+  const child = (number: number) => ({
+    id: number,
+    number,
+    status: 'done' as const,
+    branch: `child-${number}`,
+    currentStep: 'build',
+    pullRequestUrl: null,
+    waiting: null,
+  })
+  const replaced = summarizeTicket(
+    await facts({
+      tasks: [
+        { ...task, key: 'export', status: 'failed', child: child(2) },
+        {
+          ...task,
+          id: 2,
+          key: 'export-2',
+          child: child(3),
+          createdAt: end,
+        },
+      ],
+    }),
+  )
+  assert.equal(replaced.status, 'ready')
+  assert.deepEqual(replaced.issues, [])
+  assert.match(replaced.happened, /^1 task merged · 1 replaced · /)
+  assert.doesNotMatch(replaced.happened, /failed|cancelled/)
+
+  const unreplaced = summarizeTicket(
+    await facts({
+      tasks: [
+        { ...task, key: 'export', status: 'failed', child: child(2) },
+        { ...task, id: 2, key: 'docs', child: child(3), createdAt: end },
+        { ...task, id: 3, key: 'api', status: 'cancelled', child: child(4) },
+      ],
+    }),
+  )
+  assert.equal(unreplaced.status, 'blocked')
+  assert.deepEqual(unreplaced.issues, [
+    'Task export: failed',
+    'Task api: cancelled',
+  ])
+  assert.match(unreplaced.happened, /1 failed · 1 cancelled/)
+})

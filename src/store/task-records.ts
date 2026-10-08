@@ -5,6 +5,7 @@ import type {
   TaskStatus,
   Ticket,
 } from '../domain/records.ts'
+import { replacements } from '../domain/tasks.ts'
 import type { Queryable } from './database.ts'
 import type { NewEvent } from './events.ts'
 
@@ -131,23 +132,55 @@ export function taskEvent(
   }
 }
 
-/** For each child ticket id, the task it runs and its lead's number. */
-export async function listChildTasks(
-  database: Queryable,
-): Promise<Map<number, { readonly key: string; readonly leadNumber: number }>> {
+/** For each child ticket id, the task it runs, its lead's number and the child that replaced it. */
+export async function listChildTasks(database: Queryable): Promise<
+  Map<
+    number,
+    {
+      readonly key: string
+      readonly leadNumber: number
+      readonly replacedBy: number | null
+    }
+  >
+> {
   const { rows } = await database.query<{
-    child_ticket_id: number
+    lead_id: number
+    child_ticket_id: number | null
+    child_number: number | null
     key: string
+    status: TaskStatus
+    created_at: Date
     lead_number: number
   }>(
-    `SELECT k.child_ticket_id, k.key, p.number AS lead_number
+    `SELECT k.ticket_id AS lead_id, k.child_ticket_id, c.number AS child_number,
+            k.key, k.status, k.created_at, p.number AS lead_number
      FROM tasks k JOIN tickets p ON p.id = k.ticket_id
-     WHERE k.child_ticket_id IS NOT NULL`,
+     LEFT JOIN tickets c ON c.id = k.child_ticket_id
+     ORDER BY k.id`,
   )
-  return new Map(
-    rows.map((row) => [
-      row.child_ticket_id,
-      { key: row.key, leadNumber: row.lead_number },
-    ]),
-  )
+  const leads = new Map<number, typeof rows>()
+  for (const row of rows)
+    leads.set(row.lead_id, [...(leads.get(row.lead_id) ?? []), row])
+  const result = new Map<
+    number,
+    { key: string; leadNumber: number; replacedBy: number | null }
+  >()
+  for (const tasks of leads.values()) {
+    const replaced = replacements(
+      tasks.map((row) => ({
+        key: row.key,
+        status: row.status,
+        createdAt: row.created_at.toISOString(),
+        child: row.child_number === null ? null : { number: row.child_number },
+      })),
+    )
+    for (const row of tasks)
+      if (row.child_ticket_id !== null)
+        result.set(row.child_ticket_id, {
+          key: row.key,
+          leadNumber: row.lead_number,
+          replacedBy: replaced.get(row.key) ?? null,
+        })
+  }
+  return result
 }

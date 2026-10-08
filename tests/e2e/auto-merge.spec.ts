@@ -17,6 +17,8 @@ test('repository auto-merge starts off, toggles through the API and survives rel
   await expect(toggle).not.toBeChecked()
   await toggle.click()
   await expect(toggle).toBeChecked()
+  // The box checks before the save finishes; it is enabled again once saved.
+  await expect(toggle).toBeEnabled()
   await page.reload()
   await expect(toggle).toBeChecked()
   const data = (await (
@@ -44,7 +46,7 @@ test.describe('rule-based auto-merge', () => {
     const title = detail.ticket.title
     await page.goto(`${factory.url}/#/`)
     const needsYou = page.getByRole('region', {
-      name: 'Ticket summaries',
+      name: 'Needs you',
       exact: true,
     })
     const moving = page.getByRole('region', { name: 'Moving', exact: true })
