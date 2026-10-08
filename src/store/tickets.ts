@@ -16,7 +16,6 @@ import { getTaskOfChild, listTasks, taskEvent } from './task-records.ts'
 import { type AgentChoice, runTasksParams } from '../domain/catalog.ts'
 import {
   delegateTarget,
-  ENDED_WITHOUT_LANDING,
   isFinalTask,
   replacements,
   taskWorkflowName,
@@ -1647,51 +1646,6 @@ export async function refreshTicketSummary(
     kind: 'ticket.summary',
     data: { status: summary.status },
   })
-}
-
-/**
- * Summaries are stored only at owner waits, so one written before the summary knew
- * about replaced tasks would keep blocking its lead. Recomputes those at startup;
- * a summary that is already current is left alone.
- */
-export async function refreshReplacedSummaries(
-  database: Database,
-): Promise<number[]> {
-  const { rows } = await database.query<{ number: number }>(
-    `SELECT t.number FROM tickets t
-     WHERE t.summary IS NOT NULL
-       AND t.status IN ('done', 'cancelled', 'needs-you')
-       AND EXISTS (SELECT 1 FROM tasks k
-                   WHERE k.ticket_id = t.id AND k.status = ANY($1))
-     ORDER BY t.number`,
-    [ENDED_WITHOUT_LANDING],
-  )
-  const refreshed: number[] = []
-  for (const { number } of rows) {
-    const changed = await transaction(database, async (connection) => {
-      await lockTicket(connection, { number })
-      const facts = await summaryFacts(connection, number)
-      if (!facts?.ticket.summary || !replacements(facts.tasks).size)
-        return false
-      const summary = summarizeTicket(facts)
-      const updated = await connection.query(
-        `UPDATE tickets SET summary = $2, summary_at = now()
-         WHERE id = $1 AND summary IS DISTINCT FROM $2::jsonb`,
-        [facts.ticket.id, JSON.stringify(summary)],
-      )
-      if (!updated.rowCount) return false
-      await recordEvents(connection, [
-        {
-          ticketId: facts.ticket.id,
-          kind: 'ticket.summary',
-          data: { status: summary.status },
-        },
-      ])
-      return true
-    })
-    if (changed) refreshed.push(number)
-  }
-  return refreshed
 }
 
 /** What a summary is computed from, for a ticket in a state that has one. */

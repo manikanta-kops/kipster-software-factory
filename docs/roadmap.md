@@ -187,9 +187,8 @@ lead's sub-tasks under it. Owner rows that need the owner and factory-merge rows
 carry the pill and activity line; queued and running rows keep their live line,
 and the collapsed Finished list has no pill. A task retried under the next key
 reads "Replaced by #N" and no longer blocks its lead; the link is derived when
-read, with no stored column, and stored summaries are refreshed at startup, so
-existing replaced tasks no longer block their lead. Synthetic demo tickets cover Ready,
-Needs you, Blocked and a replaced task. Summary rewrites and legacy null reports have PostgreSQL coverage;
+read, with no stored column. Synthetic demo tickets cover Ready, Needs you,
+Blocked and a replaced task. Legacy null reports have PostgreSQL coverage;
 phone/desktop reports have light/dark browser coverage. Real overnight use and
 owner morning checks remain unverified.
 

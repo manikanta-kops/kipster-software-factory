@@ -17,7 +17,6 @@ import {
 import { openDatabase } from './store/database.ts'
 import { listenForEvents } from './store/events.ts'
 import { migrate } from './store/migrate.ts'
-import { refreshReplacedSummaries } from './store/tickets.ts'
 import { startScheduler } from './engine/scheduler.ts'
 import {
   listUploadedWorkflows,
@@ -64,7 +63,6 @@ export async function startFactory(
   const database = openDatabase(options.databaseUrl)
   try {
     await migrate(database)
-    await refreshReplacedSummaries(database)
     if (await hasSavedSettings(database))
       console.log(
         'Engine settings come from the factory database; config.json concurrency, stepTimeoutMinutes and agents are ignored.',

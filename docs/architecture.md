@@ -127,10 +127,7 @@ Migration 015 stores the latest fact-based ticket summary and its timestamp.
 `cancelled` and `needs-you`, including repeated parks and initial human waits.
 Merge gate changes refresh a parked report under the same ticket lock.
 `ticket.summary` events invalidate the live list and detail. Existing tickets
-keep a null summary until their next park or completion. Server start
-recomputes stored summaries of done, cancelled and needs-you tickets with a
-replaced task, so a report written before replacement awareness stops blocking
-its lead; it writes and emits an event only when the report changed.
+keep a null summary until their next park or completion.
 
 The pure `domain/summary.ts` function uses status/ask reasons, attempt times,
 retry counts, task states, tester/reviewer outcomes, typed decision counts,
