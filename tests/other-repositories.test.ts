@@ -25,6 +25,7 @@ import {
   until,
 } from './helpers/other-repositories.ts'
 import { prepareDependencies } from '../src/workspace/dependencies.ts'
+import { schedulerTicks } from './helpers/timing.ts'
 
 const request = {
   outcome: 'needs-other-repo',
@@ -584,6 +585,9 @@ test('linked-ticket polling is throttled despite frequent scheduler wakes', asyn
     artifacts: [],
   })
   let polls = 0
+  let now = Date.now()
+  t.mock.method(Date, 'now', () => now)
+  const ticks = schedulerTicks(t, f.database)
   f.github.inspect = async () => {
     polls++
     throw new Error('Temporary GitHub error keeps the link unresolved')
@@ -593,8 +597,6 @@ test('linked-ticket polling is throttled despite frequent scheduler wakes', asyn
     async () => polls,
     (count) => count === 1,
   )
-  // Frozen Date makes the 60 s interval exact; scheduler timers stay real.
-  t.mock.timers.enable({ apis: ['Date'], now: Date.now() })
   for (let wake = 0; wake < 4; wake++)
     await addAttemptArtifacts(f.database, context.attempt.id, [
       {
@@ -603,9 +605,13 @@ test('linked-ticket polling is throttled despite frequent scheduler wakes', asyn
         content: 'Poll interval should still apply.',
       },
     ])
-  await new Promise((resolve) => setTimeout(resolve, 250))
+  const before = ticks()
+  await until(
+    async () => ticks(),
+    (count) => count > before,
+  )
   assert.equal(polls, 1)
-  t.mock.timers.tick(60_000)
+  now += 60_000
   await until(
     async () => polls,
     (count) => count === 2,

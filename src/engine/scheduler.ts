@@ -159,6 +159,7 @@ export async function startScheduler(
       await runAttempt(
         {
           ...runnerOptions,
+          parallelFinal: true,
           config: attemptConfig,
           attemptAgents: selections.agents,
         },

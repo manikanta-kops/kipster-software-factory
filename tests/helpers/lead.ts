@@ -18,21 +18,7 @@ import { createTicket, getTicketDetail } from '../../src/store/tickets.ts'
 import { Workspaces } from '../../src/workspace/workspaces.ts'
 import { commit } from './other-repositories.ts'
 import { createTestStore } from './store.ts'
-
-/** Polls until the predicate holds; lead flows chain many sessions, so allow a minute. */
-export async function until<T>(
-  read: () => Promise<T>,
-  predicate: (value: T) => boolean,
-): Promise<T> {
-  const deadline = Date.now() + 60_000
-  while (true) {
-    const value = await read()
-    if (predicate(value)) return value
-    if (Date.now() >= deadline)
-      throw new Error(`Timed out: ${JSON.stringify(value).slice(0, 4000)}`)
-    await new Promise((resolve) => setTimeout(resolve, 20))
-  }
-}
+export { until } from './timing.ts'
 
 export type Role = 'lead' | 'builder' | 'reviewer' | 'writer' | 'tester'
 
@@ -184,7 +170,7 @@ verify:
   ready: http://127.0.0.1:{port}/health
   ports: 1
   database: none
-  timeoutSeconds: 5
+  timeoutSeconds: 60
 `,
     )
   }

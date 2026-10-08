@@ -198,6 +198,12 @@ owner morning checks remain unverified.
 Reviewer and tester agents are checked against recorded builder CLI/model
 choices, including a lead's tasks. Settings provides global and per-workflow
 reviewer lists. Lead reviews run the list in parallel and combine the verdicts.
+The `lead`, `bug` and `task-pr` workflows run testing and review concurrently
+on one commit whenever a tester's passed route goes straight to the next
+reviewer step. Any owner-defined workflow of that shape does the same. The
+reviewer does not see that round's tester evidence and shares the tester's
+scheduler slot and timeout. The pair routes once with both results (waking the
+lead once) and restarts both on a new commit.
 Review `limit` controls rounds (default 5); the built-in lead publishes unresolved
 findings after round five and keeps the PR for the owner. Later lead rounds check
 earlier fixes; new findings on unchanged files become notes. An unavailable

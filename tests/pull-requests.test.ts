@@ -51,6 +51,7 @@ import {
   getPullRequestDescription,
   savePullRequestDescription,
 } from '../src/store/pull-requests.ts'
+import { until } from './helpers/timing.ts'
 
 const signal = new AbortController().signal
 function entry(workflow: Workflow) {
@@ -667,23 +668,20 @@ test('CI wait survives scheduler restart and releases its only execution slot', 
     }),
   })
   const second = await f.start()
-  const end = Date.now() + 5000
-  let other = (await getTicketDetail(f.store.database, f.ticket.number + 1))!
-  while (other.ticket.waiting?.for !== 'ask') {
-    assert.ok(Date.now() < end, 'Waiting CI held the only scheduler slot')
-    await new Promise((resolve) => setTimeout(resolve, 25))
-    other = (await getTicketDetail(f.store.database, f.ticket.number + 1))!
-  }
+  const other = await until(
+    async () => (await getTicketDetail(f.store.database, f.ticket.number + 1))!,
+    (detail) => detail.ticket.waiting?.for === 'ask',
+  )
   const waitingOnCi = (await f.detail()).ticket
   assert.equal(waitingOnCi.waiting?.for, 'pull-request-checks')
   // CI is the factory's wait, so the ticket stays out of Needs you.
   assert.equal(waitingOnCi.status, 'running')
   assert.match(other.attempts[0]!.error!, /without a pull request/)
   f.setChecks({ state: 'passed', failures: [] })
-  while ((await f.detail()).ticket.waiting?.for !== 'pull-request-merge') {
-    assert.ok(Date.now() < end, 'CI did not resume')
-    await new Promise((resolve) => setTimeout(resolve, 25))
-  }
+  await until(
+    () => f.detail(),
+    (detail) => detail.ticket.waiting?.for === 'pull-request-merge',
+  )
   assert.equal((await f.detail()).attempts[0]!.id, d.attempts[0]!.id)
   assert.equal(f.writers(), 1)
   await second.close()

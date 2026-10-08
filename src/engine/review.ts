@@ -8,13 +8,13 @@ import { run } from '../executors/process.ts'
 import { loadTrustedInstructions } from '../kit/kit.ts'
 import {
   addAttemptArtifacts,
-  completeAttempt,
   type AttemptContext,
   type TicketDetail,
 } from '../store/tickets.ts'
 import { dependencySession } from './dependencies.ts'
 import { buildPrompt, openSession, readResult } from './prompt.ts'
 import type { RunnerOptions } from './runner.ts'
+import type { Verdict } from './parallel-final.ts'
 
 export async function runReviewAttempt(
   options: RunnerOptions,
@@ -23,7 +23,7 @@ export async function runReviewAttempt(
   cwd: string,
   diff: string,
   signal: AbortSignal,
-) {
+): Promise<Verdict> {
   const { step, ticket, attempt, repository } = context
   if (step.kind !== 'agent') throw new Error('Review requires an agent step')
   const git = (args: string[]) => run('git', args, { cwd, signal })
@@ -212,10 +212,8 @@ export async function runReviewAttempt(
   const ownerReasons = fulfilled.flatMap((result) =>
     result.ownerReview ? [result.ownerReview.reason] : [],
   )
-  await completeAttempt(
-    options.database,
-    attempt.id,
-    {
+  return {
+    result: {
       outcome,
       summary:
         !isLead && fulfilled.length === 1
@@ -231,6 +229,6 @@ export async function runReviewAttempt(
         ? { ownerReview: { reason: ownerReasons.join('; ').slice(0, 1000) } }
         : {}),
     },
-    { headCommit: head },
-  )
+    completion: { headCommit: head },
+  }
 }
