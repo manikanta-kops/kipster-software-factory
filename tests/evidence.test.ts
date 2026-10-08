@@ -116,7 +116,8 @@ test('retention uses the injected clock, keeps final curated evidence, never pru
   )
   const now = new Date(end.getTime() + 31 * 86400000)
   const count = await pruneEvidence(f.database, f.home, 30, now)
-  assert.equal(count, 3, 'recording, log and inline archive evidence expire')
+  // The fourth is the demo's finished lights-out task's inline unverified item.
+  assert.equal(count, 4, 'recording, log and inline archive evidence expire')
   const after = (await getTicketDetail(f.database, finished.ticket.number))!
   const kept = after.artifacts.find((a) => a.mediaType === 'image/png')!
   assert.equal(kept.prunedAt, null)

@@ -32,19 +32,8 @@ import { createApp } from '../src/api/app.ts'
 import { listenForEvents } from '../src/store/events.ts'
 
 const sentinel = 'test-only-key-not-a-real-credential'
-for (const scenario of [
-  'acted',
-  'confirm',
-  'confirm-override',
-  'owner',
-  'no-key',
-  401,
-  422,
-  429,
-  529,
-  'timeout',
-  'invalid',
-] as const) {
+// Transport failures share one engine branch; decisions-transport.test.ts covers each mapping.
+for (const scenario of ['acted', 'confirm', 'owner', 'no-key', 401] as const) {
   test(`decide engine logs and routes ${scenario} against real HTTP and PostgreSQL`, async (t) => {
     const root = await mkdtemp(join(tmpdir(), 'ksf-decide-'))
     const store = await createTestStore()
@@ -113,7 +102,6 @@ for (const scenario of [
       let text = ''
       for await (const chunk of req) text += chunk
       sent = JSON.parse(text)
-      if (scenario === 'timeout') return
       res.setHeader('content-type', 'application/json')
       if (typeof scenario === 'number') {
         res.writeHead(scenario)
@@ -128,7 +116,7 @@ for (const scenario of [
           answers: {
             decision: {
               type: 'choice',
-              choice: scenario === 'invalid' ? 'unknown' : 'proceed',
+              choice: 'proceed',
               probabilities: {
                 proceed: (1 + confidence) / 2,
                 review: (1 - confidence) / 2,
@@ -156,7 +144,7 @@ for (const scenario of [
         secrets,
         transport: {
           baseURL: `http://127.0.0.1:${address.port}`,
-          timeout: scenario === 'timeout' ? 30 : 1000,
+          timeout: 10_000,
           retry: { backoffInitialMs: 1, backoffMaxMs: 2 },
         },
       },
@@ -196,16 +184,7 @@ for (const scenario of [
     await runAttempt(options, context, signal)
     const [decision] = await listDecisions(store.database)
     assert.ok(decision)
-    assert.equal(
-      decision.band,
-      typeof scenario === 'number' ||
-        scenario === 'timeout' ||
-        scenario === 'invalid'
-        ? 'error'
-        : scenario === 'confirm-override'
-          ? 'confirm'
-          : scenario,
-    )
+    assert.equal(decision.band, scenario === 401 ? 'error' : scenario)
     assert.equal(
       decision.question,
       'Does this change need further owner review?',
@@ -231,19 +210,15 @@ for (const scenario of [
       assert.equal(sent?.model, 'jev-1.13.0')
       assert.deepEqual(sent?.state, decision.facts)
     }
+    assert.equal(requests, scenario === 'no-key' ? 0 : 1)
     assert.equal(
-      requests,
-      scenario === 429 || scenario === 529 || scenario === 'timeout'
-        ? 3
-        : scenario === 'no-key'
-          ? 0
-          : 1,
+      decision.reason,
+      scenario === 'no-key'
+        ? 'No TypeSafe key: run kf secret set typesafe'
+        : scenario === 401
+          ? 'TypeSafe HTTP 401: invalid key'
+          : null,
     )
-    if (scenario === 'no-key')
-      assert.equal(
-        decision.reason,
-        'No TypeSafe key: run kf secret set typesafe',
-      )
     const detail = await getTicketDetail(store.database, ticket.number)
     assert.ok(detail)
     if (scenario === 'acted') {

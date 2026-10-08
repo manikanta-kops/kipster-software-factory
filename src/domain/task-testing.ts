@@ -1,76 +1,75 @@
-import { roles, type Role } from './catalog.ts'
-import type { LeadTask, Ticket } from './records.ts'
-import type { Workflow } from './workflow.ts'
+import type { Artifact, Attempt, Ticket } from './records.ts'
 
+/** Stored on tickets that skipped their tester before every task was checked. */
 export interface SkippedStep {
   readonly stepId: string
   readonly missingCapabilities: readonly string[]
 }
 
-export function skippableTaskSteps(
-  workflow: Workflow,
-  capabilities: readonly string[],
-  isLeadTask: boolean,
-): SkippedStep[] {
-  if (!isLeadTask) return []
-  return workflow.steps.flatMap((step) => {
-    if (step.kind !== 'agent') return []
-    const role: Role = roles[step.role]
-    if (!role.skipMissingNeedsInTaskWorkflows?.includes(workflow.name))
-      return []
-    const missingCapabilities = step.needs.filter(
-      (need) => !capabilities.includes(need),
-    )
-    return missingCapabilities.length
-      ? [{ stepId: step.id, missingCapabilities }]
-      : []
-  })
+export interface CheckFacts {
+  readonly ticket: Pick<Ticket, 'skippedSteps'>
+  readonly workflow: {
+    readonly steps: readonly {
+      readonly id: string
+      readonly kind: string
+      readonly role?: string
+    }[]
+  }
+  readonly attempts: readonly Attempt[]
+  readonly artifacts: readonly Artifact[]
 }
 
-/** Routes to a removed step continue at the next retained step in file order. */
-export function withoutSkippedSteps(
-  workflow: Workflow,
-  skipped: readonly SkippedStep[],
-): Workflow {
-  const ids = new Set(skipped.map((step) => step.stepId))
-  if (!ids.size) return workflow
-  const target = (id: string): string => {
-    if (!ids.has(id)) return id
-    const index = workflow.steps.findIndex((step) => step.id === id)
-    return (
-      workflow.steps.slice(index + 1).find((step) => !ids.has(step.id))?.id ??
-      'finish'
-    )
-  }
-  return {
-    ...workflow,
-    steps: workflow.steps
-      .filter((step) => !ids.has(step.id))
-      .map((step) => ({
-        ...step,
-        routes: Object.fromEntries(
-          Object.entries(step.routes).map(([outcome, id]) => [
-            outcome,
-            target(id),
-          ]),
-        ),
-      })),
-  }
+function latestCheck(facts: CheckFacts): Attempt | undefined {
+  const testers = new Set(
+    facts.workflow.steps
+      .filter((step) => step.kind === 'agent' && step.role === 'tester')
+      .map((step) => step.id),
+  )
+  return facts.attempts.findLast(
+    (attempt) => testers.has(attempt.stepId) && attempt.waitingFor === null,
+  )
 }
 
-export function untestedReasons(detail: {
-  ticket: Pick<Ticket, 'skippedSteps'>
-  tasks?: readonly LeadTask[]
-}): string[] {
-  const reasons = (detail.ticket.skippedSteps ?? []).map(
+/** Items the latest checker reported it could not prove. */
+export function uncheckedItems(facts: CheckFacts): Artifact[] {
+  const check = latestCheck(facts)
+  return facts.artifacts.filter(
+    (artifact) =>
+      artifact.attemptId === check?.id &&
+      artifact.scenarioResult === 'unverified',
+  )
+}
+
+/** Stored on tickets from before every task was checked. */
+export function skippedReasons(ticket: Pick<Ticket, 'skippedSteps'>): string[] {
+  return (ticket.skippedSteps ?? []).map(
     (step) =>
       `Untested: no ${step.missingCapabilities.join(', ')} capability (skipped ${step.stepId})`,
   )
-  for (const task of detail.tasks ?? []) {
-    if (task.status !== 'merged' || !task.child?.skippedSteps?.length) continue
-    reasons.push(
-      `Untested task ${task.key}: no ${[...new Set(task.child.skippedSteps.flatMap((step) => step.missingCapabilities))].join(', ')} capability`,
-    )
-  }
-  return reasons
+}
+
+export function untestedReasons(facts: CheckFacts): string[] {
+  return [
+    ...new Set([
+      ...skippedReasons(facts.ticket),
+      ...uncheckedItems(facts).map(
+        (artifact) =>
+          `Unverified by ${artifact.stepId}: ${artifact.scenario ?? artifact.title}`,
+      ),
+    ]),
+  ]
+}
+
+/** One sentence for a lead's task report: the checker's verdict on the landed work. */
+export function checkerVerdict(facts: CheckFacts): string {
+  const check = latestCheck(facts)
+  const reasons = untestedReasons(facts)
+  if (!check)
+    return reasons.length
+      ? `Landed untested. ${reasons.join('; ')}.`
+      : 'No checker ran.'
+  const verdict = `Checker ${check.stepId} ${check.outcome ?? check.status}${check.headCommit ? ` at ${check.headCommit}` : ''}`
+  return reasons.length
+    ? `${verdict} with unverified items. ${reasons.join('; ')}.`
+    : `${verdict}.`
 }

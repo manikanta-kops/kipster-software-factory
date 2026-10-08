@@ -6,6 +6,7 @@ import { WorkflowDiagram } from '../components/WorkflowDiagram.tsx'
 
 export function Workflows({ selected }: { selected: string | undefined }) {
   const resource = useQuery(workflowsQuery)
+  const [removed, setRemoved] = useState<string | null>(null)
 
   if (resource.isPending) {
     return <p className="muted">Loading workflows…</p>
@@ -51,6 +52,15 @@ export function Workflows({ selected }: { selected: string | undefined }) {
         <UploadWorkflow />
       </nav>
       <article className="workflow" aria-labelledby="workflow-name">
+        {removed && selected === undefined ? (
+          <output className="workflow-removed">Removed {removed}.</output>
+        ) : null}
+        {selected !== undefined && selected !== current.name ? (
+          <p className="workflow-removed muted">
+            {selected} is not in the library. Tickets that ran it keep their
+            copy.
+          </p>
+        ) : null}
         <header>
           <h2 id="workflow-name">{current.name}</h2>
           <p className="muted">{current.description}</p>
@@ -58,6 +68,13 @@ export function Workflows({ selected }: { selected: string | undefined }) {
             version {current.version}
             {current.origin === 'upload' ? ' · uploaded' : ''}
           </p>
+          {current.origin === 'upload' ? (
+            <RemoveWorkflow
+              key={current.name}
+              name={current.name}
+              onRemoved={setRemoved}
+            />
+          ) : null}
         </header>
         <WorkflowDiagram key={current.name} workflow={current} />
         <p className="legend muted">
@@ -117,6 +134,73 @@ function UploadWorkflow() {
             </ul>
           ) : null}
         </div>
+      ) : null}
+    </div>
+  )
+}
+
+function RemoveWorkflow({
+  name,
+  onRemoved,
+}: {
+  name: string
+  onRemoved: (name: string) => void
+}) {
+  const client = useQueryClient()
+  const [confirming, setConfirming] = useState(false)
+  const remove = useMutation({
+    mutationFn: () => api.removeWorkflow(name),
+    onSuccess: async () => {
+      await client.invalidateQueries({ queryKey: ['workflows'] })
+      onRemoved(name)
+      window.location.hash = '#/workflows'
+    },
+  })
+
+  const error = remove.error
+  return (
+    <div className="workflow-remove">
+      {confirming ? (
+        <fieldset className="workflow-remove-confirm">
+          <legend>Remove {name}?</legend>
+          <p>
+            New tickets can no longer use it. Finished tickets keep their copy.
+          </p>
+          <div className="actions">
+            <button
+              type="button"
+              className="danger"
+              disabled={remove.isPending}
+              onClick={() => remove.mutate()}
+            >
+              {remove.isPending ? 'Removing…' : 'Remove workflow'}
+            </button>
+            <button
+              type="button"
+              className="quiet"
+              disabled={remove.isPending}
+              onClick={() => {
+                setConfirming(false)
+                remove.reset()
+              }}
+            >
+              Keep it
+            </button>
+          </div>
+        </fieldset>
+      ) : (
+        <button
+          type="button"
+          className="danger"
+          onClick={() => setConfirming(true)}
+        >
+          Remove
+        </button>
+      )}
+      {error ? (
+        <p className="error" role="alert">
+          {error instanceof ApiError ? error.summary : error.message}
+        </p>
       ) : null}
     </div>
   )

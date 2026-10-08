@@ -8,11 +8,7 @@ import {
   markMergeRequested,
   markMergeResult,
 } from '../../src/store/auto-merge.ts'
-import {
-  getRepository,
-  markRepositoryReady,
-  setAutoMerge,
-} from '../../src/store/repositories.ts'
+import { setAutoMerge } from '../../src/store/repositories.ts'
 import {
   recordMergedPR,
   pendingPostMergeChecks,
@@ -355,13 +351,6 @@ router.post('/__test/fixtures', async (c) => {
       'failed',
       'Build failed: invalid or missing result.json after two runs. No work was produced.',
     )
-    const repository = (await getRepository(
-      fixture.database,
-      'kipster/demo-shop',
-    ))!
-    await markRepositoryReady(fixture.database, repository.id, {
-      kit: { status: 'missing', error: null, capabilities: [] },
-    })
     const child = await startTask(
       fixture.database,
       api!.id,
@@ -373,9 +362,14 @@ router.post('/__test/fixtures', async (c) => {
       },
       null,
     )
-    await markRepositoryReady(fixture.database, repository.id, {
-      kit: repository.kit!,
-    })
+    // As stored by tickets that skipped their tester before every task was checked.
+    await fixture.database.query(
+      'UPDATE tickets SET skipped_steps = $2 WHERE id = $1',
+      [
+        child!.id,
+        JSON.stringify([{ stepId: 'test', missingCapabilities: ['verify'] }]),
+      ],
+    )
     await startTask(
       fixture.database,
       docs!.id,

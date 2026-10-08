@@ -1,4 +1,9 @@
 import { evaluateMergeGate, type MergeFacts } from '../src/domain/merge-gate.ts'
+import { checksResult, ciFailure } from '../src/engine/pull-requests.ts'
+import { mergedTaskResult } from '../src/engine/tasks.ts'
+import { checkerVerdict, untestedReasons } from '../src/domain/task-testing.ts'
+import type { run as runCommand } from '../src/executors/process.ts'
+import { inspectChecks } from '../src/github/checks.ts'
 import { saveMergeGate } from '../src/store/merge-gates.ts'
 import { getTicketDetail } from '../src/store/tickets.ts'
 import { setArtifactHome } from '../src/store/database.ts'
@@ -25,6 +30,7 @@ import {
   updateTask,
 } from '../src/store/tasks.ts'
 import { migrate } from '../src/store/migrate.ts'
+import { saveUploadedWorkflow } from '../src/store/workflows.ts'
 import {
   createRepository,
   getRepository,
@@ -82,6 +88,22 @@ steps:
     action: merge
 `
 
+// An uploaded workflow that unfinished tickets use, so removing it is refused.
+const SYNTHETIC_UPLOAD = `name: synthetic-review
+description: Synthetic uploaded demo workflow. Build it and have it reviewed.
+steps:
+  - id: build
+    kind: agent
+    role: builder
+
+  - id: review
+    kind: agent
+    role: reviewer
+    limit: 2
+    routes:
+      changes-needed: build
+`
+
 /** Ticket numbers of the demo tickets, by the state each one is left in. */
 export interface DemoTickets {
   readonly proofPassed: number
@@ -90,6 +112,12 @@ export interface DemoTickets {
   readonly waitingForMerge: number
   readonly askAfterLimit: number
   readonly approvePlan: number
+  readonly planToApprove: number
+  readonly planToChange: number
+  readonly planToReject: number
+  readonly askToRetry: number
+  readonly askToMove: number
+  readonly askToCancel: number
   readonly cancelled: number
   readonly running: number
   readonly queued: number
@@ -97,6 +125,16 @@ export interface DemoTickets {
   readonly lightsOutLead: number
   readonly lightsOutChild: number
   readonly lightsOutUntestedChild: number
+  readonly uploadRunning: number
+  readonly uploadLead: number
+  readonly uploadChild: number
+  readonly bundleFailed: number
+  readonly bundlePending: number
+  readonly bundleLateFailed: number
+  readonly checkedWithoutVerifyLead: number
+  readonly checkedWithoutVerifyChild: number
+  readonly checkedWithVerifyLead: number
+  readonly checkedWithVerifyChild: number
   readonly replacedLead: number
   readonly replacedChild: number
   readonly replacementChild: number
@@ -142,6 +180,10 @@ async function seedLocked(
       error: 'verify.ready: must be a local http URL with {port}',
       capabilities: [],
     },
+  })
+  const docs = await createRepository(database, { slug: 'kipster/docs-site' })
+  await markRepositoryReady(database, docs.id, {
+    kit: { status: 'valid', error: null, capabilities: ['setup'] },
   })
   await createRepository(database, { slug: 'kipster/website' })
   const legacy = await createRepository(database, {
@@ -308,45 +350,57 @@ async function seedLocked(
     askAfterLimit,
     planFor('email validation on sign-up, including plus addresses'),
   )
-  for (const round of [1, 2]) {
-    await run(askAfterLimit, {
-      outcome: 'done',
-      summary: `Coordinated validation (round ${round}).`,
+  /** Reviews two rounds until the review limit asks the owner. */
+  const reachReviewLimit = async (
+    number: number,
+    accepted: string,
+    finding: string,
+  ) => {
+    for (const round of [1, 2]) {
+      await run(number, {
+        outcome: 'done',
+        summary: `Coordinated validation (round ${round}).`,
+      })
+      await run(number, {
+        outcome: 'passed',
+        summary: 'Tested validation.',
+      })
+      await run(number, {
+        outcome: 'changes-needed',
+        summary: `The validation still accepts ${accepted}.`,
+        artifacts: [
+          {
+            kind: 'finding',
+            title: `Review round ${round}`,
+            content: `- **Blocking:** ${accepted} passes validation; ${finding}\n- Minor: the error message is not announced to screen readers.`,
+          },
+        ],
+      })
+    }
+  }
+  await reachReviewLimit(askAfterLimit, '`a@b`', 'require a dot in the domain.')
+
+  /** Leaves a plan waiting for your approval. */
+  const waitForPlanApproval = async (
+    title: string,
+    body: string,
+    subject: string,
+  ) => {
+    const number = await create(title, body)
+    await run(number, {
+      outcome: 'plan-ready',
+      summary: 'Wrote the plan with three acceptance scenarios.',
+      artifacts: [{ kind: 'plan', title: 'Plan', content: planFor(subject) }],
     })
-    await run(askAfterLimit, {
-      outcome: 'passed',
-      summary: 'Tested validation.',
-    })
-    await run(askAfterLimit, {
-      outcome: 'changes-needed',
-      summary: 'The validation still accepts `a@b`.',
-      artifacts: [
-        {
-          kind: 'finding',
-          title: `Review round ${round}`,
-          content:
-            '- **Blocking:** `a@b` passes validation; require a dot in the domain.\n- Minor: the error message is not announced to screen readers.',
-        },
-      ],
-    })
+    return number
   }
 
   // Waiting for you to approve the plan.
-  const approvePlan = await create(
+  const approvePlan = await waitForPlanApproval(
     'Add CSV export to reports',
     'Let shop owners download any report as CSV from the report page.',
+    'CSV export of reports',
   )
-  await run(approvePlan, {
-    outcome: 'plan-ready',
-    summary: 'Wrote the plan with three acceptance scenarios.',
-    artifacts: [
-      {
-        kind: 'plan',
-        title: 'Plan',
-        content: planFor('CSV export of reports'),
-      },
-    ],
-  })
 
   // Cancelled: you rejected the plan.
   const cancelled = await create(
@@ -553,7 +607,7 @@ async function seedLocked(
       },
       {
         key: 'export-notes',
-        title: 'Document report exports (synthetic untested demo)',
+        title: 'Document report exports (synthetic unverified demo)',
         instructions:
           'Document CSV exports in the repository without a verify capability.',
         land: 'branch',
@@ -602,7 +656,7 @@ async function seedLocked(
       repository: 'kipster/invalid-kit',
       workflow: taskWorkflow,
       title: notesTask!.title,
-      body: 'Synthetic untested task: no agents, code changes or verification ran.',
+      body: 'Synthetic task with an unverified item: no agents, code changes or verification ran.',
     },
     null,
   )
@@ -612,12 +666,234 @@ async function seedLocked(
     summary:
       'Synthetic documentation task finished without a verify capability.',
   })
+  await run(lightsOutUntestedChild, {
+    outcome: 'passed',
+    summary:
+      'Synthetic checker: read the change without an app; one item stays unverified.',
+    artifacts: [
+      {
+        kind: 'evidence',
+        title: 'Export docs not viewed in a browser (synthetic demo)',
+        content: 'Synthetic: no app was started and nothing ran.',
+        scenario: 'Read the export docs',
+        scenarioResult: 'unverified',
+      },
+    ],
+  })
   await updateTask(
     database,
     notesTask!.id,
     'merged',
-    'Synthetic merged task. Untested: no verify capability (skipped test). No real merge ran.',
+    mergedTaskResult(
+      'f'.repeat(40),
+      checkerVerdict(
+        (await getTicketDetail(database, lightsOutUntestedChild))!,
+      ),
+    ),
   )
+
+  // Every task and the final change are checked, with or without the kit's app.
+  // Routing, task results and gates come from the real lifecycle and engine code.
+  const checkedLead = async (input: {
+    repository: string
+    title: string
+    task: { key: string; title: string }
+    commits: { task: string; lead: string }
+    pull: number
+    checks: { summary: string; artifacts: ArtifactInput[] }
+  }) => {
+    const lead = (
+      await createTicket(database, {
+        repository: input.repository,
+        workflow: leadWorkflow,
+        lightsOut: true,
+        title: input.title,
+        body: 'Synthetic lights-out demo of the checker on every task and the final change. No real agents, code or verification ran.',
+      })
+    ).number
+    await run(lead, {
+      outcome: 'plan-ready',
+      summary: 'Prepared the synthetic plan for automatic approval.',
+      artifacts: [
+        { kind: 'plan', title: 'Plan', content: planFor(input.task.title) },
+      ],
+    })
+    await run(lead, {
+      outcome: 'delegate',
+      summary: 'Delegated one synthetic task.',
+      tasks: [
+        {
+          key: input.task.key,
+          title: input.task.title,
+          instructions: `Synthetic demo task: ${input.task.title}.`,
+          land: 'branch',
+        },
+      ],
+    })
+    const tasks = await run(lead, undefined, 'system')
+    await parkForTasks(database, tasks.attempt.id)
+    const [task] = await listTasks(database, tasks.ticket.id)
+    const checked = (await startTask(
+      database,
+      task!.id,
+      {
+        repository: input.repository,
+        workflow: taskWorkflow,
+        title: task!.title,
+        body: 'Synthetic child task: no agents, code changes or verification ran.',
+      },
+      null,
+    ))!.number
+    await run(
+      checked,
+      { outcome: 'done', summary: 'Synthetic builder committed the change.' },
+      'claude-code',
+      input.commits.task,
+    )
+    const test = await run(
+      checked,
+      { outcome: 'passed', ...input.checks },
+      'codex',
+      input.commits.task,
+    )
+    if (test.attempt.stepId !== 'test')
+      throw new Error(
+        `Expected #${checked} to be checked, not ${test.attempt.stepId}`,
+      )
+    await updateTask(
+      database,
+      task!.id,
+      'merged',
+      mergedTaskResult(
+        input.commits.lead,
+        checkerVerdict((await getTicketDetail(database, checked))!),
+      ),
+    )
+    await reportTasks(database, tasks.attempt.id)
+    await run(
+      lead,
+      { outcome: 'done', summary: 'The task landed on the lead branch.' },
+      'claude-code',
+      input.commits.lead,
+    )
+    const final = await run(
+      lead,
+      {
+        outcome: 'passed',
+        ...input.checks,
+        summary: `Final check of the whole change. ${input.checks.summary}`,
+      },
+      'codex',
+      input.commits.lead,
+    )
+    if (final.attempt.stepId !== 'final-test')
+      throw new Error(
+        `Expected #${lead}'s final check, not ${final.attempt.stepId}`,
+      )
+    await run(
+      lead,
+      { outcome: 'passed', summary: 'Reviewed the checked commit.' },
+      'codex',
+      input.commits.lead,
+    )
+    await run(
+      lead,
+      { outcome: 'ready', summary: 'Opened the pull request; CI is green.' },
+      'system',
+      input.commits.lead,
+    )
+    await openPullRequestAndWait(lead, input.pull)
+    // Identical gate facts; only what the latest checker reported differs.
+    const detail = (await getTicketDetail(database, lead))!
+    const head = input.commits.lead
+    const checker = { status: 'finished', outcome: 'passed', commit: head }
+    await saveMergeGate(
+      database,
+      detail.ticket.id,
+      evaluateMergeGate(
+        {
+          untestedReasons: untestedReasons(detail),
+          head,
+          localHead: head,
+          base: 'c'.repeat(40),
+          behind: 0,
+          tester: checker,
+          hasTester: true,
+          hasReviewer: true,
+          reviewer: checker,
+          reproducer: null,
+          hasReproducer: false,
+          ci: 'passed',
+          checks: [
+            {
+              name: 'Demo repository checks',
+              state: 'passed',
+              required: true,
+              url: '',
+            },
+          ],
+          feedback: [],
+          buildWork: false,
+          state: 'OPEN',
+          draft: false,
+          mergeable: 'MERGEABLE',
+          paths: [],
+          migrationGlobs: [],
+          trustedKitError: null,
+          approvedUnverified: null,
+        },
+        new Date().toISOString(),
+      ),
+    )
+    return { lead, child: checked }
+  }
+  const withoutVerify = await checkedLead({
+    repository: 'kipster/docs-site',
+    title: 'Document the API rate limits (checked without verify)',
+    task: {
+      key: 'rate-limit-page',
+      title: 'Write the rate limit page (checked without verify)',
+    },
+    commits: { task: '1'.repeat(40), lead: '2'.repeat(40) },
+    pull: 46,
+    checks: {
+      summary:
+        'Synthetic checker: the kit has no verify block, so it read the diff and ran the tests in a disposable checkout. One item stays unverified.',
+      artifacts: [
+        {
+          kind: 'evidence',
+          title: 'Rate limit page not opened (synthetic demo)',
+          content:
+            'Synthetic: no app was started and nothing ran. The checker could not open the page in a browser.',
+          scenario: 'Open the rate limit page in a browser',
+          scenarioResult: 'unverified',
+        },
+      ],
+    },
+  })
+  const withVerify = await checkedLead({
+    repository: DEMO_REPOSITORY,
+    title: 'Show stock levels on product pages (checked with verify)',
+    task: {
+      key: 'stock-badge',
+      title: 'Add the stock badge (checked with verify)',
+    },
+    commits: { task: '3'.repeat(40), lead: '4'.repeat(40) },
+    pull: 47,
+    checks: {
+      summary:
+        "Synthetic checker: drove the kit's running app; every scenario passed.",
+      artifacts: [
+        {
+          kind: 'evidence',
+          title: 'Stock badge on a product page (synthetic demo)',
+          content: 'Synthetic: observed In stock: 12 on the product page.',
+          scenario: 'A product page shows its stock level',
+          scenarioResult: 'passed',
+        },
+      ],
+    },
+  })
 
   // A lead whose first task was cancelled and retried under the next key, now at its merge wait.
   const replacedLead = await create(
@@ -722,12 +998,305 @@ async function seedLocked(
     ],
   })
 
+  // Running on an uploaded workflow, and a lead whose running child task uses it.
+  const upload = parseUpload(SYNTHETIC_UPLOAD)
+  if (!upload.ok) {
+    throw new Error(
+      `Cannot parse the synthetic uploaded workflow: ${upload.errors.join('; ')}`,
+    )
+  }
+  await saveUploadedWorkflow(database, upload.entry)
+  const uploadRunning = await create(
+    'Shorten the checkout labels (synthetic upload)',
+    'Synthetic ticket running an uploaded workflow; no real agent is running.',
+    upload.entry,
+  )
+  await run(uploadRunning)
+  const uploadLead = (
+    await createTicket(database, {
+      repository: DEMO_REPOSITORY,
+      workflow: leadWorkflow,
+      title: 'Tidy the cart copy (synthetic upload lead)',
+      body: 'Synthetic lead with a task that runs the uploaded synthetic-review workflow. No real agents ran.',
+    })
+  ).number
+  await run(uploadLead, {
+    outcome: 'plan-ready',
+    summary: 'Prepared the synthetic cart copy plan for automatic approval.',
+    artifacts: [{ kind: 'plan', title: 'Plan', content: planFor('cart copy') }],
+  })
+  await run(uploadLead, {
+    outcome: 'delegate',
+    summary: 'Delegated the synthetic cart copy task.',
+    tasks: [
+      {
+        key: 'cart-copy',
+        title: 'Tidy the cart copy (synthetic upload task)',
+        instructions: 'Tidy the wording on the cart page.',
+        land: 'branch',
+        workflow: upload.entry.workflow.name,
+      },
+    ],
+  })
+  const uploadTasks = await run(uploadLead, undefined, 'system')
+  await parkForTasks(database, uploadTasks.attempt.id)
+  const [cartTask] = await listTasks(database, uploadTasks.ticket.id)
+  const uploadChildTicket = await startTask(
+    database,
+    cartTask!.id,
+    {
+      repository: DEMO_REPOSITORY,
+      workflow: upload.entry,
+      title: cartTask!.title,
+      body: 'Synthetic child task running the uploaded workflow; no real agent is running.',
+    },
+    null,
+  )
+  const uploadChild = uploadChildTicket!.number
+  await run(uploadChild)
+
   // Running: the lead is working on it.
   const running = await create(
     'Fix the typo on the pricing page',
     'The pricing page says "anually"; it should say "annually".',
   )
   await run(running)
+
+  // One plan and one ask for each owner action, so every verification scenario
+  // can run on one instance without consuming another scenario's ticket. They
+  // come before the CI tickets, whose pending build attempt run() would claim.
+  const planToApprove = await waitForPlanApproval(
+    'Add gift notes to orders (plan to approve)',
+    'Let shoppers add a short gift note at checkout.',
+    'gift notes on orders',
+  )
+  const planToChange = await waitForPlanApproval(
+    'Add a size guide to product pages (plan to change)',
+    'Show a size guide next to the size picker on clothing pages.',
+    'a size guide on product pages',
+  )
+  const planToReject = await waitForPlanApproval(
+    'Add a loyalty points page (plan to reject)',
+    'Show shoppers the loyalty points they have earned.',
+    'a loyalty points page',
+  )
+  const ask = async (title: string, subject: string, accepted: string) => {
+    const number = await create(
+      title,
+      `Reject malformed ${subject} with a clear message.`,
+      historical.entry,
+    )
+    await planAndApprove(number, planFor(`${subject} validation`))
+    await reachReviewLimit(number, accepted, 'reject it with a clear message.')
+    return number
+  }
+  const askToRetry = await ask(
+    'Validate postcodes at checkout (ask to retry)',
+    'postcodes at checkout',
+    '`ABC`',
+  )
+  const askToMove = await ask(
+    'Validate phone numbers on the account page (ask to move)',
+    'phone numbers on the account page',
+    '`12`',
+  )
+  const askToCancel = await ask(
+    'Validate coupon codes in the cart (ask to cancel)',
+    'coupon codes in the cart',
+    '`!!!`',
+  )
+
+  // CI outcomes come from the real check inspection and maintain-pr result, fed fixture gh output.
+  const taskPr = library.get('task-pr')
+  if (!taskPr) throw new Error('The library has no task-pr workflow')
+  const ciTicket = async (
+    title: string,
+    body: string,
+    head: string,
+    pull: number,
+    bundle: object,
+    logs: Record<string, string>,
+  ) => {
+    const number = await create(title, body, taskPr)
+    await run(
+      number,
+      { outcome: 'done', summary: 'Built the change and committed it.' },
+      'claude-code',
+      head,
+    )
+    await run(
+      number,
+      { outcome: 'passed', summary: 'Tested the change at its head.' },
+      'codex',
+      head,
+    )
+    await run(
+      number,
+      { outcome: 'passed', summary: 'Reviewed the tested commit.' },
+      'codex',
+      head,
+    )
+    const maintain = await run(number, undefined, 'system')
+    const url = `https://github.com/${DEMO_REPOSITORY}/pull/${pull}`
+    await setPullRequestUrl(database, maintain.ticket.id, url)
+    await waitForPullRequestMerge(
+      database,
+      maintain.attempt.id,
+      'pull-request-checks',
+      head,
+    )
+    const checks = await ciSnapshot(
+      maintain.ticket.id,
+      head,
+      pull,
+      bundle,
+      logs,
+    )
+    const result = checksResult(checks, url)
+    if (!result) throw new Error(`Demo CI for #${number} is still awaited`)
+    await completeAttempt(database, maintain.attempt.id, result, {
+      headCommit: head,
+    })
+    return number
+  }
+  /** Inspects one fixture check snapshot and saves the merge gate it produces. */
+  const ciSnapshot = async (
+    ticketId: number,
+    head: string,
+    pull: number,
+    bundle: object,
+    logs: Record<string, string>,
+  ) => {
+    const url = `https://github.com/${DEMO_REPOSITORY}/pull/${pull}`
+    const checks = await inspectChecks(
+      fixtureGh(
+        head,
+        [
+          {
+            kind: 'CheckRun',
+            name: 'Demo repository checks',
+            isRequired: true,
+            status: 'COMPLETED',
+            conclusion: 'SUCCESS',
+            detailsUrl: `https://github.com/${DEMO_REPOSITORY}/actions/runs/${pull}0/job/${pull}1`,
+            databaseId: Number(`${pull}1`),
+          },
+          bundle,
+        ],
+        logs,
+      ),
+      DEMO_REPOSITORY,
+      url,
+      head,
+      AbortSignal.timeout(10_000),
+    )
+    await saveMergeGate(
+      database,
+      ticketId,
+      evaluateMergeGate(
+        {
+          head,
+          localHead: head,
+          base: 'c'.repeat(40),
+          behind: 0,
+          tester: { status: 'finished', outcome: 'passed', commit: head },
+          hasTester: true,
+          hasReviewer: true,
+          reviewer: { status: 'finished', outcome: 'passed', commit: head },
+          reproducer: null,
+          hasReproducer: false,
+          ci: checks.state,
+          checks: checks.checks ?? [],
+          feedback: [],
+          buildWork: false,
+          state: 'OPEN',
+          draft: false,
+          mergeable: 'MERGEABLE',
+          paths: [],
+          migrationGlobs: [],
+          trustedKitError: null,
+          approvedUnverified: [],
+        },
+        new Date().toISOString(),
+      ),
+    )
+    return checks
+  }
+  const bundlePending = await ciTicket(
+    'Optional check still running',
+    'Synthetic demo: the required check passed while the optional **Bundle** check is still running. maintain-pr does not wait for it. No real GitHub or agents ran.',
+    'e'.repeat(40),
+    45,
+    {
+      kind: 'CheckRun',
+      name: 'Bundle',
+      isRequired: false,
+      status: 'IN_PROGRESS',
+      conclusion: null,
+      detailsUrl: `https://github.com/${DEMO_REPOSITORY}/actions/runs/450/job/452`,
+      databaseId: 452,
+    },
+    {},
+  )
+  await openPullRequestAndWait(bundlePending, 45)
+  // Ready while Bundle ran, then Bundle failed during the merge wait: the merge step sends it back to build.
+  const lateHead = '9'.repeat(40)
+  const lateBundle = {
+    kind: 'CheckRun',
+    name: 'Bundle',
+    isRequired: false,
+    detailsUrl: `https://github.com/${DEMO_REPOSITORY}/actions/runs/480/job/482`,
+    databaseId: 482,
+  }
+  const bundleLateFailed = await ciTicket(
+    'Bundle check failed while waiting to merge',
+    'Synthetic demo: the required check passed while the optional **Bundle** check was still running, so maintain-pr reported ready. Bundle then failed while the ticket waited to merge, so the merge step sent it back to the builder. No real GitHub or agents ran.',
+    lateHead,
+    48,
+    { ...lateBundle, status: 'IN_PROGRESS', conclusion: null },
+    {},
+  )
+  const lateMerge = await openPullRequestAndWait(bundleLateFailed, 48)
+  // Left queued at build: the scheduler is off, so the builder never picks it up.
+  const bundleFailed = await ciTicket(
+    'Bundle check failed on the pull request',
+    'Synthetic demo: the required check passed but the optional **Bundle** check failed, so maintain-pr sent the ticket back to the builder. No real GitHub or agents ran.',
+    'd'.repeat(40),
+    44,
+    {
+      kind: 'CheckRun',
+      name: 'Bundle',
+      isRequired: false,
+      status: 'COMPLETED',
+      conclusion: 'FAILURE',
+      detailsUrl: `https://github.com/${DEMO_REPOSITORY}/actions/runs/440/job/442`,
+      databaseId: 442,
+    },
+    {
+      '442':
+        'Bundle\tSize\tdist/assets/index.js is 312.4 kB, over the 250 kB budget (synthetic demo)\nBundle\tSize\tError: Process completed with exit code 1.',
+    },
+  )
+
+  // A queued build would be claimed by the next ticket's seeding, so Bundle fails only after the last CI ticket.
+  const lateChecks = await ciSnapshot(
+    (await getTicket(database, bundleLateFailed))!.id,
+    lateHead,
+    48,
+    { ...lateBundle, status: 'COMPLETED', conclusion: 'FAILURE' },
+    {
+      '482':
+        'Bundle\tSize\tdist/assets/vendor.js is 410.2 kB, over the 250 kB budget (synthetic demo)\nBundle\tSize\tError: Process completed with exit code 1.',
+    },
+  )
+  if (lateChecks.state !== 'failed')
+    throw new Error(`Demo CI for #${bundleLateFailed} did not fail`)
+  await completeAttempt(
+    database,
+    lateMerge,
+    { outcome: 'changes-needed', ...ciFailure(lateChecks.failures) },
+    { headCommit: lateHead },
+  )
 
   // Queued: nothing has picked it up yet.
   const queued = await create(
@@ -742,16 +1311,69 @@ async function seedLocked(
     waitingForMerge,
     askAfterLimit,
     approvePlan,
+    planToApprove,
+    planToChange,
+    planToReject,
+    askToRetry,
+    askToMove,
+    askToCancel,
     cancelled,
     running,
     queued,
     lightsOutLead,
     lightsOutChild,
     lightsOutUntestedChild,
+    retiredWorkflow,
+    uploadRunning,
+    uploadLead,
+    uploadChild,
+    bundleFailed,
+    bundlePending,
+    bundleLateFailed,
+    checkedWithoutVerifyLead: withoutVerify.lead,
+    checkedWithoutVerifyChild: withoutVerify.child,
+    checkedWithVerifyLead: withVerify.lead,
+    checkedWithVerifyChild: withVerify.child,
     replacedLead,
     replacedChild: first.child,
     replacementChild: retry.child,
-    retiredWorkflow,
+  }
+}
+
+/** Answers the gh calls check inspection makes with fixed pull request checks. */
+function fixtureGh(
+  head: string,
+  nodes: readonly object[],
+  logs: Readonly<Record<string, string>>,
+): typeof runCommand {
+  return async (command, args) => {
+    const call = `${command} ${args.join(' ')}`
+    if (command === 'gh' && args[0] === 'api' && args[1] === 'graphql')
+      return JSON.stringify({
+        data: {
+          repository: {
+            pullRequest: {
+              headRefOid: head,
+              baseRefName: 'main',
+              baseRef: { branchProtectionRule: null },
+            },
+            object: {
+              statusCheckRollup: {
+                contexts: {
+                  nodes,
+                  pageInfo: { hasNextPage: false, endCursor: '' },
+                },
+              },
+            },
+          },
+        },
+      })
+    if (command === 'gh' && args[0] === 'api' && args.includes('--slurp'))
+      return '[[]]'
+    const job = args[args.indexOf('--job') + 1] ?? ''
+    if (command === 'gh' && args[0] === 'run' && logs[job] !== undefined)
+      return logs[job]
+    throw new Error(`Unexpected demo GitHub call: ${call}`)
   }
 }
 

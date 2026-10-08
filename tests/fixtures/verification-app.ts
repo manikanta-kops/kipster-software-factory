@@ -34,4 +34,3 @@ createServer((request, response) => {
   })
   response.end(JSON.stringify({ databaseUrl, pid: process.pid }))
 }).listen(Number(port), '127.0.0.1')
-if (mode === 'later-crash') setTimeout(() => process.exit(8), 1500)

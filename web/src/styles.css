@@ -1531,6 +1531,10 @@ button.more-toggle:hover {
   background: var(--red-wash);
   color: var(--red-ink);
 }
+.result-pill.unverified {
+  background: var(--amber-wash);
+  color: var(--amber);
+}
 button.small {
   min-height: 26px;
   padding: 0 10px;
@@ -2960,6 +2964,26 @@ button.small {
 .workflow .version {
   font: 12px var(--mono);
   color: var(--grey);
+}
+.workflow-remove {
+  margin-top: 12px;
+  font-size: 13.5px;
+}
+.workflow-remove-confirm {
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.workflow-remove-confirm legend {
+  padding: 0;
+  font-weight: 600;
+}
+.workflow-remove-confirm p {
+  margin: 4px 0 8px;
+  line-height: 1.4;
+}
+.workflow-removed {
+  margin-bottom: 12px;
 }
 .track-figure {
   margin: 26px 0 0;

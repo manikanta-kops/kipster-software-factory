@@ -93,6 +93,17 @@ export interface WorkflowResponse {
   readonly workflow: WorkflowSummary
 }
 
+// DELETE /api/workflows/:name removes an uploaded workflow. Workflow files are
+// refused (409), as is a workflow unfinished tickets use (409, WorkflowInUseResponse).
+export interface RemoveWorkflowResponse {
+  readonly removed: string
+}
+
+export interface WorkflowInUseResponse extends ErrorResponse {
+  /** Unfinished tickets that run the workflow, or leads with a task that will. */
+  readonly tickets: readonly number[]
+}
+
 /** Every 4xx and 5xx response. */
 export interface ErrorResponse {
   readonly error: string

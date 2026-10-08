@@ -28,7 +28,6 @@ steps:
   - id: final-test
     kind: agent
     role: tester
-    needs: [verify]
     instructions: Test the whole change against the ticket and the approved plan, not one task.
     limit: 3
     routes:

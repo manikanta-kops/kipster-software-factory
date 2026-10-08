@@ -98,7 +98,16 @@ export function TicketPage({
           ) : (
             <Status value={ticket.status} />
           )}
-          {untestedReasons(query.data).map((reason) => (
+          {untestedReasons({
+            ...query.data,
+            workflow: {
+              steps: query.data.workflow.steps.map((step) => ({
+                id: step.id,
+                kind: step.kind,
+                ...(step.does ? { role: step.does } : {}),
+              })),
+            },
+          }).map((reason) => (
             <span className="badge" key={reason}>
               {reason}
             </span>

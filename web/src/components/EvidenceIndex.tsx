@@ -94,7 +94,10 @@ function ScenarioChecklist({ detail }: { detail: TicketResponse }) {
     )
     .map(({ artifact }) => artifact)
   const passed = rows.filter(({ scenario }) => scenario.result === 'passed')
-  const failed = rows.length - passed.length
+  const unverified = rows.filter(
+    ({ scenario }) => scenario.result === 'unverified',
+  ).length
+  const failed = rows.length - passed.length - unverified
   const allOpen = rows.every((row) => open.has(row.key))
   const toggle = (key: string) => {
     const next = new Set(open)
@@ -137,6 +140,11 @@ function ScenarioChecklist({ detail }: { detail: TicketResponse }) {
           <span className="result-pill passed">{passed.length} passed</span>
           {failed > 0 && (
             <span className="result-pill failed">{failed} failed</span>
+          )}
+          {unverified > 0 && (
+            <span className="result-pill unverified">
+              {unverified} unverified
+            </span>
           )}
         </span>
         {cardOpen && (

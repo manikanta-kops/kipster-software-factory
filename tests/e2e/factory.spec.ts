@@ -643,7 +643,8 @@ test('repositories show valid and invalid kits and gate workflows on capabilitie
   await page
     .getByLabel('Repository', { exact: true })
     .selectOption('kipster/invalid-kit')
-  await expect(page.getByRole('radio', { name: /^lead / })).toBeDisabled()
+  await expect(page.getByRole('radio', { name: /^bug / })).toBeDisabled()
+  await expect(page.getByRole('radio', { name: /^lead / })).toBeEnabled()
   await expect(page.getByText(/needs a verified kit/).first()).toBeVisible()
 })
 

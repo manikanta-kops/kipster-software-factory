@@ -1,7 +1,8 @@
 import type { LessonResponse, LessonsResponse } from '../src/api/contract.ts'
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { mkdir, readFile, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { proposeLessons, type Lesson } from '../src/domain/lessons.ts'
 import type { Artifact, Attempt } from '../src/domain/records.ts'
@@ -326,9 +327,15 @@ test('PostgreSQL completion proposes without blocking; API acceptance reaches th
 })
 
 test('PostgreSQL repeated errors park unchanged; lesson files cover all step directory forms and order scopes', async (t) => {
-  const f = await autoMergeFixture(t, { tester: false, reviewer: false })
-  const db = f.store.database
-  const created = await quickTicket(db, { repository: f.repository.slug })
+  const store = await createTestStore()
+  const home = await mkdtemp(join(tmpdir(), 'ksf-lessons-'))
+  t.after(async () => {
+    await store.close()
+    await rm(home, { recursive: true, force: true })
+  })
+  const db = store.database
+  const created = await quickTicket(db)
+  const repository = created.repository
   for (let i = 0; i < 2; i++) {
     const context = (await claimAttempts(db, 1))[0]!
     await markRunning(db, context.attempt.id, 'codex')
@@ -355,7 +362,7 @@ test('PostgreSQL repeated errors park unchanged; lesson files cover all step dir
       c,
       [
         {
-          repositoryId: f.repository.id,
+          repositoryId: repository.id,
           text: 'Repository rule first',
           source: 'owner-comment',
           sourceTicketId: created.id,
@@ -365,7 +372,7 @@ test('PostgreSQL repeated errors park unchanged; lesson files cover all step dir
       [],
     ),
   )
-  const [repo] = await listLessons(db, { repositoryId: f.repository.id })
+  const [repo] = await listLessons(db, { repositoryId: repository.id })
   await acceptLesson(db, repo!.id)
   const detail = (await getTicketDetail(db, created.number))!
   for (const [role, suffix] of [
@@ -376,7 +383,7 @@ test('PostgreSQL repeated errors park unchanged; lesson files cover all step dir
     ['writer', 'writer-1'],
   ] as const) {
     const directory = join(
-      f.home,
+      home,
       'steps',
       String(created.id),
       'snapshot',
@@ -388,7 +395,7 @@ test('PostgreSQL repeated errors park unchanged; lesson files cover all step dir
       detail,
       step: { id: 'step', kind: 'agent' as const, role, needs: [], routes: {} },
       directory,
-      home: f.home,
+      home,
       diff: '',
       trusted: { roleInstructions: '', contextIndex: '' },
     }

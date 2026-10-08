@@ -9,6 +9,7 @@ import type {
   DecisionsResponse,
   OptionRequest,
   ErrorResponse,
+  RemoveWorkflowResponse,
   EventMessage,
   RepositoriesResponse,
   RepositoryResponse,
@@ -73,6 +74,10 @@ async function post<T>(path: string, body: unknown): Promise<T> {
   ).json() as Promise<T>
 }
 
+async function remove<T>(path: string): Promise<T> {
+  return (await response(path, { method: 'DELETE' })).json() as Promise<T>
+}
+
 export const api = {
   lessons: (status: LessonStatus, signal: AbortSignal) =>
     get<LessonsResponse>(`/lessons?status=${status}`, signal),
@@ -97,6 +102,8 @@ export const api = {
     get<WorkflowsResponse>('/workflows', signal),
   uploadWorkflow: (body: UploadWorkflowRequest) =>
     post<WorkflowResponse>('/workflows', body),
+  removeWorkflow: (name: string) =>
+    remove<RemoveWorkflowResponse>(`/workflows/${encodeURIComponent(name)}`),
   settings: (signal: AbortSignal) => get<SettingsResponse>('/settings', signal),
   saveSettings: (body: SettingsRequest) =>
     post<SettingsResponse>('/settings', body),

@@ -39,6 +39,7 @@ test('other repository result is typed, trimmed and defaults to lead', () => {
   for (const otherRepository of [
     undefined,
     {},
+    { repository: 'invalid' },
     { ...request, repository: '../bad' },
     { ...request, title: '' },
     { ...request, body: ' ' },
