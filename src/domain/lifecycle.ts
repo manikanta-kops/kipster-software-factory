@@ -268,7 +268,7 @@ export function reportableOutcomes(step: Step): readonly string[] {
 }
 
 export function parseStepResult(value: unknown): StepResult {
-  const parsed = stepResultSchema.safeParse(value)
+  const parsed = stepResultSchema.safeParse(stripResultNuls(value))
   if (!parsed.success) {
     throw new FactoryError(
       'invalid',
@@ -278,6 +278,19 @@ export function parseStepResult(value: unknown): StepResult {
     )
   }
   return parsed.data
+}
+
+function stripResultNuls(value: unknown): unknown {
+  if (typeof value === 'string') return value.replaceAll('\u0000', '')
+  if (Array.isArray(value)) return value.map(stripResultNuls)
+  if (value && typeof value === 'object')
+    return Object.fromEntries(
+      Object.entries(value).map(([key, entry]) => [
+        key,
+        stripResultNuls(entry),
+      ]),
+    )
+  return value
 }
 
 /** An agent or system step finished with a result. */

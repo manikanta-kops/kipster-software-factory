@@ -25,7 +25,13 @@ import {
   verificationFinding,
   type VerificationInstance,
 } from '../verification/harness.ts'
-import { artifactPath, buildPrompt, openSession, readResult } from './prompt.ts'
+import {
+  agentResultError,
+  artifactPath,
+  buildPrompt,
+  openSession,
+  readResult,
+} from './prompt.ts'
 import type { RunnerOptions } from './runner.ts'
 import type { Verdict } from './parallel-final.ts'
 import { agentFor } from './tasks.ts'
@@ -250,8 +256,11 @@ export async function runProofAttempt(
         log,
         signal: executionSignal,
       })
+      let executionError: unknown
       await Promise.race([
-        execution,
+        execution.catch((error: unknown) => {
+          executionError = error
+        }),
         ...instances
           .filter((i) => i.url)
           .map((i) =>
@@ -261,21 +270,28 @@ export async function runProofAttempt(
           ),
       ])
       signal.throwIfAborted()
+      if (executionError instanceof DependencyChangedError) throw executionError
       try {
         result = await readResult(directory, step.role, home)
         await validateProof(result, step.role, instances, home)
       } catch (error) {
-        resultValidationError = String(error)
+        const failure = await agentResultError(
+          error,
+          executionError,
+          log,
+          retry === 1
+            ? 'Invalid or missing proof result'
+            : 'Invalid or missing proof result after two runs',
+        )
+        resultValidationError = failure.message
         await writeFile(
           join(directory, 'result-error.txt'),
           resultValidationError,
         )
         if (retry === 1) continue
-        throw new Error(
-          `Invalid or missing proof result after two runs: ${String(error)}`,
-          { cause: error },
-        )
+        throw failure
       }
+      if (executionError) throw executionError
       const artifacts = await Promise.all(
         result.artifacts.map(async (artifact) => {
           if (!artifact.path) return { artifact, source: null }

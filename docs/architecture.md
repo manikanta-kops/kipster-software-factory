@@ -386,18 +386,25 @@ directory and follows log retention:
 }
 ```
 
-All three keys are required; a passed reviewer may also supply the typed
+Outcome and summary are required; omitted artifacts default to an empty list.
+A passed reviewer may also supply the typed
 `ownerReview` field described below. Outcomes must belong to the role's catalog contract
 or be `needs-decision`. Summary is nonempty. Artifacts use the existing lifecycle
 schema: kind (`plan`, `comment`, `finding`, `evidence`, `log`, `note`), title, and
 exactly one of Markdown `content` or a `path` to an existing file under the
 factory home. Symlink escapes are rejected. File artifacts are copied into `evidence/<ticket-id>/` before recording, so scratch and worktree cleanup cannot erase evidence.
 Artifact titles and scenario labels over 200 characters are shortened, not
-rejected. A successful planner must include a plan artifact. Missing or invalid results
+rejected. NUL bytes are stripped from all result string values before validation
+and storage. A successful planner must include a plan artifact. Missing or invalid results
 get one fresh CLI retry in a separate directory with the previous validation
 failure in its prompt; proof retries still receive fresh instances and must
 capture new evidence. A second invalid result fails
-the attempt and opens a human ask. Timeouts fail immediately. Chat text is never
+the attempt and opens a human ask. When the agent process fails without a valid
+result, diagnostics lead with the process error and the last 40 lines (at most
+4 KiB) of its log, followed by the result problem. A builder reporting done with
+uncommitted files gets the same retry, naming those files and asking it to commit
+or remove them. Each lead run, including a retry, rebuilds its context from current
+task and pull request state. Timeouts fail immediately. Chat text is never
 parsed for routing. Logs survive failures and cancellation.
 
 ### System actions and verification
