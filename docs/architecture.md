@@ -392,7 +392,8 @@ or be `needs-decision`. Summary is nonempty. Artifacts use the existing lifecycl
 schema: kind (`plan`, `comment`, `finding`, `evidence`, `log`, `note`), title, and
 exactly one of Markdown `content` or a `path` to an existing file under the
 factory home. Symlink escapes are rejected. File artifacts are copied into `evidence/<ticket-id>/` before recording, so scratch and worktree cleanup cannot erase evidence.
-A successful planner must include a plan artifact. Missing or invalid results
+Artifact titles and scenario labels over 200 characters are shortened, not
+rejected. A successful planner must include a plan artifact. Missing or invalid results
 get one fresh CLI retry in a separate directory with the previous validation
 failure in its prompt; proof retries still receive fresh instances and must
 capture new evidence. A second invalid result fails
