@@ -498,6 +498,28 @@ export function afterPullRequestBaseAdvance(
   )
 }
 
+/** Waits only the owner ends; the merge poll still watches their pull requests. */
+export const OWNER_WAITS = ['ask', 'human', 'decision'] as const
+
+/** The owner merged the pull request on GitHub while the ticket waited on them. */
+export function afterPullRequestMergedWhileWaiting(
+  history: readonly AttemptState[],
+): Transition {
+  const attempt = openAttempt(history)
+  if (
+    attempt.status !== 'waiting' ||
+    !(OWNER_WAITS as readonly (string | null)[]).includes(attempt.waitingFor)
+  )
+    throw new FactoryError(
+      'conflict',
+      `Step "${attempt.stepId}" is not waiting on you`,
+    )
+  return transition(
+    { status: 'finished', outcome: 'merged', next: { to: 'finish' } },
+    null,
+  )
+}
+
 /** A system step parks its running attempt until the pull request is merged. */
 export function waitForMerge(
   workflow: Workflow,

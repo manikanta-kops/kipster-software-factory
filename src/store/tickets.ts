@@ -37,6 +37,7 @@ import {
   afterFailure,
   afterInterruption,
   afterPullRequestBaseAdvance,
+  afterPullRequestMergedWhileWaiting,
   afterResolution,
   afterResult,
   type ArtifactInput,
@@ -48,6 +49,7 @@ import {
   startTicket,
   stepOf,
   type Opening,
+  OWNER_WAITS,
   ticketStatus,
   type Transition,
   waitForMerge,
@@ -256,6 +258,20 @@ export async function listWaitingForMerge(
      WHERE status = 'waiting' AND waiting_for = $1
      ORDER BY id`,
     [waitingFor],
+  )
+  return Promise.all(rows.map((row) => loadContext(database, toAttempt(row))))
+}
+
+/** Owner waits on tickets with a pull request, which the owner may merge on GitHub meanwhile. */
+export async function listOwnerWaitsWithPullRequest(
+  database: Queryable,
+): Promise<AttemptContext[]> {
+  const { rows } = await database.query<AttemptRow>(
+    `SELECT a.* FROM attempts a JOIN tickets t ON t.id = a.ticket_id
+     WHERE a.status = 'waiting' AND a.waiting_for = ANY($1)
+       AND t.pull_request_url IS NOT NULL
+     ORDER BY a.id`,
+    [OWNER_WAITS],
   )
   return Promise.all(rows.map((row) => loadContext(database, toAttempt(row))))
 }
@@ -969,6 +985,47 @@ export async function failAttempt(
   })
 }
 
+/** The owner merged the pull request on GitHub while this attempt waited on them. */
+export async function finishMergedWhileWaiting(
+  database: Database,
+  attemptId: number,
+  merge: {
+    readonly pullRequestUrl: string
+    readonly mergeCommit: string
+    readonly mergedBy: 'factory' | 'owner'
+  },
+): Promise<Moved> {
+  return transaction(database, async (connection) => {
+    const locked = await lockByAttempt(connection, attemptId)
+    openAttemptOf(locked, attemptId)
+    const transition = afterPullRequestMergedWhileWaiting(locked.attempts)
+    const events: NewEvent[] = []
+    await insertArtifacts(
+      connection,
+      locked.id,
+      attemptId,
+      [
+        {
+          kind: 'note',
+          title: 'Pull request merged on GitHub while waiting',
+          content: `${merge.pullRequestUrl} was merged by ${merge.mergedBy} at merge commit ${merge.mergeCommit} while the ticket waited on you, so the ticket finished.`,
+        },
+      ],
+      events,
+    )
+    return apply(
+      connection,
+      locked,
+      transition,
+      {
+        executor: 'system',
+        eventSummary: `Pull request merged on GitHub by ${merge.mergedBy} while waiting: ${merge.pullRequestUrl}`,
+      },
+      events,
+    )
+  })
+}
+
 export async function requeuePullRequestMaintenance(
   database: Database,
   attemptId: number,
@@ -1418,6 +1475,8 @@ export async function apply(
     readonly headCommit?: string
     readonly reproductionAttemptId?: number
     readonly ownerReview?: { readonly reason: string }
+    /** A readable line for the closing event, where the attempt summary is not one. */
+    readonly eventSummary?: string
   },
   events: NewEvent[],
 ): Promise<Moved> {
@@ -1471,6 +1530,7 @@ export async function apply(
       outcome: close.outcome,
       next: close.next,
       ...(closing.ownerReview ? { ownerReview: closing.ownerReview } : {}),
+      ...(closing.eventSummary ? { summary: closing.eventSummary } : {}),
       ...(closing.error === undefined ? {} : { error: closing.error }),
     },
   })
