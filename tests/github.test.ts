@@ -45,9 +45,10 @@ test('GitHub adapter reuses a branch PR and passes exact Markdown through stdin'
   assert.ok(edits[0]!.args.includes('--body-file'))
 })
 
-test('GitHub adapter reuses merged and closed PRs so merge polling resolves them', async () => {
+test('GitHub adapter creates a new PR when the branch PR is merged or closed', async () => {
   for (const state of ['MERGED', 'CLOSED'] as const) {
     const github = createGitHub(async (_command, args) => {
+      if (args[1] === 'create') return 'https://github.com/acme/shop/pull/2'
       assert.equal(args[1], 'list')
       return JSON.stringify([
         {
@@ -66,7 +67,8 @@ test('GitHub adapter reuses merged and closed PRs so merge polling resolves them
       cwd: '/tmp',
       signal: new AbortController().signal,
     })
-    assert.equal(pr.state, state)
+    assert.equal(pr.state, 'OPEN')
+    assert.equal(pr.url, 'https://github.com/acme/shop/pull/2')
   }
 })
 
