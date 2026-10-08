@@ -336,7 +336,10 @@ only ignored directories named `node_modules`, `dist`, `build`, `coverage`,
 `playwright-report` or `test-results`, after checking ownership, branch, locks,
 tracked content and symlinks. All other ignored files retain the worktree.
 The database records successful removal (or an already absent worktree), so
-subsequent passes and restarts skip it. The cache and step metadata are retained; recorded files are owned by the per-ticket evidence store. `maintain-pr` synchronizes branches
+subsequent passes and restarts skip it. Cleanup also removes the ticket's agent
+scratch directory, `steps/<ticket-id>`, even when the worktree is retained, and
+the emptied `worktrees/<ticket-id>` folder; a symlinked scratch directory is left
+alone. The cache is retained; recorded files are owned by the per-ticket evidence store. `maintain-pr` synchronizes branches
 with the fetched base and watches CI (Slice 3). Kit
 capabilities are refreshed from committed default-branch blobs after each cache
 fetch; workflows needing missing capabilities remain gated by the store.
@@ -359,7 +362,9 @@ disposable checkouts, as described in Independent proof below.
 
 The factory writes the prompt to
 `steps/<ticket-id>/<attempt-id>/<try>/prompt.md`, outside the repository, and
-instructs the agent to write `result.json` beside it:
+instructs the agent to write `result.json` beside it. A copy of each prompt is
+recorded as a log artifact (`<role> run <try> prompt`), so it outlives the scratch
+directory and follows log retention:
 
 ```json
 {

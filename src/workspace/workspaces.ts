@@ -1,4 +1,12 @@
-import { access, lstat, mkdir, readFile, writeFile, rm } from 'node:fs/promises'
+import {
+  access,
+  lstat,
+  mkdir,
+  readFile,
+  rm,
+  rmdir,
+  writeFile,
+} from 'node:fs/promises'
 import { basename, join, resolve } from 'node:path'
 import type { Repository, Ticket } from '../domain/records.ts'
 import { loadKit } from '../kit/kit.ts'
@@ -235,10 +243,14 @@ export class Workspaces {
   ): Promise<boolean> {
     if (ticket.status !== 'done' && ticket.status !== 'cancelled') return false
     await removeDependencies(this, ticket, signal)
+    await this.removeScratch(ticket)
     return this.serial(repository.id, async () => {
       const root = join(this.home, 'worktrees', String(ticket.id))
       const path = this.path(ticket)
-      if (!(await exists(path))) return true
+      if (!(await exists(path))) {
+        await removeIfEmpty(root)
+        return true
+      }
       if (
         (await lstat(root)).isSymbolicLink() ||
         (await lstat(path)).isSymbolicLink()
@@ -305,8 +317,18 @@ export class Workspaces {
         signal,
       })
       await rm(join(root, 'owner.json'))
+      await removeIfEmpty(root)
       return true
     })
+  }
+  /** Agent sessions' scratch directories; their results and evidence were copied when recorded. */
+  private async removeScratch(ticket: Ticket) {
+    const steps = join(this.home, 'steps')
+    const scratch = join(steps, String(ticket.id))
+    for (const path of [steps, scratch]) {
+      if (!(await exists(path)) || (await lstat(path)).isSymbolicLink()) return
+    }
+    await rm(scratch, { recursive: true })
   }
   private async ownership(path: string, owner: object) {
     try {
@@ -318,6 +340,16 @@ export class Workspaces {
           cause: error,
         })
     }
+  }
+}
+/** Removes a directory only when nothing is left in it. */
+async function removeIfEmpty(path: string) {
+  try {
+    await rmdir(path)
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code
+    if (!['ENOENT', 'ENOTEMPTY', 'EEXIST', 'ENOTDIR'].includes(code ?? ''))
+      throw error
   }
 }
 async function exists(path: string) {

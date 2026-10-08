@@ -6,10 +6,7 @@ import { requestOtherRepository } from './ticket-links.ts'
 import { agentFor, agentsFor, leadContext, leadResultProblem } from './tasks.ts'
 import { getTaskOfChild, parkForTasks } from '../store/tasks.ts'
 import { setArtifactHome } from '../store/database.ts'
-import {
-  newEvidenceFile,
-  cleanVerificationEvidence,
-} from '../artifacts/storage.ts'
+import { cleanVerificationEvidence } from '../artifacts/storage.ts'
 import { runDecision, type DecisionDependencies } from './decisions.ts'
 import { maintainPullRequest } from './pull-requests.ts'
 import { runProofAttempt } from './proof.ts'
@@ -36,7 +33,7 @@ import type { AgentExecutor } from '../executors/cli.ts'
 import { run } from '../executors/process.ts'
 import type { Workspaces } from '../workspace/workspaces.ts'
 import type { GitHub } from '../github/github.ts'
-import { buildPrompt, readResult } from './prompt.ts'
+import { buildPrompt, openSession, readResult } from './prompt.ts'
 
 export interface RunnerOptions {
   database: Database
@@ -279,12 +276,15 @@ async function executeAttempt(
         resultValidationError,
         ...(lead ? { lead } : {}),
       })
-      await writeFile(join(directory, 'prompt.md'), prompt)
-      const log = await newEvidenceFile(home, ticket.id)
-      await writeFile(log, '')
-      await addAttemptArtifacts(database, attempt.id, [
-        { kind: 'log', title: `${step.role} run ${retry + 1}`, path: log },
-      ])
+      const log = await openSession({
+        database,
+        home,
+        ticketId: ticket.id,
+        attemptId: attempt.id,
+        directory,
+        prompt,
+        title: `${step.role} run ${retry + 1}`,
+      })
       let executionError: unknown
       try {
         await session.execute({

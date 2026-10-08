@@ -286,11 +286,23 @@ test('planned-change: approval, two builds, review loop, PR, merge wait, termina
     f.requests[0]!.body,
     /Acceptance plan|Verification build|fake reviewer/,
   )
-  assert.equal(waiting.artifacts.filter((a) => a.kind === 'log').length, 7)
+  const logs = waiting.artifacts.filter((a) => a.kind === 'log')
+  const promptLogs = logs.filter((a) => a.title.endsWith(' prompt'))
+  assert.equal(logs.length, 14)
+  assert.equal(promptLogs.length, 7)
   const buildPrompt = await readFile(
     join(f.invocations[4]!, 'prompt.md'),
     'utf8',
   )
+  const savedPrompts = await Promise.all(
+    promptLogs.map(async (a) => ({
+      path: a.path!,
+      text: await readFile(a.path!, 'utf8'),
+    })),
+  )
+  const savedBuild = savedPrompts.find((p) => p.text === buildPrompt)
+  assert.ok(savedBuild, 'each session prompt is kept as evidence')
+  assert.ok(savedBuild.path.startsWith(join(f.home, 'evidence') + '/'))
   assert.match(buildPrompt, /Add a second change file/)
   assert.match(buildPrompt, /Use the plan/)
   assert.match(buildPrompt, /"planApproved": true/)
@@ -348,6 +360,13 @@ test('planned-change: approval, two builds, review loop, PR, merge wait, termina
     () => exists(new Workspaces(f.home).path(ticket)),
     (value) => !value,
   )
+  // Cleanup removes the agents' scratch and the emptied worktree folder; the saved prompt stays.
+  await until(
+    () => exists(join(f.home, 'worktrees', String(ticket.id))),
+    (value) => !value,
+  )
+  assert.equal(await exists(join(f.home, 'steps', String(ticket.id))), false)
+  assert.equal(await readFile(savedBuild.path, 'utf8'), buildPrompt)
   assert.deepEqual(
     (await getRepository(f.store.database, f.repository.slug))!.kit,
     { status: 'valid', error: null, capabilities: ['setup'] },
@@ -367,7 +386,15 @@ test('an invalid result retries once with a fresh run, then asks, preserving log
   assert.notEqual(f.invocations[0], f.invocations[1])
   assert.match(stopped.attempts[0]!.headCommit!, /^[0-9a-f]{40}$/)
   assert.match(stopped.attempts[0]!.error!, /result.json after two runs/)
-  assert.equal(stopped.artifacts.filter((a) => a.kind === 'log').length, 2)
+  assert.deepEqual(
+    stopped.artifacts.filter((a) => a.kind === 'log').map((a) => a.title),
+    [
+      'planner run 1 prompt',
+      'planner run 1',
+      'planner run 2 prompt',
+      'planner run 2',
+    ],
+  )
 })
 
 test('reading a result rejects invalid JSON, a missing file and an outcome the role cannot report', async (t) => {
@@ -423,8 +450,11 @@ test('invalid result can recover on the one fresh retry', async (t) => {
   assert.match(second, /Previous result validation failed:/)
 })
 
-async function assertDead(pidFile: string) {
-  const pid = Number(await readFile(pidFile, 'utf8'))
+async function pidOf(file: string) {
+  return Number(await readFile(file, 'utf8'))
+}
+
+async function assertDead(pid: number) {
   await until(async () => {
     try {
       process.kill(pid, 0)
@@ -446,9 +476,12 @@ test('cancelling a running step kills the whole group without opening an ask', a
         : false,
     Boolean,
   )
+  // Read the pids first: cleanup removes the cancelled ticket's scratch directory.
+  const agent = await pidOf(join(f.invocations[0]!, 'pid'))
+  const descendant = await pidOf(join(f.invocations[0]!, 'descendant.pid'))
   await cancelTicket(f.store.database, { ticketNumber: ticket.number })
-  await assertDead(join(f.invocations[0]!, 'pid'))
-  await assertDead(join(f.invocations[0]!, 'descendant.pid'))
+  await assertDead(agent)
+  await assertDead(descendant)
   assert.equal((await f.detail(ticket.number)).ticket.status, 'cancelled')
 })
 
@@ -601,8 +634,8 @@ test('a second factory cannot take the lock; SIGKILL of the factory kills orphan
   assert.equal((await f.detail(ticket.number)).attempts[0]!.status, 'running')
   child.kill('SIGKILL')
   await closed
-  await assertDead(join(directory, 'pid'))
-  await assertDead(join(directory, 'descendant.pid'))
+  await assertDead(await pidOf(join(directory, 'pid')))
+  await assertDead(await pidOf(join(directory, 'descendant.pid')))
   assert.equal((await f.detail(ticket.number)).attempts[0]!.status, 'running')
   await writeFile(join(f.root, 'script.json'), '{}')
   await f.start()
@@ -622,15 +655,32 @@ test('workspace ownership and dirty files survive terminal cleanup', async (t) =
   await workspaces.prepareRepository(f.repository, signal)
   const cwd = await workspaces.prepare(ticket, f.repository, signal)
   await writeFile(join(cwd, 'valuable-notes.txt'), 'Keep this')
-  await workspaces.cleanup(
-    { ...ticket, status: 'cancelled' },
-    f.repository,
-    signal,
+  const scratch = join(f.home, 'steps', String(ticket.id), '1', '1')
+  await mkdir(scratch, { recursive: true })
+  await writeFile(join(scratch, 'prompt.md'), 'prompt')
+  assert.equal(
+    await workspaces.cleanup(
+      { ...ticket, status: 'running' },
+      f.repository,
+      signal,
+    ),
+    false,
+  )
+  assert.equal(await exists(scratch), true)
+  assert.equal(
+    await workspaces.cleanup(
+      { ...ticket, status: 'cancelled' },
+      f.repository,
+      signal,
+    ),
+    false,
   )
   assert.equal(
     await readFile(join(cwd, 'valuable-notes.txt'), 'utf8'),
     'Keep this',
   )
+  // Scratch goes even while the worktree is kept for the owner.
+  assert.equal(await exists(join(f.home, 'steps', String(ticket.id))), false)
   await rm(join(f.home, 'worktrees', String(ticket.id), 'owner.json'))
   await assert.rejects(
     workspaces.prepare(ticket, f.repository, signal),
@@ -702,8 +752,15 @@ test('cleanup removes ignored dependencies and build output, preserves unknown s
     await writeFile(join(cwd, folder, 'keep.txt'), folder)
   }
   await writeFile(join(cwd, '.env'), 'secret')
+  const other = join(f.home, 'steps', String(ticket.id + 1000), '1', '1')
+  await mkdir(other, { recursive: true })
+  await writeFile(join(other, 'prompt.md'), 'another ticket')
   const terminal = { ...ticket, status: 'cancelled' as const }
   assert.equal(await workspaces.cleanup(terminal, f.repository, signal), false)
+  assert.equal(
+    await readFile(join(other, 'prompt.md'), 'utf8'),
+    'another ticket',
+  )
   assert.equal(await exists(join(cwd, 'node_modules')), false)
   assert.equal(await exists(join(cwd, 'dist')), false)
   assert.equal(await readFile(join(cwd, '.env'), 'utf8'), 'secret')
@@ -728,6 +785,10 @@ test('cleanup removes ignored dependencies and build output, preserves unknown s
     (tickets) => tickets.length === 0,
   )
   assert.equal(await exists(workspaces.cache(f.repository)), true)
+  assert.equal(
+    await exists(join(f.home, 'worktrees', String(ticket.id))),
+    false,
+  )
   assert.equal(await workspaces.cleanup(terminal, f.repository, signal), true)
 })
 
@@ -828,6 +889,11 @@ test('cleanup never follows a replaced worktree root symlink', async (t) => {
   const moved = join(f.root, 'moved-worktree')
   await rename(cwd, moved)
   await symlink(moved, cwd)
+  const outside = join(f.root, 'outside-scratch')
+  await mkdir(outside)
+  await writeFile(join(outside, 'keep'), 'not factory scratch')
+  await mkdir(join(f.home, 'steps'), { recursive: true })
+  await symlink(outside, join(f.home, 'steps', String(ticket.id)))
   assert.equal(
     await workspaces.cleanup(
       { ...ticket, status: 'cancelled' },
@@ -839,6 +905,10 @@ test('cleanup never follows a replaced worktree root symlink', async (t) => {
   assert.equal(
     await readFile(join(moved, 'dist', 'keep'), 'utf8'),
     'external output',
+  )
+  assert.equal(
+    await readFile(join(outside, 'keep'), 'utf8'),
+    'not factory scratch',
   )
 })
 

@@ -1,7 +1,6 @@
 import { DependencyChangedError } from '../workspace/dependencies.ts'
 import { mkdir, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import { newEvidenceFile } from '../artifacts/storage.ts'
 import type { ArtifactInput, StepResult } from '../domain/lifecycle.ts'
 import { findingTitle, reviewHistory } from '../domain/review.ts'
 import { describeAgent } from '../domain/settings.ts'
@@ -13,7 +12,7 @@ import {
   type TicketDetail,
 } from '../store/tickets.ts'
 import { dependencySession } from './dependencies.ts'
-import { buildPrompt, readResult } from './prompt.ts'
+import { buildPrompt, openSession, readResult } from './prompt.ts'
 import type { RunnerOptions } from './runner.ts'
 import type { Verdict } from './parallel-final.ts'
 
@@ -84,20 +83,15 @@ export async function runReviewAttempt(
           trusted,
           resultValidationError,
         })
-        await writeFile(join(directory, 'prompt.md'), prompt)
-        const log = await newEvidenceFile(options.home, ticket.id)
-        await writeFile(log, '')
-        await addAttemptArtifacts(options.database, attempt.id, [
-          {
-            kind: 'log',
-            title:
-              `Reviewer ${index + 1} (${describeAgent(agent)}) run ${retry}`.slice(
-                0,
-                200,
-              ),
-            path: log,
-          },
-        ])
+        const log = await openSession({
+          database: options.database,
+          home: options.home,
+          ticketId: ticket.id,
+          attemptId: attempt.id,
+          directory,
+          prompt,
+          title: `Reviewer ${index + 1} (${describeAgent(agent)}) run ${retry}`,
+        })
         let executionError: unknown
         try {
           await session.execute({

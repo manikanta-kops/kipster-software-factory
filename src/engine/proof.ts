@@ -1,9 +1,6 @@
 import { DependencyChangedError } from '../workspace/dependencies.ts'
 import { dependencySession } from './dependencies.ts'
-import {
-  newEvidenceFile,
-  cleanVerificationEvidence,
-} from '../artifacts/storage.ts'
+import { cleanVerificationEvidence } from '../artifacts/storage.ts'
 import {
   lstat,
   mkdir,
@@ -28,7 +25,7 @@ import {
   verificationFinding,
   type VerificationInstance,
 } from '../verification/harness.ts'
-import { artifactPath, buildPrompt, readResult } from './prompt.ts'
+import { artifactPath, buildPrompt, openSession, readResult } from './prompt.ts'
 import type { RunnerOptions } from './runner.ts'
 import type { Verdict } from './parallel-final.ts'
 import { agentFor } from './tasks.ts'
@@ -236,12 +233,15 @@ export async function runProofAttempt(
         proof: { context: proof },
         resultValidationError,
       })
-      await writeFile(join(directory, 'prompt.md'), prompt)
-      const log = await newEvidenceFile(home, ticket.id)
-      await writeFile(log, '')
-      await addAttemptArtifacts(database, attempt.id, [
-        { kind: 'log', title: `${step.role} run ${retry}`, path: log },
-      ])
+      const log = await openSession({
+        database,
+        home,
+        ticketId: ticket.id,
+        attemptId: attempt.id,
+        directory,
+        prompt,
+        title: `${step.role} run ${retry}`,
+      })
       execution = session.execute({
         config: await agentFor(options, context, step.role),
         cwd,
