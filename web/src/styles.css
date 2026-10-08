@@ -854,9 +854,15 @@ section.quiet {
   color: var(--ink-2);
 }
 .decision-context {
+  display: -webkit-box;
   margin: 8px 0 0;
+  overflow: hidden;
   color: var(--grey);
   font-size: 14px;
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  /* The ticket page shows the full text; a long failure must not stretch the card. */
+  -webkit-line-clamp: 3;
 }
 .decision-thumb {
   grid-row: span 2;
