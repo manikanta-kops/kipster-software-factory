@@ -2,6 +2,7 @@ import type { Artifact, Attempt, LeadTask, Ticket } from './records.ts'
 import { evaluateMergeGate, type MergeGate } from './merge-gate.ts'
 import { scenarioIndex } from './evidence.ts'
 import { skippedReasons, uncheckedItems } from './task-testing.ts'
+import { replacements } from './tasks.ts'
 import type { Workflow } from './workflow.ts'
 
 export interface TicketSummary {
@@ -59,6 +60,7 @@ export function summarizeTicket(facts: {
       `${unchecked} item${unchecked === 1 ? '' : 's'} the checker could not verify`,
     )
   const waiting = ticket.waiting
+  const replaced = replacements(tasks)
   const brokenAsk =
     waiting?.for === 'ask' &&
     ['failed', 'limit', 'interrupted', 'unrouted'].includes(
@@ -82,7 +84,10 @@ export function summarizeTicket(facts: {
         label: `Merge task ${task.key}`,
         href: task.child?.pullRequestUrl ?? childHref,
       })
-    if (['failed', 'conflict', 'cancelled'].includes(task.status))
+    if (
+      ['failed', 'conflict', 'cancelled'].includes(task.status) &&
+      !replaced.has(task.key)
+    )
       issues.push(`Task ${task.key}: ${task.status}`)
   }
   const roles = new Map(
@@ -165,9 +170,12 @@ export function summarizeTicket(facts: {
       'left-open',
       'cancelled',
     ] as const) {
-      const count = tasks.filter((t) => t.status === status).length
+      const count = tasks.filter(
+        (t) => t.status === status && !replaced.has(t.key),
+      ).length
       if (count) parts.push(`${count} ${status}`)
     }
+    if (replaced.size) parts.push(`${replaced.size} replaced`)
   } else {
     const completed = attempts.filter(
       (a) => a.status === 'finished' && a.waitingFor !== 'ask',
@@ -195,7 +203,11 @@ export function summarizeTicket(facts: {
   const blocked =
     ticket.status === 'cancelled' ||
     brokenAsk ||
-    tasks.some((t) => t.status === 'failed' || t.status === 'conflict') ||
+    tasks.some(
+      (t) =>
+        (t.status === 'failed' || t.status === 'conflict') &&
+        !replaced.has(t.key),
+    ) ||
     (ticket.status !== 'done' && !!gate?.blockers.length)
   const onlyMerge =
     waiting?.for === 'pull-request-merge' &&
@@ -203,7 +215,9 @@ export function summarizeTicket(facts: {
     !unverified.length &&
     actions.length === 1 &&
     !!ticket.pullRequestUrl &&
-    tasks.every((t) => ['merged', 'cancelled'].includes(t.status))
+    tasks.every(
+      (t) => ['merged', 'cancelled'].includes(t.status) || replaced.has(t.key),
+    )
   const status = blocked
     ? 'blocked'
     : (ticket.status === 'done' && !actions.length) || onlyMerge

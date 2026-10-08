@@ -138,7 +138,12 @@ export interface TicketsResponse {
 
 export interface ListedTicket extends Ticket {
   /** On a child ticket, the lead task it runs. */
-  readonly task?: { readonly key: string; readonly leadNumber: number } | null
+  readonly task?: {
+    readonly key: string
+    readonly leadNumber: number
+    /** The child ticket number of the later task that retried this one, when it ended without landing. */
+    readonly replacedBy?: number | null
+  } | null
 }
 
 // POST /api/tickets (201, TicketResponse)

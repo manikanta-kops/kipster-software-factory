@@ -14,7 +14,12 @@ import type { SkippedStep } from '../domain/task-testing.ts'
 import { listTicketLinks, listDependencies } from './ticket-links.ts'
 import { getTaskOfChild, listTasks, taskEvent } from './task-records.ts'
 import { type AgentChoice, runTasksParams } from '../domain/catalog.ts'
-import { delegateTarget, taskWorkflowName } from '../domain/tasks.ts'
+import {
+  delegateTarget,
+  isFinalTask,
+  replacements,
+  taskWorkflowName,
+} from '../domain/tasks.ts'
 import type { DecisionInput } from '../domain/decisions.ts'
 import { insertDecision, finishDecision } from './decisions.ts'
 // Tickets and their attempts and artifacts. Every write locks the ticket row, asks the
@@ -194,7 +199,16 @@ export async function getTicketDetail(
     dependencies,
     links,
     tasks,
-    parentTask: parent?.parent ?? null,
+    parentTask: parent
+      ? {
+          ...parent.parent,
+          replacedBy: isFinalTask(parent.task.status)
+            ? (replacements(
+                await listTasks(database, parent.task.ticketId),
+              ).get(parent.task.key) ?? null)
+            : null,
+        }
+      : null,
   }
 }
 
@@ -1579,18 +1593,9 @@ export async function refreshTicketSummary(
   number: number,
   events: NewEvent[],
 ): Promise<void> {
-  const ticket = await getTicket(connection, number)
-  if (!ticket || !['done', 'cancelled', 'needs-you'].includes(ticket.status))
-    return
-  const workflow = await loadWorkflow(
-    connection,
-    ticket.workflow.name,
-    ticket.workflow.version,
-  )
-  const attempts = await listAttempts(connection, ticket.id)
-  const artifacts = await listArtifacts(connection, ticket.id)
-  const tasks = await listTasks(connection, ticket.id)
-  const gate = await getMergeGate(connection, ticket.id)
+  const facts = await summaryFacts(connection, number)
+  if (!facts) return
+  const { ticket, workflow, attempts, artifacts, tasks } = facts
   const childErrors = await connection.query<{ id: number; error: string }>(
     `SELECT a.id, a.error FROM attempts a JOIN tasks t ON t.child_ticket_id = a.ticket_id
      WHERE t.ticket_id = $1 AND a.status = 'failed' AND a.error IS NOT NULL`,
@@ -1631,14 +1636,7 @@ export async function refreshTicketSummary(
     }),
     events,
   )
-  const summary = summarizeTicket({
-    ticket,
-    workflow,
-    attempts,
-    artifacts,
-    tasks,
-    mergeGate: gate?.latest ?? null,
-  })
+  const summary = summarizeTicket(facts)
   await connection.query(
     'UPDATE tickets SET summary = $2, summary_at = now() WHERE id = $1',
     [ticket.id, JSON.stringify(summary)],
@@ -1648,6 +1646,26 @@ export async function refreshTicketSummary(
     kind: 'ticket.summary',
     data: { status: summary.status },
   })
+}
+
+/** What a summary is computed from, for a ticket in a state that has one. */
+async function summaryFacts(connection: Queryable, number: number) {
+  const ticket = await getTicket(connection, number)
+  if (!ticket || !['done', 'cancelled', 'needs-you'].includes(ticket.status))
+    return null
+  const gate = await getMergeGate(connection, ticket.id)
+  return {
+    ticket,
+    workflow: await loadWorkflow(
+      connection,
+      ticket.workflow.name,
+      ticket.workflow.version,
+    ),
+    attempts: await listAttempts(connection, ticket.id),
+    artifacts: await listArtifacts(connection, ticket.id),
+    tasks: await listTasks(connection, ticket.id),
+    mergeGate: gate?.latest ?? null,
+  }
 }
 
 export async function insertArtifacts(

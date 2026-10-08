@@ -419,6 +419,7 @@ output {
   color: var(--green);
 }
 .badge.cancelled,
+.badge.replaced,
 .badge.rejected,
 .badge.left-open {
   color: var(--grey);
@@ -872,6 +873,9 @@ section.quiet {
   height: 100%;
   object-fit: cover;
 }
+.decision-happened {
+  margin: 8px 0 0;
+}
 .decision-actions {
   grid-column: 1 / -1;
   grid-row: 3;
@@ -880,6 +884,19 @@ section.quiet {
   align-items: center;
   gap: 14px;
   margin-top: 16px;
+}
+.decision-tasks {
+  grid-column: 1 / -1;
+  grid-row: 4;
+  min-width: 0;
+  margin-top: 16px;
+}
+.decision-tasks .lead-tasks-toggle {
+  max-width: 100%;
+  margin: 0;
+}
+.decision-tasks .task-rows {
+  margin: 8px -14px 0;
 }
 .moving {
   margin-bottom: 36px;
@@ -985,6 +1002,9 @@ section.quiet {
   color: var(--accent);
   font-weight: 500;
 }
+.row-happened {
+  flex-basis: 100%;
+}
 .row.queued .row-doing {
   color: var(--grey);
 }
@@ -997,8 +1017,10 @@ section.quiet {
 }
 .lead-tasks-toggle {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 9px;
+  gap: 4px 9px;
+  max-width: calc(100% - 56px);
   min-height: 30px;
   margin: -4px 0 8px 56px;
   padding: 0 12px 0 10px;
@@ -1046,7 +1068,8 @@ section.quiet {
 .task-bar i.you {
   background: var(--red);
 }
-.task-bar i.stopped {
+.task-bar i.stopped,
+.task-bar i.replaced {
   background: var(--paper-3);
 }
 .task-rows {
@@ -1184,12 +1207,20 @@ section.quiet {
   background: var(--paper-2);
   color: var(--grey);
 }
-.finished-title {
+.finished-main {
   flex: 1;
+  display: grid;
   min-width: 0;
+}
+.finished-title,
+.finished-happened {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.finished-happened {
+  color: var(--grey);
+  font-size: 12.5px;
 }
 .finished-list .muted {
   font-size: 12.5px;
@@ -1216,6 +1247,7 @@ section.quiet {
 .ticket-primary {
   grid-area: primary;
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 16px;
   min-width: 0;
 }
@@ -1841,11 +1873,13 @@ button.small {
   background: var(--red);
 }
 .task-progress i.cancelled,
+.task-progress i.replaced,
 .task-progress i.left-open {
   background: var(--grey-2);
 }
 .tasks-card .task-list {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 2px;
   margin: 0 -10px;
   padding: 0;
@@ -1946,6 +1980,7 @@ button.small {
 }
 .task-facts {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 4px;
   margin: 0 10px 0 38px;
   padding-bottom: 4px;
@@ -3474,6 +3509,14 @@ main > section.settings-page {
   color: var(--red-ink);
   background: var(--red-wash);
 }
+.summary-status.replaced {
+  color: var(--ink-2);
+  background: var(--paper-2);
+  text-decoration: none;
+}
+.summary-status.replaced:hover {
+  background: var(--paper-3);
+}
 .summary-happened {
   color: var(--ink-2);
   font-size: 13px;
@@ -3498,38 +3541,10 @@ main > section.settings-page {
 .summary-unverified {
   color: var(--ink-2);
 }
-.today-summaries {
-  margin-bottom: 28px;
-}
-.today-summaries > ul {
-  list-style: none;
-  padding: 0;
-  margin: 0;
-}
-.today-summary {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 8px 14px;
-  padding: 14px 0;
-  border-bottom: 1px solid var(--hair-2);
-  overflow-wrap: anywhere;
-}
-.summary-title {
-  flex: 1;
-  min-width: 150px;
-  font-weight: 500;
-}
-.today-summary .text-link {
-  font-size: 13px;
-}
 #ticket-details {
   scroll-margin-top: 80px;
 }
 @media (max-width: 600px) {
-  .today-summary .summary-happened {
-    flex-basis: 100%;
-  }
   .ticket-summary {
     padding: 16px;
   }
