@@ -352,6 +352,7 @@ export function createApp({
       )
     }
     const ticket = await createTicket(database, {
+      ...(input.agents === undefined ? {} : { agents: input.agents }),
       repository: input.repository,
       ...(input.lightsOut === undefined ? {} : { lightsOut: input.lightsOut }),
       ...(input.dependencies === undefined

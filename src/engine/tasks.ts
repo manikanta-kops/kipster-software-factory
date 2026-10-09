@@ -46,11 +46,13 @@ export async function agentsFor(
 ): Promise<{ agents: AgentConfig[]; notes: ArtifactInput[] }> {
   const { config, database } = options
   const workflow = context.workflow.name
+  const ticketAgents = context.ticket.agents
   const owned = await getTaskOfChild(database, context.ticket.id)
   const original = resolveAgent(config, {
     workflow,
     role,
     taskAgent: owned?.task.agent,
+    ticketAgents,
   })
   if (!['reviewer', 'tester'].includes(role))
     return { agents: [original], notes: [] }
@@ -81,11 +83,16 @@ export async function agentsFor(
         workflow,
         role: 'builder',
         taskAgent: owned?.task.agent,
+        ticketAgents,
       }),
     )
   const override = config.workflows?.[workflow]
-  const reviewers = override?.reviewers ?? config.agents.reviewers
+  const reviewers =
+    ticketAgents?.reviewers ?? override?.reviewers ?? config.agents.reviewers
   const candidates = [
+    ...(role === 'reviewer' ? (ticketAgents?.reviewers ?? []) : []),
+    ...(ticketAgents?.roles?.[role] ? [ticketAgents.roles[role]!] : []),
+    ...(ticketAgents?.default ? [ticketAgents.default] : []),
     ...(role === 'reviewer' ? (override?.reviewers ?? []) : []),
     ...(override?.roles?.[role] ? [override.roles[role]!] : []),
     ...(config.agents.roles[role] ? [config.agents.roles[role]!] : []),

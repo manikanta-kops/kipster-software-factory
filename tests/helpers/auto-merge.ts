@@ -9,6 +9,7 @@ import { run } from '../../src/executors/process.ts'
 import { Workspaces } from '../../src/workspace/workspaces.ts'
 import { workflowVersion } from '../../src/library/library.ts'
 import type { Workflow } from '../../src/domain/workflow.ts'
+import type { TicketAgents } from '../../src/domain/settings.ts'
 import {
   createRepository,
   markRepositoryReady,
@@ -328,7 +329,10 @@ export async function autoMergeFixture(
  * The auto-merge fixture's ticket and database without Git, a publication or a
  * merge step, for tests that need only stored attempts and a factory home.
  */
-export async function autoMergeStoreFixture(t: TestContext) {
+export async function autoMergeStoreFixture(
+  t: TestContext,
+  agents?: TicketAgents,
+) {
   const root = await mkdtemp(join(tmpdir(), 'ksf-auto-store-'))
   const home = join(root, 'home')
   const store = await createTestStore()
@@ -350,6 +354,7 @@ export async function autoMergeStoreFixture(t: TestContext) {
       source,
       version: workflowVersion(source),
     },
+    ...(agents === undefined ? {} : { agents }),
   })
   // Published steps leave this directory behind; evidence tests compare its contents.
   await mkdir(join(home, 'evidence', String(ticket.id)), { recursive: true })

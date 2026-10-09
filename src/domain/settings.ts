@@ -31,6 +31,13 @@ export const roleAgentsSchema = z.partialRecord(
   agentSettingSchema,
 )
 
+export const ticketAgentsSchema = z.strictObject({
+  default: agentSettingSchema.optional(),
+  roles: roleAgentsSchema.optional(),
+  reviewers: z.array(agentSettingSchema).optional(),
+})
+export type TicketAgents = z.infer<typeof ticketAgentsSchema>
+
 export const concurrencySchema = z
   .int({
     error: 'must be a positive integer',
@@ -72,8 +79,8 @@ export const DEFAULT_SETTINGS: Settings = {
 }
 
 /**
- * The agent for one step: a lead's task agent sets only the builder, so review can come
- * from another model family; then the workflow override, the role setting and the default.
+ * An owner's ticket role choice wins over a delegated builder choice. A task's
+ * agent never selects its testers, reviewers or writers.
  */
 export function resolveAgent(
   settings: Pick<Settings, 'agents'> & Partial<Pick<Settings, 'workflows'>>,
@@ -81,14 +88,19 @@ export function resolveAgent(
     workflow,
     role,
     taskAgent,
+    ticketAgents,
   }: {
     readonly workflow: string
     readonly role: RoleName
     readonly taskAgent?: AgentChoice | null | undefined
+    readonly ticketAgents?: TicketAgents | null | undefined
   },
 ): AgentChoice {
+  const ticketRole = ticketAgents?.roles?.[role]
+  if (ticketRole) return ticketRole
   if (role === 'builder' && taskAgent) return taskAgent
   return (
+    ticketAgents?.default ??
     settings.workflows?.[workflow]?.roles?.[role] ??
     settings.agents.roles[role] ??
     settings.agents.default

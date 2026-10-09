@@ -11,6 +11,7 @@ import {
   cancelTicket,
   claimAttempts,
   completeAttempt,
+  createTicket,
   decide,
   linkOtherRepository,
   listTickets,
@@ -73,7 +74,12 @@ test('needs-other-repo creates one link across restart, releases its slot, and r
         invocation.prompt.startsWith('You are the planner'),
       )
   })
-  const original = await f.ticket()
+  const original = await createTicket(f.database, {
+    repository: 'fixture/caller',
+    workflow: f.library.get('caller')!,
+    title: 'Original',
+    agents: { default: { cli: 'codex', model: 'caller-only' } },
+  })
   await f.start()
   const parked = await until(
     () => f.detail(original.number),
@@ -91,6 +97,7 @@ test('needs-other-repo creates one link across restart, releases its slot, and r
     (detail) => detail.ticket.waiting?.for === 'human',
   )
   assert.equal(linked.ticket.currentStep, 'approve-plan')
+  assert.equal(linked.ticket.agents, null)
   assert.deepEqual(
     linked.dependencies.map((repo) => repo.slug),
     ['fixture/caller'],
@@ -221,7 +228,6 @@ test('invalid other repository targets always ask the owner without a linked tic
   t.after(() => f.close())
   const { parseWorkflow } = await import('../src/domain/workflow.ts')
   const { workflowVersion } = await import('../src/library/library.ts')
-  const { createTicket } = await import('../src/store/tickets.ts')
   const source = f.library
     .get('caller')!
     .source.replace(

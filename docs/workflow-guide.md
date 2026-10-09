@@ -89,9 +89,11 @@ three times, then report an unavailable check with the reason.
   conflicting task and on each ready pull request, not only when all are done.
 - **Write tasks for a stranger.** Task agents see only the task's title and
   instructions. Name the goal, the files, the checks and what is out of scope.
-- **Author and reviewer differ.** A task's agent runs only its builder; the
-  reviewer keeps its own setting. Set per-workflow agents and timeouts on the
-  Settings page, not in the workflow file.
+- **Author and reviewer differ.** A task's agent selects only its builder;
+  an owner's ticket builder role takes precedence. Testers and reviewers keep
+  their own settings and independence checks. Set per-workflow agents and
+  timeouts on Settings, or ticket agent overrides through the creation API,
+  never in the workflow file. Lead children inherit ticket agent overrides.
 - **Parallel only when separate.** Tasks given out together should touch
   different files. Delegate dependent work after its prerequisite merges.
 - **Bound the loop.** Give `run-tasks` a limit: each report is a lead session.
