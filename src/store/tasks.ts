@@ -1,6 +1,7 @@
 // A lead's tasks and the child tickets that run them. Writes that touch a ticket's
 // attempts lock that ticket first.
 import { FactoryError } from '../domain/errors.ts'
+import type { TicketAgents } from '../domain/settings.ts'
 import { afterResult, waitForTasks } from '../domain/lifecycle.ts'
 import type { LeadTask, TaskStatus, Ticket } from '../domain/records.ts'
 import {
@@ -70,13 +71,16 @@ export async function startTask(
     ])
     const task = rows[0]
     if (!task || task.status !== 'pending') return null
-    const parent = await connection.query<{ lights_out: boolean }>(
-      'SELECT lights_out FROM tickets WHERE id = $1',
-      [task.ticket_id],
-    )
+    const parent = await connection.query<{
+      lights_out: boolean
+      agent_overrides: TicketAgents | null
+    }>('SELECT lights_out, agent_overrides FROM tickets WHERE id = $1', [
+      task.ticket_id,
+    ])
     const ticket = await createTicketInTransaction(connection, {
       ...child,
       lightsOut: parent.rows[0]!.lights_out,
+      agents: parent.rows[0]!.agent_overrides,
     })
     await connection.query(
       `UPDATE tasks SET status = 'running', child_ticket_id = $2, base_commit = $3, updated_at = now() WHERE id = $1`,

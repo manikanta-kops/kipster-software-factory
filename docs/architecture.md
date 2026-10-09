@@ -272,15 +272,43 @@ when it starts: its step timeout and every agent choice in that attempt come
 from that snapshot, so a running step keeps the values it started with.
 Post-merge checks use the global step timeout.
 
-An agent step's agent is, in order: a lead task's `agent` (child builder steps
-only), the workflow override for the role, the global role setting, then the
-default. Testers, reproducers, reviewers and writers of a child ticket never take
+An agent step's agent is, in order: the ticket's role override, a lead task's
+`agent` (child builder steps only), the ticket's default, the workflow override
+for the role, the global role setting, then the global default.
+Testers, reproducers, reviewers and writers of a child ticket never take
 the task's agent, so review can come from another model family than the author.
 The step timeout is the workflow override, then the global value. Overrides are
 keyed by workflow name; saving accepts names in the library or retained by
 stored tickets, so retired workflows keep their agent and timeout overrides.
 The step schema is unchanged. Each started agent attempt records the choice it ran with
 (`Attempt.agent`), which the ticket page shows next to the step.
+
+#### Ticket agent overrides
+
+`POST /api/tickets` accepts optional `agents: { default, roles, reviewers }`.
+Every field is optional and uses the same agent choices and role validation as
+Settings. The request rejects unknown keys, including `allowed` and timeout or
+concurrency settings. Model names are nonempty strings passed to the selected
+CLI, not checked against a factory model catalog. Ticket overrides are creation-only;
+there are no ticket editing controls or UI inputs in this API slice.
+
+Migration 019 stores only supplied choices in `tickets.agent_overrides`.
+Existing tickets and requests without `agents` have null overrides. Ticket
+list/detail and creation responses add `ticket.agents`; Settings is never
+modified. Overrides persist across retries and restarts. Fields left out keep
+following workflow/global settings at each attempt's snapshot.
+
+Lead child tickets copy their parent's overrides when created, including child
+workflows with separate PRs. An owner-specified builder role wins over a lead's
+task `agent`; otherwise that explicit task choice wins over the ticket default.
+Linked tickets in other repositories and post-merge bug tickets do not inherit
+overrides. PR writers and proof sessions use the same ticket resolution.
+
+Reviewer lists resolve from ticket, workflow, then global settings. An omitted
+list inherits; `[]` selects a single resolved reviewer. As before, only lead
+workflows run a configured list in parallel; other workflows use their reviewer
+role choice. Tester/reviewer independence can replace a requested model and
+records why, or requires owner merging when no independent candidate exists.
 
 Without `databaseUrl`, the factory runs a private PostgreSQL cluster in
 `<home>/postgres`. It listens only on a Unix socket in a `0700` directory under
@@ -1079,7 +1107,8 @@ Before an attempt starts, the engine compares its reviewer or tester agent with
 recorded builder agents on this ticket and, for leads, its child tickets. Equality
 means the same CLI and model; effort is ignored and an absent model is its own
 value. Without recorded builders it resolves the builder from settings. It uses
-the first independent candidate: workflow reviewer list (reviewers only),
+the first independent candidate: ticket reviewer list (reviewers only), ticket
+role override, ticket default, workflow reviewer list (reviewers only),
 workflow role override, global role setting, global reviewers, allowed agents,
 then default. The scheduler records the selection once; execution and proof
 reuse it. Replacements appear as ticket notes in the timeline. If no candidate
