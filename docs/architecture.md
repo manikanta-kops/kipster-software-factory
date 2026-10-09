@@ -334,6 +334,22 @@ service before replacing the version. A push to `master` publishes
 requests touching installation build and smoke-test both bundles without
 publishing.
 
+The archive also contains a native, signed background launcher. `kf start`
+verifies it, stages a copy, stops the previous service, and installs it at
+`<home>/service/Kipster Software Factory.app`. Its bundle identifier is
+`app.kipster.factory`; the LaunchAgent associates that identifier and runs the
+native executable. The executable stays alive as the Node process's parent and
+forwards shutdown signals. A private `service/runtime.json` selects the release's
+Node and CLI outside the signed app. Updates preserve the app path and signing
+identity, while changing that manifest. A failed stop prevents replacement.
+
+The launcher has the hardened-runtime Apple Events entitlement and usage
+descriptions. This enables permission requests; it does not grant consent.
+Every agent retains its configured Mac-control tools and hooks. No role,
+workflow, tool selection or retry policy changes. See
+[macOS permissions](macos-permissions.md) for release requirements and the
+installed-service checks needed to verify permission persistence.
+
 Verified against installed Codex **0.160.0** and Claude Code **2.1.289**:
 
 - Codex: `codex exec --dangerously-bypass-approvals-and-sandbox --ephemeral --json -`

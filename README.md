@@ -86,6 +86,12 @@ command, or `kf update`, to update; your
 configuration, secrets and database are kept. `kf status`, `kf logs -f`,
 `kf stop` and `kf start` manage the background factory.
 
+On macOS the background service uses its own signed identity, **Kipster Software
+Factory**, for privacy permissions. Mac app control remains available to all
+agent jobs. macOS still asks you to approve the access a job needs; the factory
+cannot grant it itself. See [macOS permissions](docs/macos-permissions.md) for
+setup, release signing and verification.
+
 New `lead` and `program-lead` tickets default to Lights-out: the system approves
 lead plans, agents choose and record sensible defaults, and a child needing a
 decision parks while siblings continue. New ticket lets you change the setting;
