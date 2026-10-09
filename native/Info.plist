@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>CFBundleDevelopmentRegion</key><string>en</string>
+  <key>CFBundleDisplayName</key><string>Kipster Software Factory</string>
+  <key>CFBundleExecutable</key><string>Factory</string>
+  <key>CFBundleIdentifier</key><string>app.kipster.factory</string>
+  <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
+  <key>CFBundleName</key><string>Kipster Software Factory</string>
+  <key>CFBundlePackageType</key><string>APPL</string>
+  <key>CFBundleShortVersionString</key><string>@VERSION@</string>
+  <key>CFBundleVersion</key><string>@VERSION@</string>
+  <key>LSMinimumSystemVersion</key><string>13.0</string>
+  <key>LSUIElement</key><true/>
+  <key>NSAppleEventsUsageDescription</key><string>Factory agents use other apps to carry out the work you assign, including checking applications they build.</string>
+  <key>NSDesktopFolderUsageDescription</key><string>Factory agents need access to project files you keep on your Desktop.</string>
+  <key>NSDocumentsFolderUsageDescription</key><string>Factory agents need access to project files you keep in Documents.</string>
+  <key>NSDownloadsFolderUsageDescription</key><string>Factory agents need access to project files you download.</string>
+  <key>NSRemovableVolumesUsageDescription</key><string>Factory agents need access to projects on your removable drives.</string>
+  <key>NSNetworkVolumesUsageDescription</key><string>Factory agents need access to projects on your network drives.</string>
+</dict>
+</plist>

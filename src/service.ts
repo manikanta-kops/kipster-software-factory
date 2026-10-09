@@ -6,6 +6,11 @@ import { homedir, userInfo } from 'node:os'
 import { join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { defaultHome } from './config.ts'
+import {
+  prepareServiceApp,
+  registerServiceApp,
+  SERVICE_BUNDLE_ID,
+} from './service-app.ts'
 
 const CLI = fileURLToPath(new URL('./cli.ts', import.meta.url))
 
@@ -41,6 +46,7 @@ export function launchAgent(options: {
   path: string
   log: string
   workingDirectory: string
+  bundleIdentifier?: string
 }): string {
   const string = (value: string) => `<string>${escapeXml(value)}</string>`
   return `<?xml version="1.0" encoding="UTF-8"?>
@@ -49,6 +55,7 @@ export function launchAgent(options: {
 <dict>
   <key>Label</key>
   ${string(options.label)}
+${options.bundleIdentifier ? `  <key>AssociatedBundleIdentifiers</key>\n  <array>${string(options.bundleIdentifier)}</array>\n` : ''}\
   <key>ProgramArguments</key>
   <array>
 ${options.program.map((part) => `    ${string(part)}`).join('\n')}
@@ -90,7 +97,16 @@ function plistPath(label: string): string {
 }
 
 function launchctl(args: string[]) {
-  return spawnSync('launchctl', args, { encoding: 'utf8' })
+  const result = spawnSync('launchctl', args, {
+    encoding: 'utf8',
+    timeout: 30_000,
+  })
+  if (result.error)
+    throw new Error(
+      'Could not query or control the factory login service. Its state is unknown.',
+      { cause: result.error },
+    )
+  return result
 }
 
 function domain(): string {
@@ -113,6 +129,10 @@ async function unload(label: string): Promise<boolean> {
   const deadline = Date.now() + 30_000
   while (isLoaded(label) && Date.now() < deadline)
     await new Promise((done) => setTimeout(done, 250))
+  if (isLoaded(label))
+    throw new Error(
+      'The previous factory service has not stopped. Its files have been preserved; inspect kf logs before restarting.',
+    )
   return true
 }
 
@@ -123,18 +143,25 @@ export async function startService(home: string): Promise<void> {
   const log = serviceLog(home)
   await mkdir(join(home, 'logs'), { recursive: true, mode: 0o700 })
   await mkdir(join(homedir(), 'Library', 'LaunchAgents'), { recursive: true })
+  const launcher = await prepareServiceApp({
+    home: resolve(home),
+    node: process.execPath,
+    cli: CLI,
+    stop: () => unload(label),
+  })
+  registerServiceApp(launcher)
   const path = plistPath(label)
   await writeFile(
     path,
     launchAgent({
       label,
-      program: [process.execPath, CLI, 'serve', '--home', resolve(home)],
+      program: [launcher, '--home', resolve(home)],
+      bundleIdentifier: SERVICE_BUNDLE_ID,
       path: servicePath(process.env['PATH'] ?? '/usr/bin:/bin'),
       log,
       workingDirectory: resolve(home),
     }),
   )
-  await unload(label)
   const result = launchctl(['bootstrap', domain(), path])
   if (result.status !== 0)
     throw new Error(

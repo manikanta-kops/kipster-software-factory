@@ -31,6 +31,7 @@ test('the launch agent runs the factory with the captured PATH and escapes value
     path: '/opt/homebrew/bin:/Users/a&b/.local/bin',
     log: '/Users/me/.kipster-factory/logs/factory.log',
     workingDirectory: '/Users/me/.kipster-factory',
+    bundleIdentifier: 'app.kipster.factory',
   })
   assert.match(
     plist,
@@ -41,6 +42,10 @@ test('the launch agent runs the factory with the captured PATH and escapes value
     /<key>PATH<\/key>\s*<string>\/opt\/homebrew\/bin:\/Users\/a&amp;b\/.local\/bin<\/string>/,
   )
   assert.match(plist, /<key>SuccessfulExit<\/key>\s*<false\/>/)
+  assert.match(
+    plist,
+    /<key>AssociatedBundleIdentifiers<\/key>\s*<array><string>app\.kipster\.factory<\/string><\/array>/,
+  )
   assert.match(plist, /<key>RunAtLoad<\/key>\s*<true\/>/)
   assert.equal(
     servicePath('/repo/node_modules/.bin:/opt/homebrew/bin::/usr/bin'),
