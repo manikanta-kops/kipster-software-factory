@@ -5,7 +5,7 @@ import type { Library } from '../library/library.ts'
 import { invalidateMergeGate } from '../store/merge-gates.ts'
 import { AttemptMovedOn } from '../domain/errors.ts'
 import { pruneEvidence, adoptEvidence } from '../store/evidence.ts'
-import { pollMergeWait } from './merge-wait.ts'
+import { pollMergeWait, pollOwnerWaitPullRequest } from './merge-wait.ts'
 import { checkAfterMerge } from './post-merge.ts'
 import {
   pendingPostMergeChecks,
@@ -40,6 +40,7 @@ import {
   getTicket,
   interruptRunning,
   listTickets,
+  listOwnerWaitsWithPullRequest,
   listWaitingForMerge,
   markRunning,
   addAttemptArtifacts,
@@ -275,6 +276,22 @@ export async function startScheduler(
                 report(invalidationError)
               }
             }
+          })
+          .finally(() => {
+            mergeJobs.delete(context.attempt.id)
+          })
+        mergeJobs.set(context.attempt.id, job)
+      }
+      for (const context of await listOwnerWaitsWithPullRequest(database)) {
+        if (stopped) return
+        if (mergeJobs.has(context.attempt.id)) continue
+        const job = pollOwnerWaitPullRequest(
+          polling,
+          context,
+          AbortSignal.any([lifetime.signal, AbortSignal.timeout(60_000)]),
+        )
+          .catch((error) => {
+            if (!stopped && !(error instanceof AttemptMovedOn)) report(error)
           })
           .finally(() => {
             mergeJobs.delete(context.attempt.id)

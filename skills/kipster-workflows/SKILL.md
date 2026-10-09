@@ -250,6 +250,9 @@ Action notes:
   running at `ready`, also reports `changes-needed` with the same
   `CI failed: <name>` findings as `ci-failed`. Route `merge`'s
   `changes-needed` to the builder, or to the lead in a lead workflow.
+- Merging the pull request on GitHub while the ticket waits on the owner, at an
+  ask, a human step or a decision, also finishes the ticket as `merged`. A
+  closed pull request leaves that wait as it is.
 
 ## Human steps
 

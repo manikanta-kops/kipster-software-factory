@@ -509,6 +509,17 @@ a human from the factory using the same CLI login. Comment artifacts carry sourc
 IDs so retries/restarts and later merge waits do not replay consumed feedback.
 Superseded/dismissed change requests are ignored. Only the system merge policy described below may invoke `gh pr merge`. Other system actions explicitly fail to a human in this slice.
 
+The owner can also merge on GitHub while the ticket waits on them at an ask, a
+human step or a decision. At the same merge-poll interval the scheduler inspects
+the pull request of every such ticket that has one; tickets without a pull
+request are never inspected. A `MERGED` pull request is recorded as at `merge`
+(merger, merge commit, `pull-request.merged` and the post-merge check row), and
+the waiting attempt finishes as `merged` with a `Pull request merged on GitHub
+while waiting` note, so the ticket is done and its worktree is cleaned up. An
+open or closed pull request changes nothing; a closed one is left to the owner's
+answer. If the owner answers first, the finish loses the race and the ticket
+keeps the answer.
+
 `tests/pull-requests.test.ts` uses real PostgreSQL, local bare remotes, a fake
 writer and a stub GitHub interface to cover clean/conflicting merges, stale
 verdicts, CI outcomes/timeouts, restart and executor-slot release, writer caching
