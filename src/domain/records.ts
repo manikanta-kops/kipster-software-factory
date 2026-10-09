@@ -2,6 +2,7 @@
 // Timestamps are ISO 8601 strings so the same shapes work on both sides of the wire.
 import type { TicketSummary } from './summary.ts'
 import type { AgentChoice } from './catalog.ts'
+import type { TicketAgents } from './settings.ts'
 import type { Next } from './routing.ts'
 import type { SkippedStep } from './task-testing.ts'
 
@@ -142,6 +143,8 @@ export function defaultLightsOut(workflow: string): boolean {
 }
 
 export interface Ticket {
+  /** Choices fixed at creation and inherited by lead child tickets. */
+  readonly agents?: TicketAgents | null
   readonly summary: TicketSummary | null
   readonly summaryAt: string | null
   readonly skippedSteps?: readonly SkippedStep[]

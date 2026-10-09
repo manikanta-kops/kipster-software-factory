@@ -221,13 +221,26 @@ Action notes:
   cause without a workaround may report `needs-decision`.
 - A pull request task's `merge` waits for the lead: it merges only after the
   lead chooses `merge`, and then only under the normal auto-merge rules.
-- A lead may give a task an `agent` from the factory's allowed list. It runs
-  only the task's `builder` steps; the task's `tester`, `reviewer` and `writer`
-  keep the factory settings, so review can come from another model family.
+- A lead may give a task an `agent` from the factory's allowed list. It selects
+  only the task's `builder` steps unless the owner fixed a ticket builder role.
+  Other roles keep their ticket/workflow/global settings, so review can come
+  from another model family.
 - A workflow file never names an agent, model or timeout. The owner sets those
-  on the factory's Settings page, globally or per workflow name. An agent step
-  runs with, in order: the task's agent (builder steps only), the workflow's
-  override for the role, the factory's role setting, then its default. The step
+  on the factory's Settings page, globally or per workflow name, or through
+  `POST /api/tickets` with optional `agents: { default, roles, reviewers }`.
+  All three fields are optional. Choices use `{ cli, model?, effort? }`;
+  `cli` is `codex` or `claude`, a supplied model must be nonempty, and effort is
+  `minimal`, `low`, `medium`, `high`, `xhigh` or `max`. Unknown roles and keys
+  are rejected, including `allowed`, concurrency and timeout settings.
+  An agent step runs with, in order: the ticket's role override, the task's
+  agent (builder steps only), the ticket default, the workflow's override for
+  the role, the factory's role setting, then its default. Choices replace a
+  whole CLI/model/effort selection; fields are not mixed with lower choices.
+  Lead children inherit the supplied ticket choices, including separate-PR
+  tasks. Linked tickets in other repositories and post-merge bugs do not.
+  Overrides persist across retries and restarts; omitted choices keep following
+  Settings. API responses expose `ticket.agents` (null when omitted).
+  The built-in `lead` plans with role `lead`, not `planner`. The step
   timeout is the workflow's override, then the factory's (120 minutes unless
   changed).
 - `maintain-pr` is the only way a pull request gets published. Put it before
@@ -704,7 +717,8 @@ so that base synchronization starts a fresh pair.
 
 Settings accepts global `agents.reviewers` (default `[]`) and optional
 `workflows.<name>.reviewers` lists of agent choices. Lists have no length limit;
-a workflow list overrides the global list, and an empty list uses the reviewer
+a ticket's `agents.reviewers` overrides both; otherwise a workflow list
+overrides the global list. An empty list uses the reviewer
 role setting. They are settings, not workflow fields. Lead workflows run the
 selected list in parallel, each with its own log and result directory. Other
 workflows retain a single reviewer. Use different CLI families (`claude` and
@@ -712,7 +726,8 @@ workflows retain a single reviewer. Use different CLI families (`claude` and
 
 Tester and reviewer choices must differ in CLI or model from every recorded
 builder of the change, including child builders for a lead. Effort does not
-make an agent independent. Candidates are tried in this order: workflow
+make an agent independent. Candidates are tried in this order: ticket reviewer
+list (reviewers only), ticket role override, ticket default, workflow
 reviewer list (reviewers only), workflow role override, role setting, global
 reviewers, allowed list, default. The engine records replacements. Without a
 candidate it runs anyway, records the lack of independence, and requires the

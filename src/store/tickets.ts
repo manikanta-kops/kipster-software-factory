@@ -1,4 +1,5 @@
 import { proposeLessons } from '../domain/lessons.ts'
+import type { TicketAgents } from '../domain/settings.ts'
 import {
   afterParallelResults,
   parallelReviewer,
@@ -84,6 +85,7 @@ import { listEvents, type NewEvent, recordEvents } from './events.ts'
 import { getRepository, getRepositoryById } from './repositories.ts'
 
 export interface NewTicket {
+  readonly agents?: TicketAgents | null
   readonly lightsOut?: boolean
   /** The target repository's `owner/name`. */
   readonly repository: string
@@ -345,8 +347,9 @@ export async function createTicketInTransaction(
   const status = ticketStatus({ status: opening.status, next: null })
   const inserted = await connection.query<{ id: number }>(
     `INSERT INTO tickets (number, repository_id, workflow_name, workflow_version,
-                            title, body, branch, current_step, status, lights_out)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+                            title, body, branch, current_step, status, lights_out,
+                            agent_overrides)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
        RETURNING id`,
     [
       number,
@@ -359,6 +362,7 @@ export async function createTicketInTransaction(
       opening.stepId,
       status,
       input.lightsOut ?? defaultLightsOut(workflow.name),
+      input.agents == null ? null : JSON.stringify(input.agents),
     ],
   )
   const ticketId = (inserted.rows[0] as { id: number }).id
@@ -1858,6 +1862,7 @@ const TICKET_SELECT = `
   LEFT JOIN attempts w ON w.ticket_id = t.id AND w.status = 'waiting'`
 
 interface TicketRow {
+  agent_overrides: TicketAgents | null
   summary: TicketSummary | null
   summary_at: Date | null
   skipped_steps: SkippedStep[]
@@ -1886,6 +1891,7 @@ interface TicketRow {
 
 function toTicket(row: TicketRow): Ticket {
   return {
+    agents: row.agent_overrides,
     summary: row.summary,
     summaryAt: iso(row.summary_at),
     skippedSteps: row.skipped_steps,

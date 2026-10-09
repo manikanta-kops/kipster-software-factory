@@ -262,7 +262,9 @@ test('untested and unreviewed is ready for owner, while an invalid trusted kit b
 })
 
 test('post-merge failure opens exactly one bug in a transaction and links it from the original timeline', async (t) => {
-  const f = await autoMergeStoreFixture(t)
+  const f = await autoMergeStoreFixture(t, {
+    default: { cli: 'codex', model: 'original-ticket-only' },
+  })
   const context = await f.mergeWait()
   await recordMergedPR(
     f.store.database,
@@ -296,9 +298,11 @@ test('post-merge failure opens exactly one bug in a transaction and links it fro
     number: number
     body: string
     workflow_name: string
+    agent_overrides: unknown
   }>('SELECT * FROM tickets WHERE id <> $1', [f.ticket.id])
   assert.equal(rows.length, 1)
   assert.equal(rows[0]!.workflow_name, 'bug')
+  assert.equal(rows[0]!.agent_overrides, null)
   assert.match(rows[0]!.body, /Expected total 3, got 4/)
   assert.ok(rows[0]!.body.includes(f.head))
   const notes = (await f.detail()).artifacts.filter(

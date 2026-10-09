@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { ticketAgentsSchema } from '../domain/settings.ts'
 import {
   HUMAN_CHOICES,
   REPOSITORY_SLUG,
@@ -23,6 +24,7 @@ export const createRepositoryRequest = z.strictObject({
 }) satisfies z.ZodType<CreateRepositoryRequest>
 
 export const createTicketRequest = z.strictObject({
+  agents: ticketAgentsSchema.optional(),
   lightsOut: z.boolean().optional(),
   repository: text.min(1),
   dependencies: z
