@@ -1,3 +1,4 @@
+import { readPromptContext } from '../helpers/prompt.ts'
 import { spawn, execFileSync } from 'node:child_process'
 import { readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
@@ -6,7 +7,9 @@ const [directory, scriptFile, stateRoot] = process.argv.slice(2) as [
   string,
   string,
 ]
-const prompt = await readFile(join(directory, 'prompt.md'), 'utf8')
+const prompt = readPromptContext(
+  await readFile(join(directory, 'prompt.md'), 'utf8'),
+)
 const role =
   /You are (?:an independent |the )(\w+)/i.exec(prompt)?.[1]?.toLowerCase() ??
   'unknown'

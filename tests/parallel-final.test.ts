@@ -1,3 +1,4 @@
+import { readPromptContext } from './helpers/prompt.ts'
 import assert from 'node:assert/strict'
 import { access, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
@@ -208,6 +209,16 @@ for (const [tested, reviewed] of [
       ).size,
       overlapping.artifacts.filter((a) => a.kind === 'log').length,
     )
+    const currentEvidence = overlapping.artifacts.find(
+      (a) => a.title === 'head response',
+    )!
+    for (const invocation of f.invocations.filter(
+      (i) => i.role === 'reviewer',
+    )) {
+      const context = readPromptContext(invocation.prompt)
+      assert.ok(!context.includes(currentEvidence.path!))
+      assert.doesNotMatch(context, /Latest completed tester result/)
+    }
     finishReview.release()
     const joined = await until(
       () => f.detail(ticket.number),
@@ -248,7 +259,7 @@ for (const [tested, reviewed] of [
       true,
     )
     if (reviewed === 'changes-needed')
-      assert.match(wake, /Serious review problem/)
+      assert.match(readPromptContext(wake), /Serious review problem/)
     assert.deepEqual(f.errors, [])
   })
 }

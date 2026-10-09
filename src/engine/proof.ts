@@ -233,6 +233,7 @@ export async function runProofAttempt(
         step,
         detail,
         directory,
+        headCommit: instances.at(-1)!.commit,
         diff,
         home,
         trusted,

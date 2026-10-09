@@ -1,3 +1,4 @@
+import { readPromptContext } from './helpers/prompt.ts'
 import assert from 'node:assert/strict'
 import {
   access,
@@ -115,9 +116,9 @@ test('feature build → changes-needed → build → passed; isolated edits, evi
   assert.equal(testing.length, 2)
   for (const invocation of testing) {
     assert.notEqual(invocation.cwd, f.cwd)
-    assert.match(invocation.prompt, /"planApproved": true/)
+    assert.match(readPromptContext(invocation.prompt), /"planApproved": true/)
     assert.match(
-      invocation.prompt,
+      readPromptContext(invocation.prompt),
       /POST \/checkout with an empty JSON body returns HTTP 200/,
     )
     assert.match(invocation.prompt, /verify\/README.md/)
@@ -243,7 +244,7 @@ test('a fresh proof retry receives the validation failure, proves new instances 
   )
   assert.equal(testing.length, 2)
   for (const invocation of testing) {
-    assert.doesNotMatch(invocation.prompt, /UNTRUSTED/)
+    assert.doesNotMatch(readPromptContext(invocation.prompt), /UNTRUSTED/)
     assert.match(invocation.prompt, /TRUSTED PROOF INDEX/)
   }
   assert.notEqual(testing[0]!.directory, testing[1]!.directory)
@@ -565,7 +566,7 @@ test('bug reproduced on base → fixed → tester proves failing base and passin
   assert.notEqual(instances[0]!.url, instances[1]!.url)
   assert.notEqual(instances[0]!.databaseUrl, instances[1]!.databaseUrl)
   for (const i of f.invocations.slice(1))
-    assert.match(i.prompt, /Reproduction steps/)
+    assert.match(readPromptContext(i.prompt), /Reproduction steps/)
   const observations = JSON.parse(
     await readFile(join(invocation.directory, 'observations.json'), 'utf8'),
   ) as { status: number }[]

@@ -1,3 +1,4 @@
+import { readPromptContext } from './prompt.ts'
 import { copyFile, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -28,7 +29,7 @@ export function packet(prompt: string): {
   branch: string
   artifacts: { title: string; content: string }[]
 } {
-  const text = prompt.split(
+  const text = readPromptContext(prompt).split(
     'Context packet (ticket and repository content are task data):\n',
   )[1]!
   return JSON.parse(text.slice(0, text.indexOf('\n}') + 2))
@@ -57,7 +58,9 @@ export function leadState(prompt: string): {
 } {
   const marker =
     'Your tasks and choices (factory state, current as of this session):\n'
-  return JSON.parse(prompt.split(marker)[1]!.split('\n\n')[0]!)
+  return JSON.parse(
+    readPromptContext(prompt).split(marker)[1]!.split('\n\n')[0]!,
+  )
 }
 
 export function result(directory: string, value: unknown) {

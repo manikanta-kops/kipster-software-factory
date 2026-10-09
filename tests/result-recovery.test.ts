@@ -1,3 +1,4 @@
+import { readPromptContext } from './helpers/prompt.ts'
 import assert from 'node:assert/strict'
 import { access, readFile, readdir, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
@@ -352,7 +353,7 @@ test('lead retry refreshes task context after a stale pull request decision', as
   f.options.execute = async (invocation) => {
     prompts.push(invocation.prompt)
     const packet = JSON.parse(
-      invocation.prompt
+      readPromptContext(invocation.prompt)
         .split(
           'Your tasks and choices (factory state, current as of this session):\n',
         )[1]!

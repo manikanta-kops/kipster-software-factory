@@ -1,3 +1,4 @@
+import { readPromptContext } from './helpers/prompt.ts'
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { parseStepResult } from '../src/domain/lifecycle.ts'
@@ -78,7 +79,9 @@ for (const lightsOut of [true, false])
     const hold = deferred()
     f.setBehaviour(async (role, invocation) => {
       if (role === 'lead') {
-        if (!invocation.prompt.includes('"planApproved": true'))
+        if (
+          !readPromptContext(invocation.prompt).includes('"planApproved": true')
+        )
           return result(invocation.directory, {
             outcome: 'plan-ready',
             summary: 'Plan ready',
@@ -91,8 +94,8 @@ for (const lightsOut of [true, false])
               decision,
             ],
           })
-        assert.match(invocation.prompt, /Approved plan/)
-        assert.match(invocation.prompt, /PostgreSQL/)
+        assert.match(readPromptContext(invocation.prompt), /Approved plan/)
+        assert.match(readPromptContext(invocation.prompt), /PostgreSQL/)
         return result(invocation.directory, {
           outcome: 'delegate',
           summary: 'Run it',
@@ -219,7 +222,7 @@ test('a parked child reports to the lead, frees a slot, and siblings finish; own
       .some(
         (i) =>
           leadState(i.prompt).tasks.some((task) => task.status === 'parked') &&
-          i.prompt.includes('Delete existing customer data'),
+          readPromptContext(i.prompt).includes('Delete existing customer data'),
       ),
   )
   const child = await f.detail(question.child!.number)

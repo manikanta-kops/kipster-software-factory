@@ -284,6 +284,7 @@ async function executeAttempt(
         step,
         detail: currentDetail,
         directory,
+        headCommit: await git(['rev-parse', 'HEAD']),
         diff,
         home,
         trusted,
