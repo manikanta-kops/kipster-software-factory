@@ -1,3 +1,4 @@
+import { readPromptContext } from './helpers/prompt.ts'
 import type { TicketResponse } from '../src/api/contract.ts'
 import assert from 'node:assert/strict'
 import { chmod, lstat, readFile, readdir, writeFile } from 'node:fs/promises'
@@ -151,13 +152,19 @@ test('needs-other-repo creates one link across restart, releases its slot, and r
     (item) => packet(item.prompt).ticket.title === 'Original',
   )!
   assert.match(
-    invocation.prompt,
+    readPromptContext(invocation.prompt),
     /https:\/\/github.com\/fixture\/library\/pull\/42/,
   )
-  assert.ok(invocation.prompt.includes('a'.repeat(40)))
-  assert.ok(invocation.prompt.includes(request.summary))
-  assert.ok(invocation.prompt.includes(request.otherRepository.title))
-  assert.ok(invocation.prompt.includes(request.otherRepository.body))
+  assert.ok(readPromptContext(invocation.prompt).includes('a'.repeat(40)))
+  assert.ok(readPromptContext(invocation.prompt).includes(request.summary))
+  assert.ok(
+    readPromptContext(invocation.prompt).includes(
+      request.otherRepository.title,
+    ),
+  )
+  assert.ok(
+    readPromptContext(invocation.prompt).includes(request.otherRepository.body),
+  )
   assert.equal(
     resumed.attempts.find((attempt) => attempt.id === link.attemptId)!.summary,
     request.summary,
@@ -312,7 +319,7 @@ test('dependency checkouts are fresh, detached, read-only and named with exact c
     'updated dependency\n',
     first.ticket.waiting?.summary ?? 'Dependency context was not observed',
   )
-  assert.ok(f.invocations[0]!.prompt.includes(firstCommit))
+  assert.ok(readPromptContext(f.invocations[0]!.prompt).includes(firstCommit))
   const path = dependencies(f.invocations[0]!.prompt)[0]!.path
   await writeFile(join(f.sources[1]!, 'README.md'), 'second update\n')
   const secondCommit = await commit(f.sources[1]!, 'Advance again')
@@ -330,7 +337,7 @@ test('dependency checkouts are fresh, detached, read-only and named with exact c
   )
   assert.equal(observed, 'second update\n')
   assert.equal(dependencies(f.invocations[1]!.prompt)[0]!.path, path)
-  assert.ok(f.invocations[1]!.prompt.includes(secondCommit))
+  assert.ok(readPromptContext(f.invocations[1]!.prompt).includes(secondCommit))
   assert.deepEqual(f.errors, [])
 })
 

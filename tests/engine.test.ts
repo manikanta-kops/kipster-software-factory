@@ -1,3 +1,4 @@
+import { readPromptContext } from './helpers/prompt.ts'
 import assert from 'node:assert/strict'
 import { execFileSync, spawn } from 'node:child_process'
 import {
@@ -291,7 +292,9 @@ test('planned-change: approval, two builds, review loop, PR, merge wait, termina
     f.requests[0]!.body,
     /Acceptance plan|Verification build|fake reviewer/,
   )
-  const logs = waiting.artifacts.filter((a) => a.kind === 'log')
+  const logs = waiting.artifacts.filter(
+    (a) => a.kind === 'log' && !a.title.startsWith('Session context:'),
+  )
   const promptLogs = logs.filter((a) => a.title.endsWith(' prompt'))
   assert.equal(logs.length, 14)
   assert.equal(promptLogs.length, 7)
@@ -308,9 +311,9 @@ test('planned-change: approval, two builds, review loop, PR, merge wait, termina
   const savedBuild = savedPrompts.find((p) => p.text === buildPrompt)
   assert.ok(savedBuild, 'each session prompt is kept as evidence')
   assert.ok(savedBuild.path.startsWith(join(f.home, 'evidence') + '/'))
-  assert.match(buildPrompt, /Add a second change file/)
-  assert.match(buildPrompt, /Use the plan/)
-  assert.match(buildPrompt, /"planApproved": true/)
+  assert.match(readPromptContext(buildPrompt), /Add a second change file/)
+  assert.match(readPromptContext(buildPrompt), /Use the plan/)
+  assert.match(readPromptContext(buildPrompt), /"planApproved": true/)
   assert.match(
     execFileSync(
       'git',
@@ -331,11 +334,22 @@ test('planned-change: approval, two builds, review loop, PR, merge wait, termina
   for (const name of ['planner', 'builder', 'reviewer', 'writer'])
     assert.ok(role(name).length > 0, `${name} ran`)
   for (const prompt of prompts) {
-    assert.match(prompt, /Repository context index[\s\S]*TRUSTED INDEX/)
-    assert.doesNotMatch(prompt, /UNTRUSTED/)
+    assert.match(
+      readPromptContext(prompt),
+      /Repository context index[\s\S]*TRUSTED INDEX/,
+    )
+    assert.doesNotMatch(readPromptContext(prompt), /UNTRUSTED/)
   }
-  assert.ok(role('reviewer').every((p) => p.includes('TRUSTED REVIEWER RULE')))
-  assert.ok(role('builder').every((p) => !p.includes('TRUSTED REVIEWER RULE')))
+  assert.ok(
+    role('reviewer').every((p) =>
+      readPromptContext(p).includes('TRUSTED REVIEWER RULE'),
+    ),
+  )
+  assert.ok(
+    role('builder').every(
+      (p) => !readPromptContext(p).includes('TRUSTED REVIEWER RULE'),
+    ),
+  )
   const builtinInstructions = (name: string) =>
     role(name).map((prompt) => prompt.split('Repository context index')[0]!)
   for (const prompt of builtinInstructions('builder')) {
@@ -392,7 +406,11 @@ test('an invalid result retries once with a fresh run, then asks, preserving log
   assert.match(stopped.attempts[0]!.headCommit!, /^[0-9a-f]{40}$/)
   assert.match(stopped.attempts[0]!.error!, /result.json after two runs/)
   assert.deepEqual(
-    stopped.artifacts.filter((a) => a.kind === 'log').map((a) => a.title),
+    stopped.artifacts
+      .filter(
+        (a) => a.kind === 'log' && !a.title.startsWith('Session context:'),
+      )
+      .map((a) => a.title),
     [
       'planner run 1 prompt',
       'planner run 1',

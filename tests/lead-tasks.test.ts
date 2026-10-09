@@ -1,3 +1,4 @@
+import { readPromptContext } from './helpers/prompt.ts'
 import { readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { proofContext } from './fixtures/proof-agent.ts'
@@ -136,7 +137,11 @@ test('a lead runs branch tasks in parallel, hears each finish while others run, 
   const builder = f.invocations.find(
     (item) => item.role === 'builder' && item.title === 'Gamma',
   )!
-  assert.match(builder.prompt, /This ticket is task "gamma" of lead ticket/)
+  assert.match(readPromptContext(builder.prompt), /"key": "gamma"/)
+  assert.match(
+    builder.prompt,
+    /Parent task \(do only this task; the lead plans the rest\)/,
+  )
   const retry = f.invocations.find(
     (item) =>
       item.role === 'lead' &&
@@ -160,10 +165,9 @@ test('a lead runs branch tasks in parallel, hears each finish while others run, 
       `${change} was reported`,
     )
   assert.ok(
-    f.invocations
-      .filter((item) => item.role === 'lead')
-      .at(-1)!
-      .prompt.includes('Task report'),
+    readPromptContext(
+      f.invocations.filter((item) => item.role === 'lead').at(-1)!.prompt,
+    ).includes('Task report'),
   )
   assert.equal(done.ticket.status, 'needs-you')
   assert.deepEqual(f.errors, [])

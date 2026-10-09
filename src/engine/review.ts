@@ -83,6 +83,7 @@ export async function runReviewAttempt(
           step,
           detail,
           directory,
+          headCommit: head,
           diff,
           home: options.home,
           trusted,

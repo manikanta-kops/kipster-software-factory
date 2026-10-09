@@ -354,13 +354,34 @@ fetch; workflows needing missing capabilities remain gated by the store.
 
 ### Prompt and result contract
 
-`engine/prompt.ts` combines `roles/<role>.md`, step `instructions`, the
-repository's optional `.kipster/roles/<role>.md` and `.kipster/context/index.md`
-(both from the fetched default branch, the index capped at 8,000 characters), and
-a context packet. The packet includes
-the title/body, latest plan before human approval (labelled unapproved until
-approval), prior step summaries and findings with attempt IDs, human comments
-and notes, branch and diff statistics. Each role runs in a new CLI session.
+`engine/prompt.ts` supplies `roles/<role>.md`, the session's head commit and
+file pointers. Step `instructions`, the default branch's optional
+`.kipster/roles/<role>.md`, and the context packet are written in full to
+per-session files under the ticket's retained evidence directory. The packet
+includes the title/body, latest plan before human approval (labelled unapproved
+until approval), prior step summaries and findings with attempt IDs, human
+comments and notes, branch and diff statistics. Prior summaries carry their
+head commits. The default branch's `.kipster/context/index.md` stays inline,
+capped at 8,000 characters with a pointer to the rest.
+
+Verification instances, dependency checkouts, lead task state, linked tickets,
+review history and retained evidence indexes use the same file-pointer format
+when supplied. These are complete snapshots of the existing context, not model
+summaries or relevance-filtered excerpts. Agents must read requirements and
+instructions before acting, read verification/dependency/task state before using
+it, and inspect large JSON files selectively instead of dumping them into output.
+The latest completed tester and reviewer attempts have direct pointers to their
+recorded results and artifact references, selected by workflow role and labelled
+with attempt and commit. Failed, waiting and running attempts cannot become
+these shortcuts; the supplied context still carries their existing history.
+Parallel tester/reviewer sessions continue to use the pre-pair snapshot, so a
+reviewer cannot see the concurrent tester's result.
+
+Every retry and parallel reviewer gets separate files. `context-files.json` in
+the session directory lists them for registration as `Session context:` log
+artifacts before execution. The saved prompt's paths survive step-directory
+cleanup and follow normal log retention. No workflow fields, outcome rules or
+provider-specific retrieval tools are needed. Each role runs in a new CLI session.
 Planners supply acceptance scenarios and never commit; builders implement and
 commit; reviewers read the diff once, block only serious problems and leave
 minor notes in the summary. Writers provide PR prose as note artifacts.
@@ -628,8 +649,9 @@ accidental local commits disappear with the disposable clone, which has no
 remote; nothing copies them back to the ticket branch. This is isolation from
 the normal publication path, not an OS sandbox for an unrestricted agent.
 
-The prompt includes the exact commit, instance URL, database URL, evidence
-directory, verification documents and the approved plan's acceptance scenarios.
+The prompt points to verification context containing the exact commit, instance
+URL, database URL, evidence directory and verification documents, and to the
+context packet containing the approved plan's acceptance scenarios.
 All maps are supplied so a relevant entry point cannot be lost to heuristic
 selection. The agent drives the actual user surface first; state inspection may
 only corroborate that run. Wrong surfaces, stale builds and self-reports cannot
@@ -915,7 +937,8 @@ The pin changes only when that ticket prepares its next fresh session, after
 the prior executor has exited. Factory caches and their pins must not be
 removed or edited externally while dependency checkouts exist; a borrowed
 checkout cannot survive deletion of its object source. Ownership checks reject unowned or symlinked directories.
-The prompt lists repository, path and full commit and forbids edits or pushes.
+The prompt points to a dependency file listing repository, path and full commit,
+and forbids edits or pushes.
 
 Files, directories and Git metadata have read-only permissions. After executor
 exit, including execution errors, cancellation and timeout, the engine compares
@@ -1008,8 +1031,8 @@ scheduler tick, `engine/tasks.ts` advances each parked lead:
   lead last heard, or nothing is left to wait for, the step finishes with
   `reported`, a "Task report" note, and routes back to the lead.
 
-Each lead run is a fresh session. Its prompt adds the current task table,
-limits, workflows, allowed agents and the repository's auto-merge setting;
+Each lead run is a fresh session. Its prompt points to a snapshot of the current
+task table, limits, workflows, allowed agents and the repository's auto-merge setting;
 the ticket's notes, comments and step summaries carry the history.
 Failed tasks are grouped by a pure signature of their stored result, removing
 paths, IDs, hashes, timestamps, durations and numbers. Conflicts are excluded.

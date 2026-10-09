@@ -72,8 +72,12 @@ Any other key is an error. Step ids `finish`, `cancel` and `ask` are reserved.
 ## Step kinds
 
 - **agent**: a fresh AI session with a fixed role. It reads the ticket, prior
-  step summaries, artifacts and the branch. It never sees an earlier
-  conversation.
+  step summaries, artifacts and the branch. The factory supplies complete
+  context files through prompt pointers, including step instructions, verification
+  details and task state when relevant. Latest completed tester/reviewer results
+  have direct pointers labelled with their commit. Agents read requirements and
+  instructions before acting and inspect large histories selectively. No workflow
+  configuration is needed. It never sees an earlier conversation.
 - **human**: the ticket waits in the owner's "Needs you" list. The owner
   approves, asks for changes with a comment, or rejects.
 - **system**: the factory does fixed work itself, such as publishing the pull
