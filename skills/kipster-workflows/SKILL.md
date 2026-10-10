@@ -258,6 +258,11 @@ Action notes:
   match the new commit. Route `base-moved` back to the tester step, followed by
   review. Without a tester, route it to review. With neither prior verdict,
   it is not reported. A saved workflow without this route asks the owner.
+  When the branch has no changes against the base after that merge, for
+  example after a squash merge, `maintain-pr` asks the owner instead of
+  re-testing or opening a pull request. A base that moves because the ticket's
+  own pull request merged is not a base move: the merge wait finishes the
+  ticket.
 - `merge` merges by itself only when the owner turned on auto-merge for the
   repository, the latest `tester` and `reviewer` both passed at the exact pull
   request head, and no rule needs the owner. Migrations, kit and CI changes

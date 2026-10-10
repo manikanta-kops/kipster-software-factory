@@ -179,6 +179,23 @@ export async function maintainPullRequest(
     return
   }
   const head = await git(['rev-parse', 'HEAD'])
+  // Commit ancestry misses a squash or rebase merge; an identical tree means the base already has this work.
+  if (
+    (await git(['rev-parse', `${head}^{tree}`])) ===
+    (await git(['rev-parse', `${base}^{tree}`]))
+  ) {
+    await completeAttempt(
+      database,
+      attempt.id,
+      {
+        outcome: 'needs-decision',
+        summary: `The ticket branch has no changes to publish against origin/${repository.defaultBranch}; its work may already be merged there.`,
+        artifacts: [],
+      },
+      { headCommit: head },
+    )
+    return
+  }
   const testerSteps = new Set(
     context.workflow.steps
       .filter((s) => s.kind === 'agent' && s.role === 'tester')
@@ -211,19 +228,6 @@ export async function maintainPullRequest(
             content: `The branch includes origin/${repository.defaultBranch} at ${base}. Refresh the ${role} verdict at ${head}; the previous verdict does not cover this commit.`,
           },
         ],
-      },
-      { headCommit: head },
-    )
-    return
-  }
-  if (Number(await git(['rev-list', '--count', `${base}..HEAD`])) === 0) {
-    await completeAttempt(
-      database,
-      attempt.id,
-      {
-        outcome: 'needs-decision',
-        summary: 'The ticket branch has no commits to publish.',
-        artifacts: [],
       },
       { headCommit: head },
     )
@@ -390,6 +394,13 @@ export async function pollPullRequestBase(
   const missingBase = Number(missing) > 0
   const head = await run('git', ['rev-parse', 'HEAD'], { cwd, signal })
   if (!missingBase && !hasStaleReview(detail, context, head)) return false
+  // Merging this pull request also advances the base; read its state after the fetch so the merge poll finishes it.
+  const pr = await options.github.inspect(
+    repository.slug,
+    ticket.pullRequestUrl!,
+    signal,
+  )
+  if (pr.state !== 'OPEN') return false
   signal.throwIfAborted()
   const maintenance = [...detail.attempts]
     .reverse()
