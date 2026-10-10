@@ -106,6 +106,7 @@ Only evidence at this exact commit counts. If the workflow has no tester, state 
       directory,
       home,
       trusted,
+      headCommit: head,
       diff: await git([
         'diff',
         '--stat',

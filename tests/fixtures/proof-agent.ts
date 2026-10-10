@@ -1,3 +1,4 @@
+import { readPromptContext } from '../helpers/prompt.ts'
 import { execFileSync } from 'node:child_process'
 import { writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
@@ -21,7 +22,9 @@ export interface ProofContext {
 export function proofContext(prompt: string): ProofContext {
   const marker =
     'Verification context (factory-owned instances; use these exact URLs and evidence directories):\n'
-  return JSON.parse(prompt.split(marker)[1]!.split('\n\n')[0]!) as ProofContext
+  return JSON.parse(
+    readPromptContext(prompt).split(marker)[1]!.split('\n\n')[0]!,
+  ) as ProofContext
 }
 export async function driveProof({
   instruction,

@@ -11,6 +11,9 @@ on:
     paths:
       - install.sh
       - scripts/bundle.ts
+      - scripts/native.ts
+      - native/**
+      - src/service-app.ts
       - src/cli.ts
       - src/config.ts
       - src/service.ts
@@ -29,8 +32,10 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  bundle:
-    name: Bundle (${{ matrix.arch }})
+  native:
+    name: Sign service (${{ matrix.arch }})
+    if: github.ref == 'refs/heads/master'
+    environment: release
     strategy:
       matrix:
         include:
@@ -46,7 +51,98 @@ jobs:
           node-version-file: .nvmrc
           cache: npm
       - run: npm ci
-      - run: node scripts/bundle.ts --arch ${{ matrix.arch }} --out release
+      - name: Sign and notarize the background service
+        env:
+          CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          NOTARY_KEY: ${{ secrets.APPLE_API_PRIVATE_KEY }}
+          NOTARY_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          NOTARY_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          SIGNING_TEAM: ${{ vars.APPLE_TEAM_ID }}
+          ARCH: ${{ matrix.arch }}
+        run: |
+          set -euo pipefail
+          for name in CERTIFICATE CERTIFICATE_PASSWORD SIGNING_IDENTITY NOTARY_KEY NOTARY_KEY_ID NOTARY_ISSUER SIGNING_TEAM; do
+            if [ -z "${!name}" ]; then echo "::error::$name is required to release the signed Factory service."; exit 1; fi
+          done
+          keychain="$RUNNER_TEMP/factory.keychain-db"
+          password="$(uuidgen)"
+          cleanup() {
+            security delete-keychain "$keychain" 2>/dev/null || true
+            rm -f "$RUNNER_TEMP/factory.p12" "$RUNNER_TEMP/factory-notary.p8"
+          }
+          trap cleanup EXIT
+          printf '%s' "$CERTIFICATE" | base64 --decode > "$RUNNER_TEMP/factory.p12"
+          security create-keychain -p "$password" "$keychain"
+          security set-keychain-settings -lut 3600 "$keychain"
+          security unlock-keychain -p "$password" "$keychain"
+          security import "$RUNNER_TEMP/factory.p12" -k "$keychain" -P "$CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$password" "$keychain" > /dev/null
+          security list-keychains -d user -s "$keychain" $(security list-keychains -d user | tr -d '"')
+          node scripts/native.ts --arch "$ARCH" --out "$RUNNER_TEMP/native" --identity "$SIGNING_IDENTITY" --keychain "$keychain"
+          app="$RUNNER_TEMP/native/Kipster Software Factory.app"
+          printf '%s\n' "$SIGNING_TEAM" > "$RUNNER_TEMP/factory-signing-team.txt"
+          ditto -c -k --keepParent "$app" "$RUNNER_TEMP/factory-notary.zip"
+          printf '%s' "$NOTARY_KEY" > "$RUNNER_TEMP/factory-notary.p8"
+          xcrun notarytool submit "$RUNNER_TEMP/factory-notary.zip" --key "$RUNNER_TEMP/factory-notary.p8" --key-id "$NOTARY_KEY_ID" --issuer "$NOTARY_ISSUER" --wait --output-format json > "$RUNNER_TEMP/notary.json"
+          cat "$RUNNER_TEMP/notary.json"
+          if [ "$(jq -r .status "$RUNNER_TEMP/notary.json")" != Accepted ]; then
+            xcrun notarytool log "$(jq -r .id "$RUNNER_TEMP/notary.json")" --key "$RUNNER_TEMP/factory-notary.p8" --key-id "$NOTARY_KEY_ID" --issuer "$NOTARY_ISSUER" || true
+            echo "::error::Factory notarization was not accepted."
+            exit 1
+          fi
+          xcrun stapler staple "$app"
+          xcrun stapler validate "$app"
+          spctl --assess --type execute --verbose=2 "$app"
+          ditto -c -k --keepParent "$app" "$RUNNER_TEMP/factory-service.zip"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: service-${{ matrix.arch }}
+          path: |
+            ${{ runner.temp }}/factory-service.zip
+            ${{ runner.temp }}/factory-signing-team.txt
+          retention-days: 7
+
+  bundle:
+    name: Bundle (${{ matrix.arch }})
+    needs: native
+    if: ${{ !failure() && !cancelled() }}
+    strategy:
+      matrix:
+        include:
+          - arch: arm64
+            runner: macos-15
+          - arch: x64
+            runner: macos-15-intel
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - if: github.ref == 'refs/heads/master'
+        uses: actions/download-artifact@v8
+        with:
+          name: service-${{ matrix.arch }}
+          path: ${{ runner.temp }}/signed-service
+      - name: Test native service lifecycle
+        run: node --test tests/service-app.test.ts
+      - name: Bundle the runtime and service
+        env:
+          ARCH: ${{ matrix.arch }}
+          RELEASE: ${{ github.ref == 'refs/heads/master' }}
+        run: |
+          if [ "$RELEASE" = true ]; then
+            ditto -x -k "$RUNNER_TEMP/signed-service/factory-service.zip" "$RUNNER_TEMP/signed-service"
+            node scripts/bundle.ts --arch "$ARCH" --out release --require-signed-service \
+              --signing-team "$(cat "$RUNNER_TEMP/signed-service/factory-signing-team.txt")" \
+              --service-app "$RUNNER_TEMP/signed-service/Kipster Software Factory.app"
+          else
+            node scripts/bundle.ts --arch "$ARCH" --out release
+          fi
       - name: Install from the bundle and serve with its own PostgreSQL
         run: |
           home="$RUNNER_TEMP/kf"

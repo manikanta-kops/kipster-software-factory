@@ -72,8 +72,12 @@ Any other key is an error. Step ids `finish`, `cancel` and `ask` are reserved.
 ## Step kinds
 
 - **agent**: a fresh AI session with a fixed role. It reads the ticket, prior
-  step summaries, artifacts and the branch. It never sees an earlier
-  conversation.
+  step summaries, artifacts and the branch. The factory supplies complete
+  context files through prompt pointers, including step instructions, verification
+  details and task state when relevant. Latest completed tester/reviewer results
+  have direct pointers labelled with their commit. Agents read requirements and
+  instructions before acting and inspect large histories selectively. No workflow
+  configuration is needed. It never sees an earlier conversation.
 - **human**: the ticket waits in the owner's "Needs you" list. The owner
   approves, asks for changes with a comment, or rejects.
 - **system**: the factory does fixed work itself, such as publishing the pull
@@ -221,13 +225,26 @@ Action notes:
   cause without a workaround may report `needs-decision`.
 - A pull request task's `merge` waits for the lead: it merges only after the
   lead chooses `merge`, and then only under the normal auto-merge rules.
-- A lead may give a task an `agent` from the factory's allowed list. It runs
-  only the task's `builder` steps; the task's `tester`, `reviewer` and `writer`
-  keep the factory settings, so review can come from another model family.
+- A lead may give a task an `agent` from the factory's allowed list. It selects
+  only the task's `builder` steps unless the owner fixed a ticket builder role.
+  Other roles keep their ticket/workflow/global settings, so review can come
+  from another model family.
 - A workflow file never names an agent, model or timeout. The owner sets those
-  on the factory's Settings page, globally or per workflow name. An agent step
-  runs with, in order: the task's agent (builder steps only), the workflow's
-  override for the role, the factory's role setting, then its default. The step
+  on the factory's Settings page, globally or per workflow name, or through
+  `POST /api/tickets` with optional `agents: { default, roles, reviewers }`.
+  All three fields are optional. Choices use `{ cli, model?, effort? }`;
+  `cli` is `codex` or `claude`, a supplied model must be nonempty, and effort is
+  `minimal`, `low`, `medium`, `high`, `xhigh` or `max`. Unknown roles and keys
+  are rejected, including `allowed`, concurrency and timeout settings.
+  An agent step runs with, in order: the ticket's role override, the task's
+  agent (builder steps only), the ticket default, the workflow's override for
+  the role, the factory's role setting, then its default. Choices replace a
+  whole CLI/model/effort selection; fields are not mixed with lower choices.
+  Lead children inherit the supplied ticket choices, including separate-PR
+  tasks. Linked tickets in other repositories and post-merge bugs do not.
+  Overrides persist across retries and restarts; omitted choices keep following
+  Settings. API responses expose `ticket.agents` (null when omitted).
+  The built-in `lead` plans with role `lead`, not `planner`. The step
   timeout is the workflow's override, then the factory's (120 minutes unless
   changed).
 - `maintain-pr` is the only way a pull request gets published. Put it before
@@ -250,6 +267,9 @@ Action notes:
   running at `ready`, also reports `changes-needed` with the same
   `CI failed: <name>` findings as `ci-failed`. Route `merge`'s
   `changes-needed` to the builder, or to the lead in a lead workflow.
+- Merging the pull request on GitHub while the ticket waits on the owner, at an
+  ask, a human step or a decision, also finishes the ticket as `merged`. A
+  closed pull request leaves that wait as it is.
 
 ## Human steps
 
@@ -293,11 +313,16 @@ routes that repeat a default.
 
 ### Limits
 
-`limit: n` counts finished runs of the step. When the step has run `n` times
-and an outcome would send the ticket back to itself or an earlier step, the
-`limit` route applies instead. Its default is `ask`. Forward routes are never
-limited. Every route that goes backwards should sit on a step with a `limit`,
-or a lasting failure loops until the owner notices.
+`limit: n` counts only finished reports of the step with the same outcome that
+would send the ticket back to itself or an earlier step, including the current
+report. On the nth such report, the `limit` route applies instead (default:
+`ask`). Passing reports, other outcomes, interrupted attempts and asks do not
+consume that outcome's limit. Forward routes are never limited.
+`maintain-pr` exempts `base-moved` from step limits: base synchronization has its
+own `with.maxBaseSyncs` bound. Its `ci-failed` and `conflict` outcomes each have
+an independent counter. The built-in workflows give `maintain-pr` a limit of 3;
+`task-pr` cancels at the limit, while `lead`, `bug` and `onboard-repo` ask.
+Give backward failure routes a limit so a lasting failure cannot loop forever.
 
 Typical limits: tester 3, lead reviewer 5, other reviewer 2, verify-kit 3. Human steps rarely need
 one because the owner is already in the loop.
@@ -371,6 +396,7 @@ steps:
   - id: maintain-pr
     kind: system
     action: maintain-pr
+    limit: 3
     routes:
       conflict: fix
       ci-failed: fix
@@ -433,6 +459,7 @@ steps:
   - id: maintain-pr
     kind: system
     action: maintain-pr
+    limit: 3
     routes:
       conflict: lead
       ci-failed: lead
@@ -492,10 +519,12 @@ steps:
   - id: maintain-pr
     kind: system
     action: maintain-pr
+    limit: 3
     routes:
       conflict: build
       ci-failed: build
       base-moved: test
+      limit: cancel
 
   - id: merge
     kind: system
@@ -505,7 +534,7 @@ steps:
 ```
 
 `onboard-repo` is write-kit (onboarder), verify-kit (limit 3,
-`failed` back to write-kit), approve-kit, maintain-pr, merge.
+`failed` back to write-kit), approve-kit, maintain-pr (limit 3), merge.
 
 An example that branches with `decide`: the planner writes a plan, then the
 decision model chooses whether the owner must approve it.
@@ -557,6 +586,7 @@ steps:
   - id: maintain-pr
     kind: system
     action: maintain-pr
+    limit: 3
     routes:
       conflict: build
       ci-failed: build
@@ -673,13 +703,16 @@ The paired reviewer shares the tester's scheduler slot and timeout. Both
 verdicts must match the pinned branch head. Both passes continue after review; a correction
 wake carries both results and findings, only after both finish.
 
-Each joined round counts one finished run for each step, even when it passes.
+Each joined round retains both step results. Only matching send-back outcomes
+count toward each step's limit; passing re-tests consume no limit.
 Existing numeric limits and `limit` routes apply independently. When results
 route differently, asks/cancellation win over backward correction routes, then
 forward routes; the tester wins ties. A tester at its third failing round still
 asks unless configured otherwise. A lead review at its fifth failing round
 continues to `maintain-pr` when the tester passes; its unresolved findings still
-prevent auto-merge. Execution errors wait for the sibling, then ask at testing.
+prevent auto-merge. Execution errors wait for the sibling. If the survivor
+reports `changes-needed`, its route and limit apply and the crashed side stays
+failed with no verdict. Otherwise the pair asks at testing.
 Cancellation interrupts both; crash recovery retries the whole pair once.
 New branch commits invalidate both verdicts. Route `base-moved` to the tester
 so that base synchronization starts a fresh pair.
@@ -688,7 +721,8 @@ so that base synchronization starts a fresh pair.
 
 Settings accepts global `agents.reviewers` (default `[]`) and optional
 `workflows.<name>.reviewers` lists of agent choices. Lists have no length limit;
-a workflow list overrides the global list, and an empty list uses the reviewer
+a ticket's `agents.reviewers` overrides both; otherwise a workflow list
+overrides the global list. An empty list uses the reviewer
 role setting. They are settings, not workflow fields. Lead workflows run the
 selected list in parallel, each with its own log and result directory. Other
 workflows retain a single reviewer. Use different CLI families (`claude` and
@@ -696,7 +730,8 @@ workflows retain a single reviewer. Use different CLI families (`claude` and
 
 Tester and reviewer choices must differ in CLI or model from every recorded
 builder of the change, including child builders for a lead. Effort does not
-make an agent independent. Candidates are tried in this order: workflow
+make an agent independent. Candidates are tried in this order: ticket reviewer
+list (reviewers only), ticket role override, ticket default, workflow
 reviewer list (reviewers only), workflow role override, role setting, global
 reviewers, allowed list, default. The engine records replacements. Without a
 candidate it runs anyway, records the lack of independence, and requires the
@@ -704,7 +739,7 @@ owner to merge that head.
 
 Review rounds use the existing step `limit`, defaulting to 5 when omitted.
 Reviewers may therefore have a `limit` route without an explicit numeric limit;
-other steps still require one. Finished runs include the current round, so
+other steps still require one. Matching send-backs include the current round, so
 `limit: 5` permits exactly five failing rounds before taking the limit route.
 The built-in lead routes `changes-needed` to `lead` and `limit` to `maintain-pr`:
 open findings are published in the PR description and prevent auto-merge.
@@ -745,3 +780,15 @@ it when planning or when stuck.` Lesson text is not inserted into the prompt.
 With no accepted lessons there is no file or pointer. Owner decisions affect the
 next invocation; existing prompts keep their snapshot. Retire lessons once a
 check prevents the mistake.
+
+## Partial results and evidence
+
+A file artifact that cannot be retained becomes a note naming the file and
+reason; the other artifacts and the step result are kept. The tester evidence
+sweep keeps the newest 50 undeclared files by modification time per evidence
+directory and adds one note with the omitted count. Declared artifacts and
+instance logs are retained separately and do not consume this cap.
+
+A failed or cancelled child task's report names its local branch and head
+commit so the lead can reuse its work. The factory does not push that branch.
+If the local branch is unavailable, the report says the head is unavailable.

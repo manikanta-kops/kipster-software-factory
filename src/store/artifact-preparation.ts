@@ -26,23 +26,45 @@ export async function withPreparedArtifacts<T>(
   let recording = false
   try {
     for (const input of inputs) {
-      const artifact = home
-        ? await retainArtifact(home, rows[0].ticket_id, input)
-        : input
-      if (home && artifact.path && artifact.path !== resolve(home, input.path!))
-        copies.push(artifact.path)
-      let mediaType =
-        artifact.content !== undefined
-          ? 'text/markdown'
-          : 'application/octet-stream'
-      if (artifact.path && isAbsolute(artifact.path)) {
-        try {
-          mediaType = await detectMediaType(artifact.path)
-        } catch (error) {
-          if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+      let copy: string | undefined
+      try {
+        const artifact = home
+          ? await retainArtifact(home, rows[0].ticket_id, input)
+          : input
+        if (
+          home &&
+          artifact.path &&
+          artifact.path !== resolve(home, input.path!)
+        ) {
+          copy = artifact.path
+          copies.push(copy)
         }
+        let mediaType =
+          artifact.content !== undefined
+            ? 'text/markdown'
+            : 'application/octet-stream'
+        if (artifact.path && isAbsolute(artifact.path)) {
+          try {
+            mediaType = await detectMediaType(artifact.path)
+          } catch (error) {
+            if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+          }
+        }
+        prepared.push({ ...artifact, mediaType })
+      } catch (error) {
+        if (!input.path) throw error
+        if (copy) {
+          await rm(copy, { force: true })
+          copies.splice(copies.indexOf(copy), 1)
+        }
+        prepared.push({
+          kind: 'note',
+          title: 'Artifact file could not be retained',
+          content: `${input.title}\n\nFile: ${input.path}\nReason: ${error instanceof Error ? error.message : String(error)}`,
+          mediaType: 'text/markdown',
+          ...(input.scenario ? { scenario: input.scenario } : {}),
+        })
       }
-      prepared.push({ ...artifact, mediaType })
     }
     recording = true
     return await work(prepared)

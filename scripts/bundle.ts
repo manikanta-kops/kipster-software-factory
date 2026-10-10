@@ -24,6 +24,8 @@ import { basename, join, resolve } from 'node:path'
 import { parseArgs } from 'node:util'
 import { factoryVersion } from '../src/config.ts'
 import { root } from './dev-database.ts'
+import { buildServiceApp } from './native.ts'
+import { SERVICE_APP_NAME, verifyServiceApp } from '../src/service-app.ts'
 
 const NODE = '26.10.0'
 const POSTGRES = '18.6.0'
@@ -67,6 +69,9 @@ const { values } = parseArgs({
   options: {
     arch: { type: 'string', default: process.arch },
     out: { type: 'string', default: join(root, 'release') },
+    'service-app': { type: 'string' },
+    'require-signed-service': { type: 'boolean' },
+    'signing-team': { type: 'string' },
   },
 })
 const arch = values.arch as keyof typeof SOURCES
@@ -207,6 +212,33 @@ try {
     ],
     app,
   )
+
+  const serviceApp = values['service-app']
+    ? resolve(values['service-app'])
+    : buildServiceApp({ out: join(staging, 'native'), arch })
+  verifyServiceApp(serviceApp)
+  sh('lipo', [
+    join(serviceApp, 'Contents', 'MacOS', 'Factory'),
+    '-verify_arch',
+    source.lipo,
+  ])
+  if (values['require-signed-service']) {
+    const team = values['signing-team']
+    if (!team || !/^[A-Z0-9]{10}$/.test(team))
+      throw new Error(
+        '--signing-team must name the expected 10-character Apple team for a public release.',
+      )
+    sh('codesign', [
+      '--verify',
+      '--strict',
+      '-R',
+      `=identifier "app.kipster.factory" and anchor apple generic and certificate 1[field.1.2.840.113635.100.6.2.6] and certificate leaf[field.1.2.840.113635.100.6.1.13] and certificate leaf[subject.OU] = "${team}"`,
+      serviceApp,
+    ])
+    sh('xcrun', ['stapler', 'validate', serviceApp])
+  }
+  sh('ditto', [serviceApp, join(app, 'native', SERVICE_APP_NAME)])
+  verifyServiceApp(join(app, 'native', SERVICE_APP_NAME))
 
   writeFileSync(join(bundle, 'bin', 'kf'), WRAPPER, { mode: 0o755 })
   writeFileSync(join(bundle, 'VERSION'), `${factoryVersion()}\n`)

@@ -4,6 +4,7 @@ import { z } from 'zod'
 export interface StepContract {
   readonly success: string | null
   readonly outcomes: readonly string[]
+  readonly limitExemptOutcomes?: readonly string[]
 }
 
 export interface Role extends StepContract {
@@ -208,7 +209,11 @@ export const actions = {
       ciSettleMinutes: z.number().nonnegative().default(3),
       maxBaseSyncs: z.int().nonnegative().default(3),
     }),
-    contract: fixed('ready', ['ready', 'conflict', 'ci-failed', 'base-moved']),
+    contract: () => ({
+      success: 'ready',
+      outcomes: ['ready', 'conflict', 'ci-failed', 'base-moved'],
+      limitExemptOutcomes: ['base-moved'],
+    }),
   },
   merge: {
     summary:

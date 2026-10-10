@@ -1,3 +1,4 @@
+import { readPromptContext } from './helpers/prompt.ts'
 import assert from 'node:assert/strict'
 import { access, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
@@ -208,6 +209,16 @@ for (const [tested, reviewed] of [
       ).size,
       overlapping.artifacts.filter((a) => a.kind === 'log').length,
     )
+    const currentEvidence = overlapping.artifacts.find(
+      (a) => a.title === 'head response',
+    )!
+    for (const invocation of f.invocations.filter(
+      (i) => i.role === 'reviewer',
+    )) {
+      const context = readPromptContext(invocation.prompt)
+      assert.ok(!context.includes(currentEvidence.path!))
+      assert.doesNotMatch(context, /Latest completed tester result/)
+    }
     finishReview.release()
     const joined = await until(
       () => f.detail(ticket.number),
@@ -248,7 +259,7 @@ for (const [tested, reviewed] of [
       true,
     )
     if (reviewed === 'changes-needed')
-      assert.match(wake, /Serious review problem/)
+      assert.match(readPromptContext(wake), /Serious review problem/)
     assert.deepEqual(f.errors, [])
   })
 }
@@ -478,7 +489,7 @@ test('bug test/review join routes back to fix with both results', async (t) => {
   )
 })
 
-test('paired limits retain each finished run and choose stops/corrections before forward exhaustion', async () => {
+test('paired limits retain each send-back and choose stops/corrections before forward exhaustion', async () => {
   const workflow = (await builtInWorkflow('lead')).workflow
   const tester = workflow.steps.find((s) => s.id === 'final-test')!
   assert.equal(parallelReviewer(workflow, tester)!.id, 'review')
@@ -486,9 +497,21 @@ test('paired limits retain each finished run and choose stops/corrections before
     ...Array.from(
       { length: rounds - 1 },
       () =>
-        ({ stepId, status: 'finished', waitingFor: null, next: null }) as const,
+        ({
+          stepId,
+          status: 'finished',
+          outcome: 'changes-needed',
+          waitingFor: null,
+          next: null,
+        }) as const,
     ),
-    { stepId, status: 'running', waitingFor: null, next: null } as const,
+    {
+      stepId,
+      status: 'running',
+      outcome: null,
+      waitingFor: null,
+      next: null,
+    } as const,
   ]
   const pass = { outcome: 'passed', summary: 'Passed', artifacts: [] }
   const fail = { ...pass, outcome: 'changes-needed' }

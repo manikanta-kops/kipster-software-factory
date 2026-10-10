@@ -18,7 +18,7 @@ import type {
 } from '../domain/records.ts'
 import type { Next } from '../domain/routing.ts'
 import type { AgentChoice, RoleName } from '../domain/catalog.ts'
-import type { Settings } from '../domain/settings.ts'
+import type { Settings, TicketAgents } from '../domain/settings.ts'
 
 export type {
   Artifact,
@@ -43,7 +43,11 @@ export type {
 } from '../domain/records.ts'
 export type { Next } from '../domain/routing.ts'
 export type { AgentChoice } from '../domain/catalog.ts'
-export type { Settings, WorkflowOverride } from '../domain/settings.ts'
+export type {
+  Settings,
+  TicketAgents,
+  WorkflowOverride,
+} from '../domain/settings.ts'
 
 export interface HealthResponse {
   readonly status: 'ok'
@@ -148,6 +152,8 @@ export interface ListedTicket extends Ticket {
 
 // POST /api/tickets (201, TicketResponse)
 export interface CreateTicketRequest {
+  /** Override agent choices for this ticket and its lead child tickets. */
+  readonly agents?: TicketAgents | undefined
   /** Defaults on for lead and program-lead, off for other workflows. */
   readonly lightsOut?: boolean | undefined
   /** The repository's `owner/name`. */

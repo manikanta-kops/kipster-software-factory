@@ -40,6 +40,47 @@ function hasStaleReview(
   )
 }
 
+async function mergeForPublication(
+  cwd: string,
+  commit: string,
+  signal: AbortSignal,
+): Promise<string> {
+  try {
+    await run(
+      'git',
+      [
+        '-c',
+        'user.name=Kipster Factory',
+        '-c',
+        'user.email=kipster@localhost',
+        'merge',
+        '--no-edit',
+        commit,
+      ],
+      { cwd, signal },
+    )
+    return ''
+  } catch (error) {
+    // Abort even after cancellation; a conflicted index must never survive this system action.
+    const files = await run('git', ['diff', '--name-only', '--diff-filter=U'], {
+      cwd,
+      signal: AbortSignal.timeout(5000),
+    })
+    const merging = await run('git', ['rev-parse', '--verify', 'MERGE_HEAD'], {
+      cwd,
+      signal: AbortSignal.timeout(5000),
+    }).catch(() => null)
+    if (merging)
+      await run('git', ['merge', '--abort'], {
+        cwd,
+        signal: AbortSignal.timeout(5000),
+      })
+    signal.throwIfAborted()
+    if (!files) throw error
+    return files
+  }
+}
+
 export async function maintainPullRequest(
   options: RunnerOptions,
   context: AttemptContext,
@@ -53,6 +94,38 @@ export async function maintainPullRequest(
     throw new Error('Cannot sync a dirty ticket worktree')
   // The workspace preparation fetched origin. Pin the base so another ticket's fetch cannot change this merge.
   const base = await git(['rev-parse', `origin/${repository.defaultBranch}`])
+  const remoteRef = `refs/heads/${ticket.branch}`
+  if (await git(['ls-remote', '--refs', 'origin', remoteRef])) {
+    await git(['fetch', '--no-tags', 'origin', remoteRef])
+    const remoteHead = await git(['rev-parse', 'FETCH_HEAD'])
+    const outsideCommits = await git([
+      'log',
+      '--format=%h %s (author: %an <%ae>)',
+      `HEAD..${remoteHead}`,
+    ])
+    if (outsideCommits) {
+      const files = await mergeForPublication(cwd, remoteHead, signal)
+      if (files) {
+        await completeAttempt(
+          database,
+          attempt.id,
+          {
+            outcome: 'needs-decision',
+            summary: `Outside commits on origin/${ticket.branch} conflict with the ticket branch. The merge was aborted.\n\nOutside commits:\n${outsideCommits}\n\nConflicting files:\n${files}`,
+            artifacts: [
+              {
+                kind: 'finding',
+                title: 'Outside commit merge conflicts',
+                content: `Reconcile these outside commits without rewriting history, then run verification again:\n\n${outsideCommits}\n\nConflicting files:\n${files}\n\nThe system aborted its merge; your branch is unchanged.`,
+              },
+            ],
+          },
+          { headCommit: await git(['rev-parse', 'HEAD']) },
+        )
+        return
+      }
+    }
+  }
   const params = actions['maintain-pr'].params.parse(
     context.step.kind === 'system' ? context.step.with : {},
   )
@@ -79,33 +152,8 @@ export async function maintainPullRequest(
     })
     return
   }
-  try {
-    await git([
-      '-c',
-      'user.name=Kipster Factory',
-      '-c',
-      'user.email=kipster@localhost',
-      'merge',
-      '--no-edit',
-      base,
-    ])
-  } catch (error) {
-    // Abort even after cancellation; a conflicted index must never survive this system action.
-    const files = await run('git', ['diff', '--name-only', '--diff-filter=U'], {
-      cwd,
-      signal: AbortSignal.timeout(5000),
-    })
-    const merging = await run('git', ['rev-parse', '--verify', 'MERGE_HEAD'], {
-      cwd,
-      signal: AbortSignal.timeout(5000),
-    }).catch(() => null)
-    if (merging)
-      await run('git', ['merge', '--abort'], {
-        cwd,
-        signal: AbortSignal.timeout(5000),
-      })
-    signal.throwIfAborted()
-    if (!files) throw error
+  const files = await mergeForPublication(cwd, base, signal)
+  if (files) {
     await completeAttempt(
       database,
       attempt.id,

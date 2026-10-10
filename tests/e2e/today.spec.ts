@@ -96,3 +96,24 @@ test('Today gives a lead with a replaced task one row that never reads Blocked',
   ).json()) as TicketResponse
   expect(detail.parentTask?.replacedBy).toBe(replacementChild)
 })
+
+test('a long failure on a Today card stays within three lines', async ({
+  page,
+  factory,
+}) => {
+  await page.goto(factory.url)
+  await expect(page.locator('output.status')).toHaveText('Live')
+  const context = page.locator('.decision .decision-context').first()
+  await expect(context).toBeVisible()
+  const lineHeight = await context.evaluate((element) => {
+    element.textContent = `final-test failed: ${'artifacts.90.title: Too big: expected string to have <=200 characters; '.repeat(40)}`
+    return parseFloat(
+      element.ownerDocument.defaultView!.getComputedStyle(element).lineHeight,
+    )
+  })
+  const box = (await context.boundingBox())!
+  expect(box.height).toBeLessThanOrEqual(lineHeight * 3 + 1)
+  expect(
+    await context.evaluate((element) => element.scrollHeight),
+  ).toBeGreaterThan(box.height)
+})

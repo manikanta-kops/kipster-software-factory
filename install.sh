@@ -130,8 +130,9 @@ main() {
   previous=""
   if [ -L "$home/current" ]; then
     previous=$(readlink "$home/current")
-    if [ -x "$home/current/bin/kf" ] &&
-      "$home/current/bin/kf" stop --home "$home" >/dev/null 2>&1; then
+    if [ -x "$home/current/bin/kf" ]; then
+      "$bundle/bin/kf" stop --home "$home" ||
+        fail "The previous factory could not stop. Its installed files have been preserved."
       note "Stopped the running factory for the update."
     fi
   fi

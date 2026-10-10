@@ -1,3 +1,4 @@
+import { promptJson } from './helpers/prompt.ts'
 import assert from 'node:assert/strict'
 import { readFile, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
@@ -52,14 +53,21 @@ test('reviewer can audit retained tester evidence after instance scratch cleanup
     diff: 'Activity caption and focused browser test',
     home: f.home,
   })
-  const manifest = JSON.parse(
-    prompt
-      .split(
-        'Retained verification artifacts (factory-owned copies; inspect these paths, not scratch paths from an earlier result.json):\n',
-      )[1]!
-      .split('\n\n')[0]!,
+  const manifest = promptJson<
+    {
+      id: number
+      path: string
+      observedCommit: string
+      attempt: number
+      scenario: string
+      scenarioResult: string
+    }[]
+  >(
+    prompt,
+    'Retained verification artifacts (factory-owned copies; inspect these paths, not scratch paths from an earlier result.json):',
   )
   const reference = manifest.find((a: { id: number }) => a.id === retained.id)
+  assert.ok(reference)
   assert.equal(reference.path, retained.path)
   assert.equal(reference.observedCommit, f.head())
   assert.equal(reference.attempt, tester.id)

@@ -24,7 +24,15 @@ test('owner choices use the identical option routes and run limits as model outc
   for (const choice of ['proceed', 'review']) {
     const model = afterResult(
       workflow,
-      [{ stepId: 'classify', status: 'running', waitingFor: null, next: null }],
+      [
+        {
+          stepId: 'classify',
+          status: 'running',
+          outcome: null,
+          waitingFor: null,
+          next: null,
+        },
+      ],
       { outcome: choice, summary: `Owner chose ${choice}` },
     )
     const owner = afterTypedDecision(
@@ -33,6 +41,7 @@ test('owner choices use the identical option routes and run limits as model outc
         {
           stepId: 'classify',
           status: 'waiting',
+          outcome: null,
           waitingFor: 'decision',
           next: null,
         },
@@ -48,6 +57,7 @@ test('owner choices use the identical option routes and run limits as model outc
         {
           stepId: 'classify',
           status: 'waiting',
+          outcome: null,
           waitingFor: 'decision',
           next: null,
         },
@@ -62,6 +72,7 @@ test('owner choices use the identical option routes and run limits as model outc
         {
           stepId: 'classify',
           status: 'waiting',
+          outcome: null,
           waitingFor: 'human',
           next: null,
         },

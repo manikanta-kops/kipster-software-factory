@@ -14,6 +14,7 @@ import {
   checkDelegation,
   delegateTarget,
   repeatedFailures,
+  keptTaskWork,
 } from '../domain/tasks.ts'
 import type { AgentStep } from '../domain/workflow.ts'
 import {
@@ -34,6 +35,7 @@ import {
   getTicketDetail,
   type TicketDetail,
 } from '../store/tickets.ts'
+import { run } from '../executors/process.ts'
 import type { RunnerOptions } from './runner.ts'
 
 /** All selections for one attempt, computed from its settings snapshot before execution. */
@@ -44,11 +46,13 @@ export async function agentsFor(
 ): Promise<{ agents: AgentConfig[]; notes: ArtifactInput[] }> {
   const { config, database } = options
   const workflow = context.workflow.name
+  const ticketAgents = context.ticket.agents
   const owned = await getTaskOfChild(database, context.ticket.id)
   const original = resolveAgent(config, {
     workflow,
     role,
     taskAgent: owned?.task.agent,
+    ticketAgents,
   })
   if (!['reviewer', 'tester'].includes(role))
     return { agents: [original], notes: [] }
@@ -79,11 +83,16 @@ export async function agentsFor(
         workflow,
         role: 'builder',
         taskAgent: owned?.task.agent,
+        ticketAgents,
       }),
     )
   const override = config.workflows?.[workflow]
-  const reviewers = override?.reviewers ?? config.agents.reviewers
+  const reviewers =
+    ticketAgents?.reviewers ?? override?.reviewers ?? config.agents.reviewers
   const candidates = [
+    ...(role === 'reviewer' ? (ticketAgents?.reviewers ?? []) : []),
+    ...(ticketAgents?.roles?.[role] ? [ticketAgents.roles[role]!] : []),
+    ...(ticketAgents?.default ? [ticketAgents.default] : []),
     ...(role === 'reviewer' ? (override?.reviewers ?? []) : []),
     ...(override?.roles?.[role] ? [override.roles[role]!] : []),
     ...(config.agents.roles[role] ? [config.agents.roles[role]!] : []),
@@ -166,6 +175,7 @@ export async function leadContext(
         step: task.child.currentStep,
         waiting: task.child.waiting?.summary ?? task.child.waiting?.for ?? null,
         pullRequestUrl: task.child.pullRequestUrl,
+        branch: task.child.branch,
       },
     })),
     limits: params,
@@ -266,7 +276,7 @@ export async function pollTasks(
         database,
         task.id,
         'failed',
-        await childEnding(options, child.number),
+        await childEnding(options, repository, child.number, signal),
       )
     else if (
       task.land === 'pr' &&
@@ -345,7 +355,7 @@ async function integrate(
       options.database,
       task.id,
       'failed',
-      `Could not merge into the lead branch: ${String(error).slice(0, 1000)}. Branch ${branch} keeps the work.`,
+      `Could not merge into the lead branch: ${String(error).slice(0, 1000)}. ${await childWork(options, repository, task.child!, signal)}`,
     )
     return
   }
@@ -372,7 +382,34 @@ async function taskVerdict(options: RunnerOptions, number: number) {
   return child ? checkerVerdict(child) : 'No checker ran.'
 }
 
-async function childEnding(options: RunnerOptions, number: number) {
+async function childWork(
+  options: RunnerOptions,
+  repository: Repository,
+  child: { branch: string },
+  signal: AbortSignal,
+) {
+  let head: string | null = null
+  try {
+    head = await run(
+      'git',
+      ['rev-parse', '--verify', `refs/heads/${child.branch}`],
+      {
+        cwd: options.workspaces.cache(repository),
+        signal,
+      },
+    )
+  } catch {
+    signal.throwIfAborted()
+  }
+  return keptTaskWork(child.branch, head)
+}
+
+async function childEnding(
+  options: RunnerOptions,
+  repository: Repository,
+  number: number,
+  signal: AbortSignal,
+) {
   const child = await getTicketDetail(options.database, number)
   const last = child?.attempts.findLast(
     (attempt) => attempt.summary || attempt.error,
@@ -380,7 +417,7 @@ async function childEnding(options: RunnerOptions, number: number) {
   const reason = child?.artifacts.findLast(
     (artifact) => artifact.title === 'Why it was cancelled',
   )?.content
-  return `Child ticket #${number} was cancelled${last ? ` after ${last.stepId}: ${(last.summary ?? last.error)!.slice(0, 1000)}` : ''}${reason ? ` Reason: ${reason.slice(0, 500)}` : ''}`
+  return `Child ticket #${number} was cancelled${last ? ` after ${last.stepId}: ${(last.summary ?? last.error)!.slice(0, 1000)}` : ''}${reason ? ` Reason: ${reason.slice(0, 500)}` : ''}. ${child ? await childWork(options, repository, child.ticket, signal) : 'Child branch unavailable.'}`
 }
 
 function childBody(lead: Ticket, task: LeadTask) {

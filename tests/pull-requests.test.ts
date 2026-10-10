@@ -1,3 +1,4 @@
+import { readPromptContext } from './helpers/prompt.ts'
 import assert from 'node:assert/strict'
 import { test, type TestContext } from 'node:test'
 import { mkdtemp, mkdir, writeFile, readFile, rm } from 'node:fs/promises'
@@ -797,7 +798,9 @@ test('writer invalid result retries in a fresh session before publication', asyn
   )
   assert.deepEqual(
     (await f.detail()).artifacts
-      .filter((a) => a.kind === 'log')
+      .filter(
+        (a) => a.kind === 'log' && !a.title.startsWith('Session context:'),
+      )
       .map((a) => a.title),
     [
       'writer run 1 prompt',
@@ -1282,15 +1285,15 @@ ${oversized ? '🌻'.repeat(40_000) : ''}  `
           'utf8',
         )
         for (const scenario of scenarios) {
-          assert.ok(prompt.includes(scenario))
+          assert.ok(readPromptContext(prompt).includes(scenario))
           assert.ok(!note.includes(scenario))
         }
-        assert.ok(prompt.includes(reason))
+        assert.ok(readPromptContext(prompt).includes(reason))
         assert.match(
-          prompt,
+          readPromptContext(prompt),
           /Maximum description length before the factory adds open findings:/,
         )
-        assert.match(prompt, /Open review findings:/)
+        assert.match(readPromptContext(prompt), /Open review findings:/)
       }
     })
   }

@@ -8,6 +8,7 @@ import {
   afterFailure,
   afterInterruption,
   afterPullRequestBaseAdvance,
+  afterPullRequestMergedWhileWaiting,
   afterResolution,
   afterResult,
   type AttemptState,
@@ -47,11 +48,21 @@ function attempt(
   status: AttemptState['status'],
   extra: Partial<AttemptState> = {},
 ): AttemptState {
-  return { stepId, status, waitingFor: null, next: null, ...extra }
+  return {
+    stepId,
+    status,
+    outcome: null,
+    waitingFor: null,
+    next: null,
+    ...extra,
+  }
 }
 
 const finished = (stepId: string, next: Next) =>
-  attempt(stepId, 'finished', { next })
+  attempt(stepId, 'finished', {
+    next,
+    outcome: stepId === 'review' ? 'changes-needed' : 'done',
+  })
 const humanWaiting = (stepId: string) =>
   attempt(stepId, 'waiting', { waitingFor: 'human' })
 const askWaiting = (stepId: string) =>
@@ -332,7 +343,7 @@ describe('limits', () => {
       waitingFor: 'ask',
       askReason: 'limit',
       summary:
-        'review reported changes-needed after 2 runs, reaching its limit of 2.',
+        'review reported changes-needed after 2 send-backs, reaching its limit of 2.',
     })
   })
 
@@ -568,6 +579,51 @@ describe('cancelling and waiting for a merge', () => {
       () => waitForMerge(quick, [attempt('merge', 'pending')]),
       'conflict',
       /not running/,
+    )
+  })
+})
+
+describe('a pull request merged while the ticket waits on you', () => {
+  test('finishes an ask, a human step or a decision', () => {
+    for (const open of [
+      askWaiting('final-test'),
+      humanWaiting('approve-plan'),
+      attempt('choose', 'waiting', { waitingFor: 'decision' }),
+    ]) {
+      const transition = afterPullRequestMergedWhileWaiting([
+        finished('build', { to: 'step', stepId: 'final-test' }),
+        open,
+      ])
+      assert.deepEqual(transition.close, {
+        status: 'finished',
+        outcome: 'merged',
+        next: { to: 'finish' },
+      })
+      assert.equal(transition.open, null)
+      assert.equal(transition.status, 'done')
+    }
+  })
+
+  test('leaves every other attempt alone', () => {
+    for (const open of [
+      attempt('build', 'pending'),
+      attempt('build', 'running'),
+      attempt('merge', 'waiting', { waitingFor: 'pull-request-merge' }),
+      attempt('run', 'waiting', { waitingFor: 'tasks' }),
+      attempt('build', 'waiting', { waitingFor: 'other-repo' }),
+    ])
+      rejects(
+        () => afterPullRequestMergedWhileWaiting([open]),
+        'conflict',
+        /not waiting on you/,
+      )
+    rejects(
+      () =>
+        afterPullRequestMergedWhileWaiting([
+          finished('merge', { to: 'finish' }),
+        ]),
+      'conflict',
+      /already ended/,
     )
   })
 })

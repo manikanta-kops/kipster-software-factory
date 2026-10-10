@@ -1,4 +1,5 @@
 import { proposeLessons } from '../domain/lessons.ts'
+import type { TicketAgents } from '../domain/settings.ts'
 import {
   afterParallelResults,
   parallelReviewer,
@@ -37,6 +38,7 @@ import {
   afterFailure,
   afterInterruption,
   afterPullRequestBaseAdvance,
+  afterPullRequestMergedWhileWaiting,
   afterResolution,
   afterResult,
   type ArtifactInput,
@@ -48,6 +50,7 @@ import {
   startTicket,
   stepOf,
   type Opening,
+  OWNER_WAITS,
   ticketStatus,
   type Transition,
   waitForMerge,
@@ -82,6 +85,7 @@ import { listEvents, type NewEvent, recordEvents } from './events.ts'
 import { getRepository, getRepositoryById } from './repositories.ts'
 
 export interface NewTicket {
+  readonly agents?: TicketAgents | null
   readonly lightsOut?: boolean
   /** The target repository's `owner/name`. */
   readonly repository: string
@@ -260,6 +264,20 @@ export async function listWaitingForMerge(
   return Promise.all(rows.map((row) => loadContext(database, toAttempt(row))))
 }
 
+/** Owner waits on tickets with a pull request, which the owner may merge on GitHub meanwhile. */
+export async function listOwnerWaitsWithPullRequest(
+  database: Queryable,
+): Promise<AttemptContext[]> {
+  const { rows } = await database.query<AttemptRow>(
+    `SELECT a.* FROM attempts a JOIN tickets t ON t.id = a.ticket_id
+     WHERE a.status = 'waiting' AND a.waiting_for = ANY($1)
+       AND t.pull_request_url IS NOT NULL
+     ORDER BY a.id`,
+    [OWNER_WAITS],
+  )
+  return Promise.all(rows.map((row) => loadContext(database, toAttempt(row))))
+}
+
 // Writes
 
 /**
@@ -329,8 +347,9 @@ export async function createTicketInTransaction(
   const status = ticketStatus({ status: opening.status, next: null })
   const inserted = await connection.query<{ id: number }>(
     `INSERT INTO tickets (number, repository_id, workflow_name, workflow_version,
-                            title, body, branch, current_step, status, lights_out)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+                            title, body, branch, current_step, status, lights_out,
+                            agent_overrides)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
        RETURNING id`,
     [
       number,
@@ -343,6 +362,7 @@ export async function createTicketInTransaction(
       opening.stepId,
       status,
       input.lightsOut ?? defaultLightsOut(workflow.name),
+      input.agents == null ? null : JSON.stringify(input.agents),
     ],
   )
   const ticketId = (inserted.rows[0] as { id: number }).id
@@ -557,29 +577,38 @@ export async function startParallelReview(
   })
 }
 
+export type ParallelCompletion = {
+  completion: { headCommit: string; reproductionAttemptId?: number }
+} & ({ result: StepResult } | { error: string })
+
 export async function completeParallelAttempts(
   database: Database,
   testerId: number,
   reviewerId: number,
-  tested: {
-    result: StepResult
-    completion: { headCommit: string; reproductionAttemptId?: number }
-  },
-  reviewed: { result: StepResult; completion: { headCommit: string } },
+  tested: ParallelCompletion,
+  reviewed: ParallelCompletion,
 ): Promise<Moved> {
-  const testerResult = parseStepResult(tested.result)
-  const reviewerResult = parseStepResult(reviewed.result)
+  const testerResult =
+    'result' in tested ? parseStepResult(tested.result) : null
+  const reviewerResult =
+    'result' in reviewed ? parseStepResult(reviewed.result) : null
+  const error =
+    'error' in tested
+      ? tested.error
+      : 'error' in reviewed
+        ? reviewed.error
+        : undefined
   if (tested.completion.headCommit !== reviewed.completion.headCommit)
     throw new Error('Parallel verdicts disagree on the commit')
   return withPreparedArtifacts(
     database,
     testerId,
-    testerResult.artifacts,
+    testerResult?.artifacts ?? [],
     (testerArtifacts) =>
       withPreparedArtifacts(
         database,
         reviewerId,
-        reviewerResult.artifacts,
+        reviewerResult?.artifacts ?? [],
         (reviewerArtifacts) =>
           transaction(database, async (connection) => {
             const locked = await lockByAttempt(connection, testerId)
@@ -599,6 +628,7 @@ export async function completeParallelAttempts(
               [...locked.attempts.slice(0, -1), reviewer],
               testerResult,
               reviewerResult,
+              error,
             )
             const events: NewEvent[] = []
             await insertArtifacts(
@@ -616,33 +646,43 @@ export async function completeParallelAttempts(
               events,
             )
             await connection.query(
-              `UPDATE attempts SET status = 'finished', outcome = $2, summary = $3, next = $4,
-           owner_review = $5, finished_at = now() WHERE id = $1`,
+              `UPDATE attempts SET status = $6, outcome = $2, summary = $3, next = $4,
+           owner_review = $5, error = $7, finished_at = now() WHERE id = $1`,
               [
                 reviewerId,
-                reviewerResult.outcome,
-                reviewerResult.summary,
+                reviewerResult?.outcome ?? null,
+                reviewerResult?.summary ?? null,
                 JSON.stringify(transition.close.next),
-                reviewerResult.ownerReview
+                reviewerResult?.ownerReview
                   ? JSON.stringify(reviewerResult.ownerReview)
                   : null,
+                reviewerResult ? 'finished' : 'failed',
+                'error' in reviewed ? reviewed.error : null,
               ],
             )
             events.push({
               ticketId: locked.id,
-              kind: 'attempt.finished',
+              kind: reviewerResult ? 'attempt.finished' : 'attempt.failed',
               data: {
                 attemptId: reviewerId,
                 stepId: reviewer.stepId,
-                outcome: reviewerResult.outcome,
+                outcome: reviewerResult?.outcome ?? null,
                 next: transition.close.next,
+                ...('error' in reviewed ? { error: reviewed.error } : {}),
               },
             })
             return apply(
               connection,
               locked,
               transition,
-              { summary: testerResult.summary, ...tested.completion },
+              {
+                summary: testerResult?.summary ?? null,
+                ...tested.completion,
+                ...('error' in tested ? { error: tested.error } : {}),
+                ...(testerResult?.ownerReview
+                  ? { ownerReview: testerResult.ownerReview }
+                  : {}),
+              },
               events,
             )
           }),
@@ -966,6 +1006,47 @@ export async function failAttempt(
     openAttemptOf(locked, attemptId)
     const transition = afterFailure(locked.attempts, error)
     return apply(connection, locked, transition, { error }, [])
+  })
+}
+
+/** The owner merged the pull request on GitHub while this attempt waited on them. */
+export async function finishMergedWhileWaiting(
+  database: Database,
+  attemptId: number,
+  merge: {
+    readonly pullRequestUrl: string
+    readonly mergeCommit: string
+    readonly mergedBy: 'factory' | 'owner'
+  },
+): Promise<Moved> {
+  return transaction(database, async (connection) => {
+    const locked = await lockByAttempt(connection, attemptId)
+    openAttemptOf(locked, attemptId)
+    const transition = afterPullRequestMergedWhileWaiting(locked.attempts)
+    const events: NewEvent[] = []
+    await insertArtifacts(
+      connection,
+      locked.id,
+      attemptId,
+      [
+        {
+          kind: 'note',
+          title: 'Pull request merged on GitHub while waiting',
+          content: `${merge.pullRequestUrl} was merged by ${merge.mergedBy} at merge commit ${merge.mergeCommit} while the ticket waited on you, so the ticket finished.`,
+        },
+      ],
+      events,
+    )
+    return apply(
+      connection,
+      locked,
+      transition,
+      {
+        executor: 'system',
+        eventSummary: `Pull request merged on GitHub by ${merge.mergedBy} while waiting: ${merge.pullRequestUrl}`,
+      },
+      events,
+    )
   })
 }
 
@@ -1418,6 +1499,8 @@ export async function apply(
     readonly headCommit?: string
     readonly reproductionAttemptId?: number
     readonly ownerReview?: { readonly reason: string }
+    /** A readable line for the closing event, where the attempt summary is not one. */
+    readonly eventSummary?: string
   },
   events: NewEvent[],
 ): Promise<Moved> {
@@ -1471,6 +1554,7 @@ export async function apply(
       outcome: close.outcome,
       next: close.next,
       ...(closing.ownerReview ? { ownerReview: closing.ownerReview } : {}),
+      ...(closing.eventSummary ? { summary: closing.eventSummary } : {}),
       ...(closing.error === undefined ? {} : { error: closing.error }),
     },
   })
@@ -1778,6 +1862,7 @@ const TICKET_SELECT = `
   LEFT JOIN attempts w ON w.ticket_id = t.id AND w.status = 'waiting'`
 
 interface TicketRow {
+  agent_overrides: TicketAgents | null
   summary: TicketSummary | null
   summary_at: Date | null
   skipped_steps: SkippedStep[]
@@ -1806,6 +1891,7 @@ interface TicketRow {
 
 function toTicket(row: TicketRow): Ticket {
   return {
+    agents: row.agent_overrides,
     summary: row.summary,
     summaryAt: iso(row.summary_at),
     skippedSteps: row.skipped_steps,

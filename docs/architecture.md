@@ -28,8 +28,10 @@ The catalog in `src/domain/catalog.ts` is the single list of each.
   requests or merge.
 - **Nothing judges its own work.** The tester never wrote the change, and its
   edits are discarded.
-- **Every loop is bounded.** A step with a `limit` stops sending the ticket
-  back once it reaches the limit.
+- **Every loop is bounded.** A step's `limit` counts only matching send-back
+  outcomes, including the current report, and stops on the nth. Passing runs
+  do not consume it. `maintain-pr` bounds `ci-failed` and `conflict` separately;
+  `base-moved` uses the separate `maxBaseSyncs` bound.
 - **A verdict belongs to one commit.** New commits or a moved base branch void
   it.
 - **Every integration is optional.** The factory works without it. A missing
@@ -270,15 +272,43 @@ when it starts: its step timeout and every agent choice in that attempt come
 from that snapshot, so a running step keeps the values it started with.
 Post-merge checks use the global step timeout.
 
-An agent step's agent is, in order: a lead task's `agent` (child builder steps
-only), the workflow override for the role, the global role setting, then the
-default. Testers, reproducers, reviewers and writers of a child ticket never take
+An agent step's agent is, in order: the ticket's role override, a lead task's
+`agent` (child builder steps only), the ticket's default, the workflow override
+for the role, the global role setting, then the global default.
+Testers, reproducers, reviewers and writers of a child ticket never take
 the task's agent, so review can come from another model family than the author.
 The step timeout is the workflow override, then the global value. Overrides are
 keyed by workflow name; saving accepts names in the library or retained by
 stored tickets, so retired workflows keep their agent and timeout overrides.
 The step schema is unchanged. Each started agent attempt records the choice it ran with
 (`Attempt.agent`), which the ticket page shows next to the step.
+
+#### Ticket agent overrides
+
+`POST /api/tickets` accepts optional `agents: { default, roles, reviewers }`.
+Every field is optional and uses the same agent choices and role validation as
+Settings. The request rejects unknown keys, including `allowed` and timeout or
+concurrency settings. Model names are nonempty strings passed to the selected
+CLI, not checked against a factory model catalog. Ticket overrides are creation-only;
+there are no ticket editing controls or UI inputs in this API slice.
+
+Migration 019 stores only supplied choices in `tickets.agent_overrides`.
+Existing tickets and requests without `agents` have null overrides. Ticket
+list/detail and creation responses add `ticket.agents`; Settings is never
+modified. Overrides persist across retries and restarts. Fields left out keep
+following workflow/global settings at each attempt's snapshot.
+
+Lead child tickets copy their parent's overrides when created, including child
+workflows with separate PRs. An owner-specified builder role wins over a lead's
+task `agent`; otherwise that explicit task choice wins over the ticket default.
+Linked tickets in other repositories and post-merge bug tickets do not inherit
+overrides. PR writers and proof sessions use the same ticket resolution.
+
+Reviewer lists resolve from ticket, workflow, then global settings. An omitted
+list inherits; `[]` selects a single resolved reviewer. As before, only lead
+workflows run a configured list in parallel; other workflows use their reviewer
+role choice. Tester/reviewer independence can replace a requested model and
+records why, or requires owner merging when no independent candidate exists.
 
 Without `databaseUrl`, the factory runs a private PostgreSQL cluster in
 `<home>/postgres`. It listens only on a Unix socket in a `0700` directory under
@@ -303,6 +333,22 @@ service before replacing the version. A push to `master` publishes
 (`.github/workflows/release.yml`). Pull
 requests touching installation build and smoke-test both bundles without
 publishing.
+
+The archive also contains a native, signed background launcher. `kf start`
+verifies it, stages a copy, stops the previous service, and installs it at
+`<home>/service/Kipster Software Factory.app`. Its bundle identifier is
+`app.kipster.factory`; the LaunchAgent associates that identifier and runs the
+native executable. The executable stays alive as the Node process's parent and
+forwards shutdown signals. A private `service/runtime.json` selects the release's
+Node and CLI outside the signed app. Updates preserve the app path and signing
+identity, while changing that manifest. A failed stop prevents replacement.
+
+The launcher has the hardened-runtime Apple Events entitlement and usage
+descriptions. This enables permission requests; it does not grant consent.
+Every agent retains its configured Mac-control tools and hooks. No role,
+workflow, tool selection or retry policy changes. See
+[macOS permissions](macos-permissions.md) for release requirements and the
+installed-service checks needed to verify permission persistence.
 
 Verified against installed Codex **0.160.0** and Claude Code **2.1.289**:
 
@@ -352,13 +398,34 @@ fetch; workflows needing missing capabilities remain gated by the store.
 
 ### Prompt and result contract
 
-`engine/prompt.ts` combines `roles/<role>.md`, step `instructions`, the
-repository's optional `.kipster/roles/<role>.md` and `.kipster/context/index.md`
-(both from the fetched default branch, the index capped at 8,000 characters), and
-a context packet. The packet includes
-the title/body, latest plan before human approval (labelled unapproved until
-approval), prior step summaries and findings with attempt IDs, human comments
-and notes, branch and diff statistics. Each role runs in a new CLI session.
+`engine/prompt.ts` supplies `roles/<role>.md`, the session's head commit and
+file pointers. Step `instructions`, the default branch's optional
+`.kipster/roles/<role>.md`, and the context packet are written in full to
+per-session files under the ticket's retained evidence directory. The packet
+includes the title/body, latest plan before human approval (labelled unapproved
+until approval), prior step summaries and findings with attempt IDs, human
+comments and notes, branch and diff statistics. Prior summaries carry their
+head commits. The default branch's `.kipster/context/index.md` stays inline,
+capped at 8,000 characters with a pointer to the rest.
+
+Verification instances, dependency checkouts, lead task state, linked tickets,
+review history and retained evidence indexes use the same file-pointer format
+when supplied. These are complete snapshots of the existing context, not model
+summaries or relevance-filtered excerpts. Agents must read requirements and
+instructions before acting, read verification/dependency/task state before using
+it, and inspect large JSON files selectively instead of dumping them into output.
+The latest completed tester and reviewer attempts have direct pointers to their
+recorded results and artifact references, selected by workflow role and labelled
+with attempt and commit. Failed, waiting and running attempts cannot become
+these shortcuts; the supplied context still carries their existing history.
+Parallel tester/reviewer sessions continue to use the pre-pair snapshot, so a
+reviewer cannot see the concurrent tester's result.
+
+Every retry and parallel reviewer gets separate files. `context-files.json` in
+the session directory lists them for registration as `Session context:` log
+artifacts before execution. The saved prompt's paths survive step-directory
+cleanup and follow normal log retention. No workflow fields, outcome rules or
+provider-specific retrieval tools are needed. Each role runs in a new CLI session.
 Planners supply acceptance scenarios and never commit; builders implement and
 commit; reviewers read the diff once, block only serious problems and leave
 minor notes in the summary. Writers provide PR prose as note artifacts.
@@ -386,27 +453,38 @@ directory and follows log retention:
 }
 ```
 
-All three keys are required; a passed reviewer may also supply the typed
+Outcome and summary are required; omitted artifacts default to an empty list.
+A passed reviewer may also supply the typed
 `ownerReview` field described below. Outcomes must belong to the role's catalog contract
 or be `needs-decision`. Summary is nonempty. Artifacts use the existing lifecycle
 schema: kind (`plan`, `comment`, `finding`, `evidence`, `log`, `note`), title, and
 exactly one of Markdown `content` or a `path` to an existing file under the
 factory home. Symlink escapes are rejected. File artifacts are copied into `evidence/<ticket-id>/` before recording, so scratch and worktree cleanup cannot erase evidence.
 Artifact titles and scenario labels over 200 characters are shortened, not
-rejected. A successful planner must include a plan artifact. Missing or invalid results
+rejected. NUL bytes are stripped from all result string values before validation
+and storage. A successful planner must include a plan artifact. Missing or invalid results
 get one fresh CLI retry in a separate directory with the previous validation
 failure in its prompt; proof retries still receive fresh instances and must
 capture new evidence. A second invalid result fails
-the attempt and opens a human ask. Timeouts fail immediately. Chat text is never
+the attempt and opens a human ask. When the agent process fails without a valid
+result, diagnostics lead with the process error and the last 40 lines (at most
+4 KiB) of its log, followed by the result problem. A builder reporting done with
+uncommitted files gets the same retry, naming those files and asking it to commit
+or remove them. Each lead run, including a retry, rebuilds its context from current
+task and pull request state. Timeouts fail immediately. Chat text is never
 parsed for routing. Logs survive failures and cancellation.
 
 ### System actions and verification
 
 `maintain-pr` requires a clean worktree. Workspace preparation fetches origin;
-the action pins and merges `origin/<defaultBranch>` into the ticket branch.
-It never rebases or force-pushes. A conflict is aborted and reports `conflict`
-with a finding listing the files for the builder. After a clean merge, a prior
-tester or reviewer execution must be a passing verdict for the exact resulting HEAD;
+the action pins `origin/<defaultBranch>`, then fetches the remote ticket branch
+if it exists. Commits missing locally are merged into the ticket branch before
+merging the pinned base. It never rebases or force-pushes. An outside-commit
+conflict is aborted and reports `needs-decision`, naming the outside commits
+(short SHA, subject and author) and conflicting files. A base conflict is aborted
+and reports `conflict` with a finding listing the files for the builder.
+After clean merges, a prior tester or reviewer execution must be a passing verdict
+for the exact resulting HEAD;
 otherwise `base-moved` routes back to testing, or review when there is no tester.
 This check also catches a restart
 after the merge committed but before its outcome was recorded. Workflows without
@@ -435,8 +513,9 @@ stop publication; aborts and infrastructure failures propagate.
 Full plans, logs and prior review rounds remain in the factory timeline.
 
 The action pushes normally, creates or updates the branch PR through `gh`, and
-persists its URL. Existing closed/merged PRs are reused. It parks as
-`pull-request-checks`, recording the pushed commit and waiting timestamp, and
+persists its URL. Only an open PR is reused; if only closed or merged PRs exist,
+it creates a new one. It parks as `pull-request-checks`, recording the pushed commit
+and waiting timestamp, and
 immediately takes one check snapshot. Pending checks are subsequently polled
 without an executor slot. The GitHub adapter queries the exact SHA via `gh api`,
 paginates checks, and checks branch protection/rulesets for required checks not
@@ -494,6 +573,17 @@ operator (including organization repositories). Bots and factory-marked content
 a human from the factory using the same CLI login. Comment artifacts carry source
 IDs so retries/restarts and later merge waits do not replay consumed feedback.
 Superseded/dismissed change requests are ignored. Only the system merge policy described below may invoke `gh pr merge`. Other system actions explicitly fail to a human in this slice.
+
+The owner can also merge on GitHub while the ticket waits on them at an ask, a
+human step or a decision. At the same merge-poll interval the scheduler inspects
+the pull request of every such ticket that has one; tickets without a pull
+request are never inspected. A `MERGED` pull request is recorded as at `merge`
+(merger, merge commit, `pull-request.merged` and the post-merge check row), and
+the waiting attempt finishes as `merged` with a `Pull request merged on GitHub
+while waiting` note, so the ticket is done and its worktree is cleaned up. An
+open or closed pull request changes nothing; a closed one is left to the owner's
+answer. If the owner answers first, the finish loses the race and the ticket
+keeps the answer.
 
 `tests/pull-requests.test.ts` uses real PostgreSQL, local bare remotes, a fake
 writer and a stub GitHub interface to cover clean/conflicting merges, stale
@@ -603,8 +693,9 @@ accidental local commits disappear with the disposable clone, which has no
 remote; nothing copies them back to the ticket branch. This is isolation from
 the normal publication path, not an OS sandbox for an unrestricted agent.
 
-The prompt includes the exact commit, instance URL, database URL, evidence
-directory, verification documents and the approved plan's acceptance scenarios.
+The prompt points to verification context containing the exact commit, instance
+URL, database URL, evidence directory and verification documents, and to the
+context packet containing the approved plan's acceptance scenarios.
 All maps are supplied so a relevant entry point cannot be lost to heuristic
 selection. The agent drives the actual user surface first; state inspection may
 only corroborate that run. Wrong surfaces, stale builds and self-reports cannot
@@ -890,7 +981,8 @@ The pin changes only when that ticket prepares its next fresh session, after
 the prior executor has exited. Factory caches and their pins must not be
 removed or edited externally while dependency checkouts exist; a borrowed
 checkout cannot survive deletion of its object source. Ownership checks reject unowned or symlinked directories.
-The prompt lists repository, path and full commit and forbids edits or pushes.
+The prompt points to a dependency file listing repository, path and full commit,
+and forbids edits or pushes.
 
 Files, directories and Git metadata have read-only permissions. After executor
 exit, including execution errors, cancellation and timeout, the engine compares
@@ -969,7 +1061,10 @@ scheduler tick, `engine/tasks.ts` advances each parked lead:
   The child's merge poll merges only after the lead chose `merge`, and then
   only under the usual auto-merge policy; `leave-open` leaves it for the
   owner. A merged child makes the task `merged`.
-- A cancelled child makes the task `failed`, with its last summary.
+- A cancelled child makes the task `failed`, with its last summary, local
+  branch name and head commit, so the lead can reuse the work. Integration
+  failures also name the branch and head; unavailable heads are explicit.
+  This reporting never pushes the child branch.
 - Pending tasks start in order while fewer than `maxParallel` run. A branch
   task's child branch starts from the lead's current head, recorded as
   `baseCommit`, and its prompts compare against it. A pull request task starts
@@ -980,8 +1075,8 @@ scheduler tick, `engine/tasks.ts` advances each parked lead:
   lead last heard, or nothing is left to wait for, the step finishes with
   `reported`, a "Task report" note, and routes back to the lead.
 
-Each lead run is a fresh session. Its prompt adds the current task table,
-limits, workflows, allowed agents and the repository's auto-merge setting;
+Each lead run is a fresh session. Its prompt points to a snapshot of the current
+task table, limits, workflows, allowed agents and the repository's auto-merge setting;
 the ticket's notes, comments and step summaries carry the history.
 Failed tasks are grouped by a pure signature of their stored result, removing
 paths, IDs, hashes, timestamps, durations and numbers. Conflicts are excluded.
@@ -1051,7 +1146,8 @@ Before an attempt starts, the engine compares its reviewer or tester agent with
 recorded builder agents on this ticket and, for leads, its child tickets. Equality
 means the same CLI and model; effort is ignored and an absent model is its own
 value. Without recorded builders it resolves the builder from settings. It uses
-the first independent candidate: workflow reviewer list (reviewers only),
+the first independent candidate: ticket reviewer list (reviewers only), ticket
+role override, ticket default, workflow reviewer list (reviewers only),
 workflow role override, global role setting, global reviewers, allowed agents,
 then default. The scheduler records the selection once; execution and proof
 reuse it. Replacements appear as ticket notes in the timeline. If no candidate
@@ -1067,13 +1163,16 @@ like the configured reviewer list. Sessions, attempts, step directories and logs
 remain separate. Testers use disposable running instances when available,
 otherwise they check the change in a disposable checkout. Dependency checkouts are prepared once and shared read-only. Both verdicts must match the
 pinned branch head, and routing waits for both sessions, even on execution errors.
-A failure asks at the tester cursor; cancellation and recovery interrupt both,
+If one side crashes and the survivor reports `changes-needed`, its route and
+limits apply, while the crashed side is recorded as failed with no verdict.
+Other failures ask at the tester cursor; cancellation and recovery interrupt both,
 and recovery retries the whole pair once. New commits reject stale results;
 `base-moved` returns to testing and starts both again. A correction wake contains
 both summaries and findings.
 
-Both steps count one finished run per joined round, including passing runs,
-under the existing limits. Nonpassing routes take priority over passing routes;
+Both step results are kept per joined round. Each limit counts only finished
+reports matching the current send-back outcome, including the current report;
+passing re-tests do not consume it. Nonpassing routes take priority over passing routes;
 asks/cancellation take priority over correction loops, which take priority over
 forward limit routes. Ties use the tester's route. Thus a third failing tester
 round still asks by default, and a fifth failing review with a passing tester
@@ -1087,7 +1186,7 @@ reviewer must pass at the same head. Findings and per-reviewer verdict notes nam
 the agent; passing reviewers' owner-review reasons are retained. A serious
 finding routes back to the lead. The built-in review has `limit: 5` and routes
 `limit` to `maintain-pr`. Review steps without an explicit limit default to five
-finished rounds, counting the current run. Explicit limits on other workflows
+matching send-back reports, counting the current report. Explicit limits on other workflows
 remain unchanged. The final unresolved round publishes the open findings in the
 PR description; its nonpassing verdict prevents auto-merge. Publication accepts
 that exhausted verdict only at its reviewed head; a moved base still requires

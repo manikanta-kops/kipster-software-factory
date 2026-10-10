@@ -1,3 +1,4 @@
+import { readPromptContext } from './helpers/prompt.ts'
 import assert from 'node:assert/strict'
 import { execFileSync, spawn } from 'node:child_process'
 import {
@@ -18,6 +19,9 @@ import { engineConfig, readConfig } from '../src/config.ts'
 import { nextStep } from '../src/domain/routing.ts'
 import type { Settings } from '../src/domain/settings.ts'
 import { readResult } from '../src/engine/prompt.ts'
+import { pollOwnerWaitPullRequest } from '../src/engine/merge-wait.ts'
+import type { RunnerOptions } from '../src/engine/runner.ts'
+import { AttemptMovedOn } from '../src/domain/errors.ts'
 import { startScheduler } from '../src/engine/scheduler.ts'
 import { effectiveSettings, saveSettings } from '../src/store/settings.ts'
 import { cliCommand, type AgentExecutor } from '../src/executors/cli.ts'
@@ -37,8 +41,10 @@ import {
   decide,
   getTicketDetail,
   markRunning,
+  listOwnerWaitsWithPullRequest,
   listTickets,
   resolveAsk,
+  setPullRequestUrl,
 } from '../src/store/tickets.ts'
 import { Workspaces } from '../src/workspace/workspaces.ts'
 import { testWorkflow, createTestStore } from './helpers/store.ts'
@@ -286,7 +292,9 @@ test('planned-change: approval, two builds, review loop, PR, merge wait, termina
     f.requests[0]!.body,
     /Acceptance plan|Verification build|fake reviewer/,
   )
-  const logs = waiting.artifacts.filter((a) => a.kind === 'log')
+  const logs = waiting.artifacts.filter(
+    (a) => a.kind === 'log' && !a.title.startsWith('Session context:'),
+  )
   const promptLogs = logs.filter((a) => a.title.endsWith(' prompt'))
   assert.equal(logs.length, 14)
   assert.equal(promptLogs.length, 7)
@@ -303,9 +311,9 @@ test('planned-change: approval, two builds, review loop, PR, merge wait, termina
   const savedBuild = savedPrompts.find((p) => p.text === buildPrompt)
   assert.ok(savedBuild, 'each session prompt is kept as evidence')
   assert.ok(savedBuild.path.startsWith(join(f.home, 'evidence') + '/'))
-  assert.match(buildPrompt, /Add a second change file/)
-  assert.match(buildPrompt, /Use the plan/)
-  assert.match(buildPrompt, /"planApproved": true/)
+  assert.match(readPromptContext(buildPrompt), /Add a second change file/)
+  assert.match(readPromptContext(buildPrompt), /Use the plan/)
+  assert.match(readPromptContext(buildPrompt), /"planApproved": true/)
   assert.match(
     execFileSync(
       'git',
@@ -326,11 +334,22 @@ test('planned-change: approval, two builds, review loop, PR, merge wait, termina
   for (const name of ['planner', 'builder', 'reviewer', 'writer'])
     assert.ok(role(name).length > 0, `${name} ran`)
   for (const prompt of prompts) {
-    assert.match(prompt, /Repository context index[\s\S]*TRUSTED INDEX/)
-    assert.doesNotMatch(prompt, /UNTRUSTED/)
+    assert.match(
+      readPromptContext(prompt),
+      /Repository context index[\s\S]*TRUSTED INDEX/,
+    )
+    assert.doesNotMatch(readPromptContext(prompt), /UNTRUSTED/)
   }
-  assert.ok(role('reviewer').every((p) => p.includes('TRUSTED REVIEWER RULE')))
-  assert.ok(role('builder').every((p) => !p.includes('TRUSTED REVIEWER RULE')))
+  assert.ok(
+    role('reviewer').every((p) =>
+      readPromptContext(p).includes('TRUSTED REVIEWER RULE'),
+    ),
+  )
+  assert.ok(
+    role('builder').every(
+      (p) => !readPromptContext(p).includes('TRUSTED REVIEWER RULE'),
+    ),
+  )
   const builtinInstructions = (name: string) =>
     role(name).map((prompt) => prompt.split('Repository context index')[0]!)
   for (const prompt of builtinInstructions('builder')) {
@@ -387,7 +406,11 @@ test('an invalid result retries once with a fresh run, then asks, preserving log
   assert.match(stopped.attempts[0]!.headCommit!, /^[0-9a-f]{40}$/)
   assert.match(stopped.attempts[0]!.error!, /result.json after two runs/)
   assert.deepEqual(
-    stopped.artifacts.filter((a) => a.kind === 'log').map((a) => a.title),
+    stopped.artifacts
+      .filter(
+        (a) => a.kind === 'log' && !a.title.startsWith('Session context:'),
+      )
+      .map((a) => a.title),
     [
       'planner run 1 prompt',
       'planner run 1',
@@ -550,6 +573,165 @@ test('no commits asks for a decision; closing an unmerged PR rejects it', async 
     (d) => d.ticket.status === 'cancelled',
   )
   assert.equal(rejected.attempts.at(-1)!.outcome, 'rejected')
+})
+
+async function askAfterNoCommits(f: Awaited<ReturnType<typeof setup>>) {
+  const ticket = await f.ticket()
+  const approval = await until(
+    () => f.detail(ticket.number),
+    (d) => d.ticket.waiting?.for === 'human',
+  )
+  await decide(f.store.database, {
+    ticketNumber: ticket.number,
+    attemptId: approval.ticket.waiting!.attemptId,
+    choice: 'approved',
+  })
+  const ask = await until(
+    () => f.detail(ticket.number),
+    (d) => d.ticket.waiting?.for === 'ask',
+  )
+  return { ticket, attemptId: ask.ticket.waiting!.attemptId }
+}
+
+const pullRequest = 'https://github.com/fixture/repo/pull/1'
+
+test('a pull request merged on GitHub while the ticket waits on you finishes it; open, closed and missing pull requests leave it waiting', async (t) => {
+  const f = await setup(t)
+  let ownerPolls = 0
+  const query = f.store.database.query.bind(f.store.database)
+  t.mock.method(f.store.database, 'query', (async (...args: unknown[]) => {
+    if (
+      typeof args[0] === 'string' &&
+      args[0].includes('t.pull_request_url IS NOT NULL')
+    )
+      ownerPolls++
+    return Reflect.apply(query, undefined, args)
+  }) as typeof f.store.database.query)
+  await f.start()
+  const { ticket, attemptId } = await askAfterNoCommits(f)
+  const polled = ownerPolls
+  await until(
+    async () => ownerPolls,
+    (count) => count >= polled + 3,
+  )
+  assert.equal(f.inspections(), 0)
+
+  await setPullRequestUrl(f.store.database, ticket.id, pullRequest)
+  for (const state of ['OPEN', 'CLOSED'] as const) {
+    f.setState(state)
+    const seen = f.inspections()
+    await until(
+      async () => f.inspections(),
+      (count) => count >= seen + 2,
+    )
+    const waiting = await f.detail(ticket.number)
+    assert.equal(waiting.ticket.status, 'needs-you')
+    assert.equal(waiting.ticket.waiting?.for, 'ask')
+    assert.equal(waiting.ticket.waiting?.attemptId, attemptId)
+  }
+  const { rows: none } = await f.store.database.query(
+    'SELECT 1 FROM post_merge_checks WHERE ticket_id = $1',
+    [ticket.id],
+  )
+  assert.equal(none.length, 0)
+
+  f.setState('MERGED')
+  const done = await until(
+    () => f.detail(ticket.number),
+    (d) => d.ticket.status === 'done',
+  )
+  const closed = done.attempts.at(-1)!
+  assert.equal(closed.id, attemptId)
+  assert.equal(closed.status, 'finished')
+  assert.equal(closed.outcome, 'merged')
+  assert.deepEqual(closed.next, { to: 'finish' })
+  assert.equal(closed.executor, 'system')
+  const note = done.artifacts.find(
+    (artifact) =>
+      artifact.title === 'Pull request merged on GitHub while waiting',
+  )
+  assert.equal(note?.kind, 'note')
+  assert.equal(note?.attemptId, attemptId)
+  assert.match(
+    note!.content!,
+    new RegExp(`${pullRequest}.*owner.*${'d'.repeat(40)}`),
+  )
+  const merged = done.events.filter(
+    (event) => event.kind === 'pull-request.merged',
+  )
+  assert.equal(merged.length, 1)
+  assert.equal(merged[0]!.data['mergedBy'], 'owner')
+  assert.equal(merged[0]!.data['mergeCommit'], 'd'.repeat(40))
+  const finished = done.events.find(
+    (event) =>
+      event.kind === 'attempt.finished' &&
+      event.data['attemptId'] === attemptId,
+  )
+  assert.equal(
+    finished?.data['summary'],
+    `Pull request merged on GitHub by owner while waiting: ${pullRequest}`,
+  )
+  const { rows } = await f.store.database.query(
+    'SELECT merge_commit, merged_by, attempt_id, status FROM post_merge_checks WHERE ticket_id = $1',
+    [ticket.id],
+  )
+  assert.deepEqual(rows, [
+    {
+      merge_commit: 'd'.repeat(40),
+      merged_by: 'owner',
+      attempt_id: attemptId,
+      status: 'pending',
+    },
+  ])
+  // The done ticket's worktree goes through the usual cleanup.
+  await until(
+    () => exists(new Workspaces(f.home).path(ticket)),
+    (value) => !value,
+  )
+  await until(
+    async () =>
+      (
+        await f.store.database.query<{ cleaned: boolean }>(
+          'SELECT worktree_cleaned_at IS NOT NULL AS cleaned FROM tickets WHERE id = $1',
+          [ticket.id],
+        )
+      ).rows[0]!.cleaned,
+    (cleaned) => cleaned,
+  )
+  assert.deepEqual(f.errors, [])
+})
+
+test('an answer that lands before the merge poll finishes wins; the ticket is unchanged', async (t) => {
+  const f = await setup(t)
+  const scheduler = await f.start()
+  const { ticket, attemptId } = await askAfterNoCommits(f)
+  await setPullRequestUrl(f.store.database, ticket.id, pullRequest)
+  const [context] = await listOwnerWaitsWithPullRequest(f.store.database)
+  assert.equal(context?.attempt.id, attemptId)
+  await scheduler.close()
+  await resolveAsk(f.store.database, {
+    ticketNumber: ticket.number,
+    attemptId,
+    resolution: { action: 'retry' },
+  })
+  const before = await f.detail(ticket.number)
+  f.setState('MERGED')
+  await assert.rejects(
+    pollOwnerWaitPullRequest(
+      {
+        database: f.store.database,
+        github: f.github,
+        workspaces: new Workspaces(f.home),
+      } as unknown as RunnerOptions,
+      context!,
+      new AbortController().signal,
+    ),
+    AttemptMovedOn,
+  )
+  const after = await f.detail(ticket.number)
+  assert.equal(after.ticket.status, before.ticket.status)
+  assert.deepEqual(after.attempts, before.attempts)
+  assert.deepEqual(after.artifacts, before.artifacts)
 })
 
 test('configuration defaults and verified CLI argument sets', async (t) => {
