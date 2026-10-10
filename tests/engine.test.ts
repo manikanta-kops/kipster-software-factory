@@ -577,7 +577,7 @@ test('no commits asks for a decision; closing an unmerged PR rejects it', async 
   )
   assert.match(
     ask.ticket.waiting!.summary!,
-    /The ticket branch has no commits to publish/,
+    /The ticket branch has no changes to publish/,
   )
   assert.equal(f.requests.length, 0)
   await writeFile(
