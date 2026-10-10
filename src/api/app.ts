@@ -7,6 +7,7 @@ import {
 } from '../store/lessons.ts'
 import { evaluateMergeGate } from '../domain/merge-gate.ts'
 import { scenarioIndex } from '../domain/evidence.ts'
+import { ticketUsage } from '../domain/usage.ts'
 import { getMergeGate } from '../store/merge-gates.ts'
 import { setArtifactHome } from '../store/database.ts'
 import { listDecisions, decisionCounts } from '../store/decisions.ts'
@@ -53,6 +54,7 @@ import {
   decideOption,
   getArtifact,
   getTicketDetail,
+  listTaskAttempts,
   listTickets,
   resolveAsk,
 } from '../store/tickets.ts'
@@ -529,6 +531,11 @@ export function createApp({
         })),
       },
       attempts,
+      usage: ticketUsage(
+        attempts,
+        detail.tasks,
+        await listTaskAttempts(database, detail.ticket.id),
+      ),
       decisions: await listDecisions(database, detail.ticket.id),
       artifacts: await Promise.all(
         detail.artifacts.map(async (artifact) => {

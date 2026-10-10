@@ -1,5 +1,7 @@
 import type { TicketSummary } from '../domain/summary.ts'
 export type { TicketSummary } from '../domain/summary.ts'
+import type { TicketUsage } from '../domain/usage.ts'
+export type { TaskUsage, TicketUsage, UsageTotals } from '../domain/usage.ts'
 import type { GateSnapshot } from '../domain/merge-gate.ts'
 import type { ScenarioEvidence } from '../domain/evidence.ts'
 import type { DecisionRecord, DecisionStepCounts } from '../domain/decisions.ts'
@@ -192,6 +194,8 @@ export interface TicketResponse {
   readonly mergeGate?: GateSnapshot | null
   readonly evidenceIndex?: readonly ScenarioEvidence[]
   readonly decisions?: readonly DecisionRecord[]
+  /** Tokens and time over finished step runs; on a lead ticket, also per task. */
+  readonly usage?: TicketUsage
   readonly ticket: Ticket
   readonly workflow: TicketWorkflowSummary
   /** Oldest first; the last one is open unless the ticket has ended. */

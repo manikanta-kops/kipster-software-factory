@@ -16,6 +16,7 @@ export const test = base.extend<{
   withAutoMerge: boolean
   withLinks: boolean
   withTasks: boolean
+  withUsage: boolean
   withLegacy: boolean
   withArtifacts: boolean
   withDecisions: boolean
@@ -25,6 +26,7 @@ export const test = base.extend<{
   withAutoMerge: [false, { option: true }],
   withLinks: [false, { option: true }],
   withTasks: [false, { option: true }],
+  withUsage: [false, { option: true }],
   withDecisions: [false, { option: true }],
   withLegacy: [false, { option: true }],
   withArtifacts: [false, { option: true }],
@@ -40,11 +42,12 @@ export const test = base.extend<{
       withAutoMerge,
       withLinks,
       withTasks,
+      withUsage,
     },
     runTest,
   ) => {
     const response = await request.post(
-      `/__test/fixtures?lessons=${withLessons}&legacy=${withLegacy}&artifacts=${withArtifacts}&decisions=${withDecisions}&verdict=${verdict}&autoMerge=${withAutoMerge}&links=${withLinks}&tasks=${withTasks}`,
+      `/__test/fixtures?lessons=${withLessons}&legacy=${withLegacy}&artifacts=${withArtifacts}&decisions=${withDecisions}&verdict=${verdict}&autoMerge=${withAutoMerge}&links=${withLinks}&tasks=${withTasks}&usage=${withUsage}`,
     )
     expect(response.ok()).toBeTruthy()
     const fixture = (await response.json()) as FactoryFixture

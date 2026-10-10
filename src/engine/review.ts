@@ -17,6 +17,7 @@ import {
   buildPrompt,
   openSession,
   readResult,
+  recordSessionUsage,
 } from './prompt.ts'
 import type { RunnerOptions } from './runner.ts'
 import type { Verdict } from './parallel-final.ts'
@@ -111,6 +112,7 @@ export async function runReviewAttempt(
         } catch (error) {
           executionError = error
         }
+        await recordSessionUsage(options.database, attempt.id, agent.cli, log)
         signal.throwIfAborted()
         if (
           (await git(['rev-parse', 'HEAD'])) !== head ||

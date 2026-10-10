@@ -90,6 +90,8 @@ const attempt: Attempt = {
   waitingSince: null,
   headCommit: head,
   finishedAt: end,
+  inputTokens: null,
+  outputTokens: null,
 }
 const task: LeadTask = {
   id: 1,

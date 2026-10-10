@@ -31,6 +31,7 @@ import {
   buildPrompt,
   openSession,
   readResult,
+  recordSessionUsage,
 } from './prompt.ts'
 import type { RunnerOptions } from './runner.ts'
 import type { Verdict } from './parallel-final.ts'
@@ -249,14 +250,19 @@ export async function runProofAttempt(
         prompt,
         title: `${step.role} run ${retry}`,
       })
-      execution = session.execute({
-        config: await agentFor(options, context, step.role),
-        cwd,
-        prompt,
-        directory,
-        log,
-        signal: executionSignal,
-      })
+      const config = await agentFor(options, context, step.role)
+      execution = session
+        .execute({
+          config,
+          cwd,
+          prompt,
+          directory,
+          log,
+          signal: executionSignal,
+        })
+        .finally(() =>
+          recordSessionUsage(database, attempt.id, config.cli, log),
+        )
       let executionError: unknown
       await Promise.race([
         execution.catch((error: unknown) => {
