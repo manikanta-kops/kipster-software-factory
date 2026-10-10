@@ -388,6 +388,30 @@ router.post('/__test/fixtures', async (c) => {
       'Pull request ready for a decision.',
     )
     taskTickets = { lead: lead.number, child: child!.number }
+    if (c.req.query('usage') === 'true') {
+      const build = (await claimAttempts(fixture.database, 100)).find(
+        (item) => item.ticket.id === child!.id,
+      )!
+      await markRunning(fixture.database, build.attempt.id, 'claude-code', {
+        cli: 'claude',
+        model: 'opus',
+        effort: 'high',
+      })
+      await completeAttempt(fixture.database, build.attempt.id, {
+        outcome: 'done',
+        summary: 'Added the export endpoint.',
+        artifacts: [],
+      })
+      for (const [id, input, output, seconds] of [
+        [first.attempt.id, 1_234_567, 180_000, 460],
+        [build.attempt.id, 35_700, 950, 46],
+      ])
+        await fixture.database.query(
+          `UPDATE attempts SET input_tokens = $2, output_tokens = $3,
+             started_at = finished_at - make_interval(secs => $4) WHERE id = $1`,
+          [id, input, output, seconds],
+        )
+    }
   }
   // Upgraded tickets without a stored report still render the full ticket page.
   if (legacyTicket !== null)

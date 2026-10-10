@@ -48,6 +48,8 @@ function attempt(id: number, stepId: string, outcome: string): Attempt {
     waitingSince: null,
     headCommit: head,
     finishedAt: null,
+    inputTokens: null,
+    outputTokens: null,
   }
 }
 

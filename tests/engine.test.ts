@@ -420,6 +420,32 @@ test('an invalid result retries once with a fresh run, then asks, preserving log
   )
 })
 
+test('agent runs record the tokens their logs report, including a run whose result failed', async (t) => {
+  const codex = await readFile(
+    new URL('./fixtures/usage/codex-exec.jsonl', import.meta.url),
+    'utf8',
+  )
+  const f = await setup(t, {
+    planner: [
+      { invalid: true, stream: codex },
+      { stream: `not json\n{"type":"turn.completed"\n${codex}` },
+    ],
+  })
+  await f.start()
+  const ticket = await f.ticket()
+  const waiting = await until(
+    () => f.detail(ticket.number),
+    (d) => d.ticket.waiting?.for === 'human',
+  )
+  const [plan, approval] = waiting.attempts
+  assert.equal(plan!.status, 'finished')
+  assert.equal(plan!.inputTokens, 2 * 2_374_730)
+  assert.equal(plan!.outputTokens, 2 * 12_648)
+  assert.equal(approval!.stepId, 'approve-plan')
+  assert.equal(approval!.inputTokens, null)
+  assert.equal(approval!.outputTokens, null)
+})
+
 test('reading a result rejects invalid JSON, a missing file and an outcome the role cannot report', async (t) => {
   const directory = await mkdtemp(join(tmpdir(), 'factory-result-'))
   t.after(() => rm(directory, { recursive: true, force: true }))
