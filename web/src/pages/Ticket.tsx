@@ -1,6 +1,7 @@
 import { TicketSummaryCard } from '../components/TicketSummary.tsx'
 import { MergeGatePanel } from '../components/MergeGate.tsx'
 import { EvidenceIndex } from '../components/EvidenceIndex.tsx'
+import { Usage } from '../components/Usage.tsx'
 import { DecisionReview, DecisionDetails } from '../components/Decision.tsx'
 import {
   useEffect,
@@ -23,6 +24,7 @@ import type {
 import { untestedReasons } from '../../../src/domain/task-testing.ts'
 import { describeAgent } from '../../../src/domain/settings.ts'
 import { isFinalTask, replacements } from '../../../src/domain/tasks.ts'
+import { compactDuration } from '../../../src/domain/usage.ts'
 import { api } from '../api.ts'
 import {
   attention,
@@ -148,6 +150,7 @@ export function TicketPage({
             ticketNumber={ticket.number}
           />
         )}
+        <Usage detail={query.data} />
       </div>
       <aside className="ticket-side">
         <StepList detail={query.data} />
@@ -978,20 +981,10 @@ function StandardActionPanel({ detail }: { detail: TicketResponse }) {
 function duration(attempt: Attempt, now: number) {
   const start = attempt.startedAt ?? attempt.waitingSince
   if (!start) return 'Not started'
-  const seconds = Math.max(
-    0,
-    Math.round(
-      ((attempt.finishedAt ? Date.parse(attempt.finishedAt) : now) -
-        Date.parse(start)) /
-        1000,
-    ),
+  const value = compactDuration(
+    (attempt.finishedAt ? Date.parse(attempt.finishedAt) : now) -
+      Date.parse(start),
   )
-  const value =
-    seconds < 60
-      ? `${seconds}s`
-      : seconds < 3600
-        ? `${Math.floor(seconds / 60)}m ${seconds % 60}s`
-        : `${Math.floor(seconds / 3600)}h ${Math.floor((seconds % 3600) / 60)}m`
   return attempt.finishedAt ? value : `${value} elapsed`
 }
 function AttemptDuration({ attempt }: { attempt: Attempt }) {

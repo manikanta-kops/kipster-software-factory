@@ -4,7 +4,13 @@ import type { DependencyCheckout } from '../workspace/dependencies.ts'
 import { open, readFile, realpath, stat, writeFile, rm } from 'node:fs/promises'
 import { dirname, join, resolve, relative, isAbsolute, sep } from 'node:path'
 import { roles, type RoleName } from '../domain/catalog.ts'
-import { addAttemptArtifacts, type TicketDetail } from '../store/tickets.ts'
+import {
+  addAttemptArtifacts,
+  addAttemptUsage,
+  type TicketDetail,
+} from '../store/tickets.ts'
+import { readUsage } from '../executors/usage.ts'
+import type { AgentConfig } from '../config.ts'
 import { newEvidenceFile } from '../artifacts/storage.ts'
 import type { AgentStep } from '../domain/workflow.ts'
 import { parseStepResult, type StepResult } from '../domain/lifecycle.ts'
@@ -280,6 +286,18 @@ export async function openSession(input: {
     { kind: 'log', title: title.slice(0, 200), path: log },
   ])
   return log
+}
+
+/** Adds the tokens a finished session's log reports to its agent attempt. Usage never fails a step. */
+export async function recordSessionUsage(
+  database: Database,
+  attemptId: number,
+  cli: AgentConfig['cli'],
+  log: string,
+): Promise<void> {
+  const usage = await readUsage(cli, log)
+  if (usage)
+    await addAttemptUsage(database, attemptId, usage).catch(() => undefined)
 }
 
 export async function readResult(

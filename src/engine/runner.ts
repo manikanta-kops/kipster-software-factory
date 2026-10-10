@@ -38,6 +38,7 @@ import {
   buildPrompt,
   openSession,
   readResult,
+  recordSessionUsage,
 } from './prompt.ts'
 
 export interface RunnerOptions {
@@ -313,6 +314,7 @@ async function executeAttempt(
       } catch (error) {
         executionError = error
       }
+      await recordSessionUsage(database, attempt.id, selected.cli, log)
       if (executionError instanceof DependencyChangedError) throw executionError
       signal.throwIfAborted()
       let result

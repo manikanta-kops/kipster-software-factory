@@ -358,6 +358,17 @@ Verified against installed Codex **0.160.0** and Claude Code **2.1.289**:
   command resumes a session or restricts tools. Stdout and stderr stream to an
   on-disk log recorded as an artifact before launching, including failed runs.
 
+After each agent session, including a failed one, the engine reads that log for
+token usage (`executors/usage.ts`): Claude's last `result` event (input counts
+`input_tokens` plus both cache fields) or the sum of Codex's `turn.completed`
+events. It adds them to the attempt's nullable `input_tokens`/`output_tokens`
+(migration 020), so retries and parallel reviewers add up. No usage event leaves
+them null; nothing is estimated and a parse failure never fails the step. Human
+and system attempts, including the PR writer inside `maintain-pr`, stay null.
+`GET /api/tickets/:number` returns them on each attempt and adds `usage`: totals
+over finished step runs (`started_at` to `finished_at`) and, on a lead, each
+task's child-ticket totals, included in the lead's total.
+
 `kf serve --no-scheduler` and `npm run dev -- --no-scheduler` serve the UI/API
 without executing tickets. Demo seeding holds the scheduler's advisory lock,
 requires an empty database and permanently marks it as demo before inserting

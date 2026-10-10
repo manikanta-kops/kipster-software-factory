@@ -196,6 +196,9 @@ export interface Attempt {
   /** Exact branch commit at completion; null when no commit was observed. */
   readonly headCommit: string | null
   readonly finishedAt: string | null
+  /** Tokens the attempt's agent runs reported, including cached input; null when none reported any. */
+  readonly inputTokens: number | null
+  readonly outputTokens: number | null
 }
 
 export interface AgentDecision {

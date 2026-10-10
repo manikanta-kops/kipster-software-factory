@@ -1298,6 +1298,49 @@ async function seedLocked(
     { headCommit: lateHead },
   )
 
+  /** Gives finished step runs, oldest first, realistic tokens and durations; null tokens stay unreported. */
+  const spend = async (
+    number: number,
+    runs: readonly (readonly [number | null, number | null, number])[],
+  ) => {
+    const { rows } = await database.query<{ id: number }>(
+      `SELECT a.id FROM attempts a JOIN tickets t ON t.id = a.ticket_id
+       WHERE t.number = $1 AND a.finished_at IS NOT NULL ORDER BY a.id`,
+      [number],
+    )
+    if (rows.length !== runs.length)
+      throw new Error(`Ticket #${number} has ${rows.length} finished runs`)
+    for (const [index, row] of rows.entries()) {
+      const [input, output, seconds] = runs[index]!
+      await database.query(
+        `UPDATE attempts SET input_tokens = $2, output_tokens = $3,
+           started_at = finished_at - make_interval(secs => $4) WHERE id = $1`,
+        [row.id, input, output, seconds],
+      )
+    }
+  }
+  await spend(done, [
+    [412_300, 9_840, 252],
+    [null, null, 1_080],
+    [2_891_400, 35_712, 2_465],
+    [1_208_950, 12_400, 460],
+    [610_220, 7_300, 214],
+    [null, null, 46],
+    [null, null, 7_380],
+  ])
+  await spend(askAfterLimit, [
+    [388_120, 8_210, 231],
+    [null, null, 640],
+    [402_775, 9_105, 268],
+    [null, null, 300],
+    [1_950_300, 28_400, 1_812],
+    [940_500, 950, 395],
+    [598_400, 6_985, 199],
+    [1_120_640, 17_050, 903],
+    [702_310, 6_120, 344],
+    [655_900, 7_420, 228],
+  ])
+
   // Queued: nothing has picked it up yet.
   const queued = await create(
     'Update the README badges',
