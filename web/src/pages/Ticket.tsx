@@ -1,6 +1,7 @@
 import { TicketSummaryCard } from '../components/TicketSummary.tsx'
 import { MergeGatePanel } from '../components/MergeGate.tsx'
 import { EvidenceIndex } from '../components/EvidenceIndex.tsx'
+import { Usage } from '../components/Usage.tsx'
 import { DecisionReview, DecisionDetails } from '../components/Decision.tsx'
 import {
   useEffect,
@@ -23,6 +24,7 @@ import type {
 import { untestedReasons } from '../../../src/domain/task-testing.ts'
 import { describeAgent } from '../../../src/domain/settings.ts'
 import { isFinalTask, replacements } from '../../../src/domain/tasks.ts'
+import { compactDuration } from '../../../src/domain/usage.ts'
 import { api } from '../api.ts'
 import {
   attention,
@@ -33,6 +35,7 @@ import {
 } from '../components/Shared.tsx'
 import { repositoriesQuery, ticketQuery } from '../queries.ts'
 import { ArtifactView } from '../components/ArtifactView.tsx'
+import { Outputs } from '../components/Outputs.tsx'
 import { isMedia, MediaGallery, MediaLibrary } from '../components/Media.tsx'
 import { RepositoryTag } from '../components/Filters.tsx'
 import { Icon, stepHue, stepIcon } from '../components/Icon.tsx'
@@ -122,6 +125,7 @@ export function TicketPage({
           />
         )}
       <div className="ticket-primary" id="ticket-details" tabIndex={-1}>
+        <Outputs detail={query.data} />
         {awaitingAction ? (
           <ActionPanel key={ticket.waiting!.attemptId} detail={query.data} />
         ) : (
@@ -148,6 +152,7 @@ export function TicketPage({
             ticketNumber={ticket.number}
           />
         )}
+        <Usage detail={query.data} />
       </div>
       <aside className="ticket-side">
         <StepList detail={query.data} />
@@ -286,27 +291,32 @@ function Details({ detail }: { detail: TicketResponse }) {
     ticket.pullRequestUrl && /^https?:\/\//i.test(ticket.pullRequestUrl)
       ? ticket.pullRequestUrl
       : null
+  const publishes = detail.workflow.steps.some(
+    (step) => step.does === 'maintain-pr',
+  )
   return (
     <section className="side-card" aria-label="Details">
       <h2 className="section-title">Details</h2>
       <dl className="details-list">
-        <div>
-          <dt>Pull request</dt>
-          <dd>
-            {pullRequest ? (
-              <a
-                className="text-link"
-                href={pullRequest}
-                target="_blank"
-                rel="noreferrer"
-              >
-                #{/\/pull\/(\d+)/.exec(pullRequest)?.[1] ?? 'Open'} ↗
-              </a>
-            ) : (
-              <span className="muted">Not opened yet</span>
-            )}
-          </dd>
-        </div>
+        {(pullRequest || publishes) && (
+          <div>
+            <dt>Pull request</dt>
+            <dd>
+              {pullRequest ? (
+                <a
+                  className="text-link"
+                  href={pullRequest}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  #{/\/pull\/(\d+)/.exec(pullRequest)?.[1] ?? 'Open'} ↗
+                </a>
+              ) : (
+                <span className="muted">Not opened yet</span>
+              )}
+            </dd>
+          </div>
+        )}
         <div>
           <dt>Repository</dt>
           <dd>
@@ -978,20 +988,10 @@ function StandardActionPanel({ detail }: { detail: TicketResponse }) {
 function duration(attempt: Attempt, now: number) {
   const start = attempt.startedAt ?? attempt.waitingSince
   if (!start) return 'Not started'
-  const seconds = Math.max(
-    0,
-    Math.round(
-      ((attempt.finishedAt ? Date.parse(attempt.finishedAt) : now) -
-        Date.parse(start)) /
-        1000,
-    ),
+  const value = compactDuration(
+    (attempt.finishedAt ? Date.parse(attempt.finishedAt) : now) -
+      Date.parse(start),
   )
-  const value =
-    seconds < 60
-      ? `${seconds}s`
-      : seconds < 3600
-        ? `${Math.floor(seconds / 60)}m ${seconds % 60}s`
-        : `${Math.floor(seconds / 3600)}h ${Math.floor((seconds % 3600) / 60)}m`
   return attempt.finishedAt ? value : `${value} elapsed`
 }
 function AttemptDuration({ attempt }: { attempt: Attempt }) {

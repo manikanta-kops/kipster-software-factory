@@ -1,5 +1,8 @@
 import { useState } from 'react'
-import { defaultLightsOut } from '../../../src/domain/records.ts'
+import {
+  defaultLightsOut,
+  SCRATCH_REPOSITORY,
+} from '../../../src/domain/records.ts'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import type { Repository, WorkflowSummary } from '../../../src/api/contract.ts'
 import { api } from '../api.ts'
@@ -8,15 +11,21 @@ import { repositoriesQuery, workflowsQuery } from '../queries.ts'
 import { navigate } from '../router.ts'
 
 function unavailable(
+  slug: string,
   repository: Repository | undefined,
   workflow: WorkflowSummary,
 ) {
-  if (!repository) return 'Choose a repository first.'
-  if (repository.status !== 'ready')
+  const scratch = slug === SCRATCH_REPOSITORY
+  if (scratch && workflow.publishes)
+    return 'Opens a pull request, so it needs a repository.'
+  if (!scratch && !repository) return 'Choose a repository first.'
+  if (repository && repository.status !== 'ready')
     return `Repository is ${repository.status}. It must be ready to start a ticket.`
   const missing = [
     ...new Set(workflow.steps.flatMap((step) => step.needs)),
-  ].filter((need) => !repository.kit.capabilities.includes(need))
+  ].filter((need) => !repository?.kit.capabilities.includes(need))
+  if (scratch && missing.length)
+    return `Needs a repository kit (${missing.join(', ')}).`
   return missing.includes('verify')
     ? 'This repository needs a verified kit to run this workflow.'
     : missing.length
@@ -56,10 +65,10 @@ export function NewTicket() {
   const canOnboard =
     needsKit &&
     onboardWorkflow &&
-    !unavailable(selectedRepository, onboardWorkflow)
+    !unavailable(repository, selectedRepository, onboardWorkflow)
   const canCreate =
     selectedWorkflow &&
-    !unavailable(selectedRepository, selectedWorkflow) &&
+    !unavailable(repository, selectedRepository, selectedWorkflow) &&
     title.trim()
   const create = useMutation({
     mutationFn: api.createTicket,
@@ -86,7 +95,7 @@ export function NewTicket() {
             event.preventDefault()
             if (canCreate)
               create.mutate({
-                repository,
+                ...(repository === SCRATCH_REPOSITORY ? {} : { repository }),
                 workflow,
                 lightsOut,
                 title: title.trim(),
@@ -109,6 +118,7 @@ export function NewTicket() {
             }}
           >
             <option value="">Choose a repository</option>
+            <option value={SCRATCH_REPOSITORY}>No repository</option>
             {repositories.data?.repositories.map((item) => (
               <option key={item.id} value={item.slug}>
                 {item.slug} ({item.status})
@@ -151,13 +161,13 @@ export function NewTicket() {
           )}
           <fieldset className="workflow-choices workflow-grid">
             <legend>Workflow</legend>
-            {!selectedRepository && (
+            {!repository && (
               <p className="muted choose-first">
                 Choose a repository to see which workflows can run.
               </p>
             )}
             {selectableWorkflows?.map((item) => {
-              const reason = unavailable(selectedRepository, item)
+              const reason = unavailable(repository, selectedRepository, item)
               return (
                 <label
                   key={item.name}
@@ -174,7 +184,7 @@ export function NewTicket() {
                   <span>
                     <strong>{item.name}</strong>
                     <span>{item.description}</span>
-                    {reason && selectedRepository && <small>{reason}</small>}
+                    {reason && repository && <small>{reason}</small>}
                   </span>
                 </label>
               )

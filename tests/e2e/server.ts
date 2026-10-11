@@ -26,7 +26,15 @@ import {
 } from '../../src/store/tasks.ts'
 // Only this test server exposes fixture creation; production API routes are unchanged.
 import { serve } from '@hono/node-server'
-import { appendFile, rm, writeFile } from 'node:fs/promises'
+import { appendFile, mkdir, rm, writeFile } from 'node:fs/promises'
+import { SCRATCH_REPOSITORY } from '../../src/domain/records.ts'
+import { setArtifactHome } from '../../src/store/database.ts'
+import {
+  getRepository,
+  markRepositoryReady,
+  registerScratchRepository,
+} from '../../src/store/repositories.ts'
+import { createScratchGit } from '../../src/workspace/scratch.ts'
 import { join } from 'node:path'
 import { createApp } from '../../src/api/app.ts'
 import { BUILT_WEB_APP } from '../../src/server.ts'
@@ -238,6 +246,48 @@ router.post('/__test/fixtures', async (c) => {
     )
     decisionTicket = created.number
   }
+  let exploreTicket: number | null = null
+  if (c.req.query('explore') === 'true') {
+    setArtifactHome(fixture.database, fixtureHome)
+    await registerScratchRepository(
+      fixture.database,
+      await createScratchGit(fixtureHome),
+    )
+    const scratch = (await getRepository(fixture.database, SCRATCH_REPOSITORY))!
+    await markRepositoryReady(fixture.database, scratch.id)
+    const created = await createTicket(fixture.database, {
+      repository: SCRATCH_REPOSITORY,
+      workflow: (await builtInLibrary()).get('explore')!,
+      title: 'Calm home page directions',
+    })
+    const context = (await claimAttempts(fixture.database, 100)).find(
+      (item) => item.ticket.id === created.id,
+    )!
+    await markRunning(fixture.database, context.attempt.id, 'codex')
+    const design = join(fixtureHome, 'steps', 'calm')
+    await mkdir(join(design, 'assets'), { recursive: true })
+    await writeFile(
+      join(design, 'index.html'),
+      '<!doctype html><html><head><title>Calm</title><link rel="stylesheet" href="assets/style.css"></head><body><h1>Calm home</h1><p id="script">script did not run</p><p id="api">not tried</p><script type="module" src="assets/app.js"></script></body></html>',
+    )
+    await writeFile(
+      join(design, 'assets', 'style.css'),
+      'h1 { color: rgb(0, 128, 128) }',
+    )
+    await writeFile(
+      join(design, 'assets', 'app.js'),
+      "document.getElementById('script').textContent = 'script ran'\n" +
+        "fetch('/api/tickets', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })" +
+        ".then(() => { document.getElementById('api').textContent = 'reached the API' })" +
+        ".catch(() => { document.getElementById('api').textContent = 'API blocked' })\n",
+    )
+    await completeAttempt(fixture.database, context.attempt.id, {
+      outcome: 'done',
+      summary: 'One calm direction.',
+      artifacts: [{ kind: 'output', title: 'Calm home page', path: design }],
+    })
+    exploreTicket = created.number
+  }
   if (c.req.query('autoMerge') === 'true') {
     const detail = (await getTicketDetail(
       fixture.database,
@@ -388,6 +438,30 @@ router.post('/__test/fixtures', async (c) => {
       'Pull request ready for a decision.',
     )
     taskTickets = { lead: lead.number, child: child!.number }
+    if (c.req.query('usage') === 'true') {
+      const build = (await claimAttempts(fixture.database, 100)).find(
+        (item) => item.ticket.id === child!.id,
+      )!
+      await markRunning(fixture.database, build.attempt.id, 'claude-code', {
+        cli: 'claude',
+        model: 'opus',
+        effort: 'high',
+      })
+      await completeAttempt(fixture.database, build.attempt.id, {
+        outcome: 'done',
+        summary: 'Added the export endpoint.',
+        artifacts: [],
+      })
+      for (const [id, input, output, seconds] of [
+        [first.attempt.id, 1_234_567, 180_000, 460],
+        [build.attempt.id, 35_700, 950, 46],
+      ])
+        await fixture.database.query(
+          `UPDATE attempts SET input_tokens = $2, output_tokens = $3,
+             started_at = finished_at - make_interval(secs => $4) WHERE id = $1`,
+          [id, input, output, seconds],
+        )
+    }
   }
   // Upgraded tickets without a stored report still render the full ticket page.
   if (legacyTicket !== null)
@@ -587,6 +661,7 @@ router.post('/__test/fixtures', async (c) => {
     artifactTicket: artifactTicketNumber,
     legacyTicket,
     decisionTicket,
+    exploreTicket,
   })
 })
 router.post('/__test/auto-merge', async (c) => {

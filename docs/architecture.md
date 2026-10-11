@@ -14,7 +14,7 @@
 | **Decision**   | A fast typed judgement (a choice with probabilities and a confidence) used where input is unstructured.                                       |
 | **Task**       | Work a lead hands out. It runs as a child ticket and lands on the lead's branch or as its own pull request.                                   |
 
-Roles: planner, builder, tester, reproducer, reviewer, writer, onboarder, lead.
+Roles: planner, builder, tester, reproducer, reviewer, writer, onboarder, lead, explorer.
 Actions: decide, verify-kit, maintain-pr, merge, run-tasks.
 The catalog in `src/domain/catalog.ts` is the single list of each.
 
@@ -55,7 +55,7 @@ src/
   executors/    Fresh Codex/Claude CLI sessions and process-group supervision.
   kit/          Zod kit validation and committed default-branch capability discovery.
   verification/ Disposable exact-commit instances, ports, databases and retained logs.
-  artifacts/    Content-based media detection for evidence.
+  artifacts/    Content-based media detection for evidence; retained outputs.
   workspace/    Repository caches, ticket worktrees and ownership-aware cleanup.
   github/       Small gh-backed PR interface.
   roles/        Base instructions for each catalog role.
@@ -357,6 +357,17 @@ Verified against installed Codex **0.160.0** and Claude Code **2.1.289**:
 - Both accept an optional `--model <model>`; prompts go through stdin. Neither
   command resumes a session or restricts tools. Stdout and stderr stream to an
   on-disk log recorded as an artifact before launching, including failed runs.
+
+After each agent session, including a failed one, the engine reads that log for
+token usage (`executors/usage.ts`): Claude's last `result` event (input counts
+`input_tokens` plus both cache fields) or the sum of Codex's `turn.completed`
+events. It adds them to the attempt's nullable `input_tokens`/`output_tokens`
+(migration 020), so retries and parallel reviewers add up. No usage event leaves
+them null; nothing is estimated and a parse failure never fails the step. Human
+and system attempts, including the PR writer inside `maintain-pr`, stay null.
+`GET /api/tickets/:number` returns them on each attempt and adds `usage`: totals
+over finished step runs (`started_at` to `finished_at`) and, on a lead, each
+task's child-ticket totals, included in the lead's total.
 
 `kf serve --no-scheduler` and `npm run dev -- --no-scheduler` serve the UI/API
 without executing tickets. Demo seeding holds the scheduler's advisory lock,
@@ -1032,7 +1043,11 @@ removal still runs from its stored version. Per-workflow Settings overrides for
 the name are kept; if no ticket ever ran it, the next Settings save reports the
 override as an unknown workflow until it is removed. There is no rename, and
 the API has no authentication beyond binding to localhost and the CORS
-allow-list (which now allows `DELETE`).
+allow-list (which now allows `DELETE`). Every `POST /api/*` must send
+`Content-Type: application/json`, otherwise it gets 400. Browsers send a
+cross-site plain-text or form POST without asking, but must ask (preflight)
+before a JSON one, which the allow-list refuses. Cross-site `DELETE` always
+needs a preflight.
 `skills/kipster-workflows/SKILL.md` teaches a model to write a valid file.
 
 ## Lead tickets and tasks
@@ -1200,3 +1215,42 @@ fixes. A new finding with a `file` unchanged between the first reviewed commit
 and the current head becomes a note. Earlier findings, changed-file findings
 and new findings without a file remain serious. Migration 016 adds the optional
 repository-relative artifact `file`; no existing migration changes.
+
+## Outputs and tickets without a repository
+
+An `output` artifact is something the owner opens in the browser: a design, a
+prototype, a report. Its `path` is a file or a folder inside the factory home.
+`readResult` checks it before the step completes, so a bad output gets the
+normal one-retry: no links anywhere inside, only regular files and folders, at
+most 500 MB. Retention then copies it to `home/outputs/<uuid>/` (a file keeps
+its name inside that folder) and records the stored path; the media type is
+`inode/directory` for a folder, otherwise by extension. Outputs are not evidence:
+retention never prunes them and evidence adoption skips them.
+
+The API adds `url` to output artifacts. `GET /files/<uuid>/<path>` serves them
+from the factory's own server, so the dashboard's address (localhost, or
+whatever proxy publishes it) works with no extra port or setup. A folder
+redirects to its trailing-slash form and opens at `index.html` or as a
+generated file list; missing or escaping paths answer 404. Every response
+carries `Content-Security-Policy: sandbox allow-scripts …` without
+`allow-same-origin`, so a page gets an opaque origin, plus `connect-src 'none'`
+and `form-action 'none'`, so it cannot call the factory API. Same-origin and
+https scripts, styles, images and fonts load. `Access-Control-Allow-Origin: *`
+lets opaque-origin pages load module scripts and fonts; the random id is the
+only access control beyond the API's own binding.
+
+A ticket created without `repository` runs in the scratch repository
+`_local/scratch` (GitHub owners cannot start with `_`). At startup the factory
+creates `home/scratch.git`, a bare repository whose `main` holds one empty
+commit, and registers it once with `repositories.scratch = true`; the scheduler
+clones it like any other, and each ticket gets its own branch and worktree.
+`GET /api/repositories` leaves it out; New ticket offers it as "No repository".
+Ticket creation rejects a workflow on it with a publishing action
+(`Action.publishes`: `maintain-pr`, `merge`, `run-tasks`), and `maintain-pr`
+refuses it again at runtime. Migration 021 adds the column and the `output`
+kind.
+
+The built-in `explore` workflow runs an `explorer` then a human review whose
+`changes-needed` loops back. The explorer must leave the worktree unchanged,
+like every role whose catalog `changes` is not `code` or `kit`. Earlier outputs
+reach the next run as paths in the context packet.

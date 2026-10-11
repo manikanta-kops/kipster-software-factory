@@ -44,6 +44,7 @@ import {
   type ArtifactInput,
   branchName,
   checkCapabilities,
+  checkScratch,
   parseStepResult,
   type Resolution,
   startAttempt,
@@ -56,6 +57,7 @@ import {
   waitForMerge,
 } from '../domain/lifecycle.ts'
 import { defaultLightsOut } from '../domain/records.ts'
+import type { TokenUsage } from '../domain/usage.ts'
 import type {
   Artifact,
   ArtifactKind,
@@ -315,6 +317,7 @@ export async function createTicketInTransaction(
       `${repository.slug} is ${repository.status}${repository.lastError ? ` (${repository.lastError})` : ''}; tickets can start once it is ready`,
     )
   }
+  checkScratch(workflow, repository)
   if (requireCapabilities) checkCapabilities(workflow, repository)
   const dependencies: Repository[] = []
   for (const slug of input.dependencies ?? []) {
@@ -1943,6 +1946,9 @@ interface AttemptRow {
   head_commit: string | null
   reproduction_attempt_id: number | null
   finished_at: Date | null
+  // bigint arrives as text.
+  input_tokens: string | null
+  output_tokens: string | null
 }
 
 function toAttempt(row: AttemptRow): Attempt {
@@ -1967,6 +1973,8 @@ function toAttempt(row: AttemptRow): Attempt {
     headCommit: row.head_commit,
     reproductionAttemptId: row.reproduction_attempt_id,
     finishedAt: iso(row.finished_at),
+    inputTokens: row.input_tokens === null ? null : Number(row.input_tokens),
+    outputTokens: row.output_tokens === null ? null : Number(row.output_tokens),
   }
 }
 
@@ -2041,4 +2049,37 @@ export async function recordAttemptHeadCommit(
     'UPDATE attempts SET head_commit = $2 WHERE id = $1 AND head_commit IS NULL',
     [attemptId, headCommit],
   )
+}
+
+/** Adds one agent run's tokens to its attempt; an attempt may run several sessions. */
+export async function addAttemptUsage(
+  database: Queryable,
+  attemptId: number,
+  usage: TokenUsage,
+): Promise<void> {
+  await database.query(
+    `UPDATE attempts SET input_tokens = coalesce(input_tokens, 0) + $2,
+       output_tokens = coalesce(output_tokens, 0) + $3 WHERE id = $1`,
+    [attemptId, usage.inputTokens, usage.outputTokens],
+  )
+}
+
+/** The attempts of each lead task's child ticket, by task id. */
+export async function listTaskAttempts(
+  database: Queryable,
+  ticketId: number,
+): Promise<Map<number, Attempt[]>> {
+  const { rows } = await database.query<AttemptRow & { task_id: number }>(
+    `SELECT a.*, k.id AS task_id FROM tasks k
+     JOIN attempts a ON a.ticket_id = k.child_ticket_id
+     WHERE k.ticket_id = $1 ORDER BY a.id`,
+    [ticketId],
+  )
+  const attempts = new Map<number, Attempt[]>()
+  for (const row of rows)
+    attempts.set(row.task_id, [
+      ...(attempts.get(row.task_id) ?? []),
+      toAttempt(row),
+    ])
+  return attempts
 }

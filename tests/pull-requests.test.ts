@@ -10,7 +10,11 @@ import { workflowVersion } from '../src/library/library.ts'
 import { engineConfig } from '../src/config.ts'
 import { run } from '../src/executors/process.ts'
 import type { AgentExecutor } from '../src/executors/cli.ts'
-import { createGitHub, type GitHub } from '../src/github/github.ts'
+import {
+  createGitHub,
+  type GitHub,
+  type PullRequest,
+} from '../src/github/github.ts'
 import type { Checks } from '../src/github/checks.ts'
 import type { PullRequestFeedback } from '../src/github/feedback.ts'
 import {
@@ -38,6 +42,7 @@ import {
   pollPullRequestBase,
   pollPullRequestFeedback,
 } from '../src/engine/pull-requests.ts'
+import { pollMergeWait } from '../src/engine/merge-wait.ts'
 import { startScheduler } from '../src/engine/scheduler.ts'
 import { listenForEvents } from '../src/store/events.ts'
 import { FACTORY_MARKER } from '../src/github/feedback.ts'
@@ -164,6 +169,9 @@ async function fixture(t: TestContext, tester = false, reviewer = false) {
   }
   let checks: Checks = { state: 'pending', failures: [] }
   let feedback: PullRequestFeedback[] = []
+  let pullRequest: Pick<PullRequest, 'state' | 'mergeCommit'> = {
+    state: 'OPEN',
+  }
   const bodies: string[] = []
   const checkedHeads: string[] = []
   const github: GitHub = {
@@ -178,7 +186,7 @@ async function fixture(t: TestContext, tester = false, reviewer = false) {
     async inspect() {
       return {
         url: 'https://github.com/fixture/repo/pull/1',
-        state: 'OPEN',
+        ...pullRequest,
         isDraft: false,
         baseRefName: 'main',
         mergeable: 'MERGEABLE',
@@ -265,6 +273,9 @@ async function fixture(t: TestContext, tester = false, reviewer = false) {
     },
     setFeedback: (value: PullRequestFeedback[]) => {
       feedback = value
+    },
+    setPullRequest: (value: typeof pullRequest) => {
+      pullRequest = value
     },
     async publish() {
       const context = await next()
@@ -439,6 +450,55 @@ test('zero settle window permits no checks on the first snapshot; base advances 
   assert.equal(await run('git', ['rev-parse', 'HEAD^2'], { cwd: f.cwd }), base)
   assert.equal(f.writers(), 2)
   assert.equal((await f.detail()).attempts.at(-2)!.outcome, 'ready')
+})
+
+// Same tree as the ticket change in a new commit, as a squash merge lands it.
+async function writeSquash(f: Awaited<ReturnType<typeof fixture>>) {
+  await writeFile(join(f.source, 'change.txt'), 'ticket change')
+  await run('git', ['add', '.'], { cwd: f.source })
+  await run(
+    'git',
+    [
+      '-c',
+      'user.name=Owner',
+      '-c',
+      'user.email=owner@example.test',
+      'commit',
+      '-m',
+      'Ticket change (#1)',
+    ],
+    { cwd: f.source },
+  )
+  await run('git', ['push', f.bare, 'main'], { cwd: f.source })
+  return run('git', ['rev-parse', 'HEAD'], { cwd: f.source })
+}
+
+test('a pull request merged during the merge wait finishes the ticket instead of syncing the base it advanced', async (t) => {
+  const f = await fixture(t, true)
+  f.setChecks({ state: 'none', failures: [] })
+  await f.publish()
+  await runAttempt(f.options, await f.next(), signal)
+  const [waiting] = await listWaitingForMerge(f.store.database)
+  // The poll read the PR as open; then a squash merge lands a base commit the branch never contains.
+  const squash = await writeSquash(f)
+  f.setPullRequest({ state: 'MERGED', mergeCommit: { oid: squash } })
+  assert.equal(await pollPullRequestBase(f.options, waiting!, signal), false)
+  await pollMergeWait(f.options, waiting!, signal)
+  const done = await f.detail()
+  assert.equal(done.ticket.status, 'done')
+  assert.equal(done.attempts.at(-1)!.outcome, 'merged')
+  assert.equal(f.writers(), 1)
+})
+
+test('maintain-pr publishes nothing when the base already has the branch work', async (t) => {
+  const f = await fixture(t, true)
+  await writeSquash(f)
+  await f.publish()
+  const stopped = await f.detail()
+  assert.equal(stopped.ticket.waiting?.for, 'ask')
+  assert.match(stopped.ticket.waiting!.summary!, /no changes to publish/)
+  assert.equal(f.writers(), 0)
+  assert.equal(f.bodies.length, 0)
 })
 
 test('a reviewed workflow without a tester refreshes stale review after base sync it already published', async (t) => {

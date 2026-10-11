@@ -19,6 +19,7 @@ import {
 import { mkdir, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { AttemptConfig } from '../config.ts'
+import { roles } from '../domain/catalog.ts'
 import { markRepositoryReady } from '../store/repositories.ts'
 import type { Database } from '../store/database.ts'
 import {
@@ -38,6 +39,7 @@ import {
   buildPrompt,
   openSession,
   readResult,
+  recordSessionUsage,
 } from './prompt.ts'
 
 export interface RunnerOptions {
@@ -313,6 +315,7 @@ async function executeAttempt(
       } catch (error) {
         executionError = error
       }
+      await recordSessionUsage(database, attempt.id, selected.cli, log)
       if (executionError instanceof DependencyChangedError) throw executionError
       signal.throwIfAborted()
       let result
@@ -348,16 +351,7 @@ async function executeAttempt(
         throw failure
       }
       if (executionError) throw executionError
-      if (
-        [
-          'planner',
-          'reviewer',
-          'writer',
-          'tester',
-          'reproducer',
-          'lead',
-        ].includes(step.role)
-      ) {
+      if (!['code', 'kit'].includes(roles[step.role].changes)) {
         if (
           (await git(['rev-parse', 'HEAD'])) !== before ||
           (await git(['status', '--porcelain']))

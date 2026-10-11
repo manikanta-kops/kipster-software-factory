@@ -3,6 +3,7 @@ import { copyFile, mkdir, realpath, rm } from 'node:fs/promises'
 import { extname, join, resolve } from 'node:path'
 import type { ArtifactInput } from '../domain/lifecycle.ts'
 import { inspectArtifactFile } from '../api/artifact-files.ts'
+import { retainOutput } from './outputs.ts'
 
 export async function evidenceDirectory(
   home: string,
@@ -31,6 +32,8 @@ export async function retainArtifact(
   artifact: ArtifactInput,
 ): Promise<ArtifactInput> {
   if (!artifact.path) return artifact
+  if (artifact.kind === 'output')
+    return { ...artifact, path: await retainOutput(home, artifact.path) }
   const file = await inspectArtifactFile(home, artifact.path)
   if (!file.ok) throw new Error(`Cannot retain artifact: ${file.reason}`)
   const directory = await evidenceDirectory(home, ticketId)

@@ -7,6 +7,7 @@ import {
 } from '../store/lessons.ts'
 import { evaluateMergeGate } from '../domain/merge-gate.ts'
 import { scenarioIndex } from '../domain/evidence.ts'
+import { ticketUsage } from '../domain/usage.ts'
 import { getMergeGate } from '../store/merge-gates.ts'
 import { setArtifactHome } from '../store/database.ts'
 import { listDecisions, decisionCounts } from '../store/decisions.ts'
@@ -25,6 +26,7 @@ import {
   settingsProblems,
   settingsSchema,
 } from '../domain/settings.ts'
+import { SCRATCH_REPOSITORY } from '../domain/records.ts'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { serveStatic } from '@hono/node-server/serve-static'
@@ -36,7 +38,12 @@ import { DEFAULT_ALLOWED_ORIGINS } from '../config.ts'
 import { FactoryError, WorkflowInUse } from '../domain/errors.ts'
 import { runsOf } from '../domain/lifecycle.ts'
 import { describeRoutes, stepLimit } from '../domain/routing.ts'
-import { type Step, stepContract, type Workflow } from '../domain/workflow.ts'
+import {
+  publishingSteps,
+  type Step,
+  stepContract,
+  type Workflow,
+} from '../domain/workflow.ts'
 import { type LibraryEntry, parseUpload } from '../library/library.ts'
 import type { Database } from '../store/database.ts'
 import type { EventSignal } from '../store/events.ts'
@@ -53,10 +60,13 @@ import {
   decideOption,
   getArtifact,
   getTicketDetail,
+  listTaskAttempts,
   listTickets,
   resolveAsk,
 } from '../store/tickets.ts'
 import { openArtifactFile, inspectArtifactFile } from './artifact-files.ts'
+import { OUTPUT_HEADERS, openOutput } from './output-files.ts'
+import { outputUrl } from '../artifacts/outputs.ts'
 import type {
   LessonResponse,
   LessonsResponse,
@@ -155,6 +165,16 @@ export function createApp({
     }),
   )
 
+  // A JSON content type makes a cross-site browser ask permission before posting.
+  app.post('/api/*', async (c, next) => {
+    if (!c.req.header('Content-Type')?.startsWith('application/json'))
+      throw new FactoryError(
+        'invalid',
+        'Send JSON with Content-Type: application/json',
+      )
+    await next()
+  })
+
   app.get('/api/lessons', async (c) => {
     const repository = c.req.query('repository')
     const status = c.req.query('status')
@@ -211,9 +231,6 @@ export function createApp({
   )
 
   app.post('/api/workflows', async (c) => {
-    // A JSON content type makes cross-site browsers ask permission first.
-    if (!c.req.header('Content-Type')?.startsWith('application/json'))
-      throw new FactoryError('invalid', 'Send the workflow as JSON')
     const input = await body(c, uploadWorkflowRequest)
     const result = parseUpload(input.source)
     if (!result.ok)
@@ -266,8 +283,6 @@ export function createApp({
   )
 
   app.post('/api/settings', async (c) => {
-    if (!c.req.header('Content-Type')?.startsWith('application/json'))
-      throw new FactoryError('invalid', 'Send the settings as JSON')
     const input = await body(c, settingsSchema)
     const problems = settingsProblems(input, await settingsWorkflows()).filter(
       (problem) => !problem.includes(': warning: '),
@@ -280,7 +295,9 @@ export function createApp({
 
   app.get('/api/repositories', async (c) =>
     c.json<RepositoriesResponse>({
-      repositories: await listRepositories(database),
+      repositories: (await listRepositories(database)).filter(
+        (repository) => !repository.scratch,
+      ),
     }),
   )
 
@@ -353,7 +370,7 @@ export function createApp({
     }
     const ticket = await createTicket(database, {
       ...(input.agents === undefined ? {} : { agents: input.agents }),
-      repository: input.repository,
+      repository: input.repository ?? SCRATCH_REPOSITORY,
       ...(input.lightsOut === undefined ? {} : { lightsOut: input.lightsOut }),
       ...(input.dependencies === undefined
         ? {}
@@ -461,6 +478,38 @@ export function createApp({
 
   app.all('/api/*', (c) => c.json<ErrorResponse>({ error: 'Not found' }, 404))
 
+  app.get('/files/:id{[0-9a-f-]{36}}/*', async (c) => {
+    const output = await openOutput(
+      home,
+      c.req.param('id'),
+      new URL(c.req.url).pathname,
+      c.req.header('If-Range') ? undefined : c.req.header('Range'),
+    )
+    for (const [name, value] of Object.entries(OUTPUT_HEADERS))
+      c.header(name, value)
+    switch (output.kind) {
+      case 'missing':
+        return c.text('Not found', 404)
+      case 'redirect':
+        return c.redirect(output.location, 301)
+      case 'listing':
+        return c.html(output.html)
+      case 'file':
+        return c.body(output.body ?? '', output.status, {
+          'Content-Type': output.type,
+          'Content-Length': String(output.size),
+          'Accept-Ranges': 'bytes',
+          ...(output.contentRange
+            ? { 'Content-Range': output.contentRange }
+            : {}),
+        })
+    }
+  })
+  app.get('/files/:id{[0-9a-f-]{36}}', (c) =>
+    c.redirect(`/files/${c.req.param('id')}/`, 301),
+  )
+  app.all('/files/*', (c) => c.text('Not found', 404))
+
   // Keep ticket links already published in PR descriptions usable.
   app.get('/tickets/:number{[0-9]+}', (c) =>
     c.redirect(`/#/tickets/${c.req.param('number')}`),
@@ -529,9 +578,16 @@ export function createApp({
         })),
       },
       attempts,
+      usage: ticketUsage(
+        attempts,
+        detail.tasks,
+        await listTaskAttempts(database, detail.ticket.id),
+      ),
       decisions: await listDecisions(database, detail.ticket.id),
       artifacts: await Promise.all(
         detail.artifacts.map(async (artifact) => {
+          if (artifact.kind === 'output')
+            return { ...artifact, url: outputUrl(artifact.path!) }
           if (!artifact.path || artifact.prunedAt) return artifact
           const file = await inspectArtifactFile(home, artifact.path)
           return file.ok ? { ...artifact, mediaType: file.type } : artifact
@@ -592,6 +648,7 @@ function summarizeWorkflow({
     description: workflow.description,
     steps: workflow.steps.map((step) => summarize(workflow, step)),
     origin: uploaded ? 'upload' : 'file',
+    publishes: publishingSteps(workflow).length > 0,
     selectable:
       Boolean(uploaded) || !LEAD_ONLY_WORKFLOWS.includes(workflow.name),
   }

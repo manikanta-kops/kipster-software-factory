@@ -26,6 +26,7 @@ import {
 import { firstStep, type Next, nextStep, stepLimit } from './routing.ts'
 import {
   missingCapabilities,
+  publishingSteps,
   routeKeys,
   type Step,
   type Workflow,
@@ -46,7 +47,7 @@ export interface ArtifactInput {
   readonly title: string
   /** Markdown. Non-decision artifacts give exactly one of content and path. */
   readonly content?: string | undefined
-  /** A file inside the factory home, absolute or relative to it. */
+  /** A file inside the factory home, absolute or relative to it; outputs may name a folder. */
   readonly path?: string | undefined
 }
 
@@ -106,6 +107,9 @@ const contentArtifactSchema = z
       (artifact.content === undefined) !== (artifact.path === undefined),
     { message: 'give either content or path' },
   )
+  .refine((artifact) => artifact.kind !== 'output' || artifact.path, {
+    message: 'an output gives the path of a file or folder',
+  })
 
 export const artifactInputSchema = z.discriminatedUnion('kind', [
   contentArtifactSchema,
@@ -664,6 +668,19 @@ export function stepOf(workflow: Workflow, stepId: string): Step {
     )
   }
   return step
+}
+
+/** The scratch repository has nowhere to publish, so its tickets cannot push, open pull requests or merge. */
+export function checkScratch(
+  workflow: Workflow,
+  repository: { readonly scratch?: boolean },
+): void {
+  const steps = publishingSteps(workflow)
+  if (!repository.scratch || steps.length === 0) return
+  throw new FactoryError(
+    'invalid',
+    `Workflow "${workflow.name}" opens a pull request (${steps.join(', ')}), so it needs a repository. Choose a repository, or a workflow such as explore.`,
+  )
 }
 
 /** Rejects a workflow whose steps need capabilities the repository does not provide. */

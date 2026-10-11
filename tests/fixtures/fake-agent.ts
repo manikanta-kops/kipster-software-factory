@@ -28,6 +28,8 @@ const script = JSON.parse(await readFile(scriptFile, 'utf8')) as Record<
     crash?: boolean
     noEvidence?: boolean
     proseOnly?: boolean
+    /** Printed as the agent's JSON event stream. */
+    stream?: string
   }[]
 >
 const counter = join(stateRoot, `${role}.count`)
@@ -38,6 +40,7 @@ try {
 await writeFile(counter, String(count + 1))
 const instruction = script[role]?.[count] ?? script[role]?.at(-1) ?? {}
 console.log(`fake ${role} run ${count + 1}`)
+if (instruction.stream) process.stdout.write(instruction.stream)
 await writeFile(join(directory, 'pid'), String(process.pid))
 if (instruction.descendant) {
   const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], {

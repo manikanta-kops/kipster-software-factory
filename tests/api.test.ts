@@ -187,6 +187,42 @@ describe('cors', () => {
       /POST/,
     )
   })
+
+  test('rejects posts that are not JSON, which browsers send cross-site without asking', async () => {
+    await readyRepository('acme/csrf')
+    const { tickets: existing } = await json<TicketsResponse>(
+      await app.request('/api/tickets'),
+      200,
+    )
+    for (const headers of [
+      { 'Content-Type': 'text/plain' },
+      { 'Content-Type': 'application/x-www-form-urlencoded' },
+      {},
+    ]) {
+      const { error } = await json<ErrorResponse>(
+        await app.request('/api/tickets', {
+          method: 'POST',
+          headers: { Origin: 'https://evil.example', ...headers },
+          body: JSON.stringify({
+            repository: 'acme/csrf',
+            workflow: 'planned-change',
+            title: 'Forged',
+          }),
+        }),
+        400,
+      )
+      assert.equal(error, 'Send JSON with Content-Type: application/json')
+    }
+    const empty = await app.request('/api/repositories/1/retry', {
+      method: 'POST',
+    })
+    assert.equal(empty.status, 400)
+    const { tickets: remaining } = await json<TicketsResponse>(
+      await app.request('/api/tickets'),
+      200,
+    )
+    assert.equal(remaining.length, existing.length)
+  })
 })
 
 describe('repositories', () => {
@@ -534,6 +570,7 @@ describe('cancel', () => {
       `/api/tickets/${created.number}/cancel`,
       {
         method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
       },
     )
     const cancelled = await json<TicketResponse>(response, 200)

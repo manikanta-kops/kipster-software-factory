@@ -104,6 +104,11 @@ existing view. Resumed tickets hide their last parked report. Summary events ref
 views. The appearance suite covers these reports at 390px and 1280px in both
 themes, including the details control.
 
+A collapsed Usage section on the ticket page totals input/output tokens and time
+over finished step runs (`Usage · ↑1.2M ↓180k · 1h 12m`). Expanded, it lists each
+run with its round, agent, outcome, compact tokens (a dash when none were
+reported) and duration; a lead adds one row per task linking to its ticket.
+
 Today's compact Lessons group lists proposed repository and engine mistakes
 with Accept and Reject controls. Repository filters narrow repository lessons;
 engine lessons remain visible and workflow filters do not filter lessons.

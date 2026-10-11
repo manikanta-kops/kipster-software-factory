@@ -7,6 +7,7 @@ interface FactoryFixture {
   legacyTicket: number | null
   artifactTicket: number | null
   decisionTicket: number | null
+  exploreTicket: number | null
   linkedTickets: { original: number; linked: number } | null
   taskTickets: { lead: number; child: number } | null
 }
@@ -16,16 +17,20 @@ export const test = base.extend<{
   withAutoMerge: boolean
   withLinks: boolean
   withTasks: boolean
+  withUsage: boolean
   withLegacy: boolean
   withArtifacts: boolean
   withDecisions: boolean
+  withExplore: boolean
   verdict: 'changes-needed' | 'unobserved' | 'default'
 }>({
   withLessons: [false, { option: true }],
   withAutoMerge: [false, { option: true }],
   withLinks: [false, { option: true }],
   withTasks: [false, { option: true }],
+  withUsage: [false, { option: true }],
   withDecisions: [false, { option: true }],
+  withExplore: [false, { option: true }],
   withLegacy: [false, { option: true }],
   withArtifacts: [false, { option: true }],
   verdict: ['default', { option: true }],
@@ -37,14 +42,16 @@ export const test = base.extend<{
       withLegacy,
       verdict,
       withDecisions,
+      withExplore,
       withAutoMerge,
       withLinks,
       withTasks,
+      withUsage,
     },
     runTest,
   ) => {
     const response = await request.post(
-      `/__test/fixtures?lessons=${withLessons}&legacy=${withLegacy}&artifacts=${withArtifacts}&decisions=${withDecisions}&verdict=${verdict}&autoMerge=${withAutoMerge}&links=${withLinks}&tasks=${withTasks}`,
+      `/__test/fixtures?lessons=${withLessons}&legacy=${withLegacy}&artifacts=${withArtifacts}&decisions=${withDecisions}&verdict=${verdict}&autoMerge=${withAutoMerge}&links=${withLinks}&tasks=${withTasks}&usage=${withUsage}&explore=${withExplore}`,
     )
     expect(response.ok()).toBeTruthy()
     const fixture = (await response.json()) as FactoryFixture
