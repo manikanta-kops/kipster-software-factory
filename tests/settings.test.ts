@@ -237,7 +237,10 @@ describe('settings store and API', () => {
     }
     const text = await post(JSON.stringify(fromConfig), 'text/plain')
     assert.equal(text.status, 400)
-    assert.match(((await text.json()) as ErrorResponse).error, /as JSON/)
+    assert.match(
+      ((await text.json()) as ErrorResponse).error,
+      /Content-Type: application\/json/,
+    )
     const unchanged = await get()
     assert.equal(unchanged.source, 'config')
     assert.deepEqual(unchanged.settings, fromConfig)

@@ -98,7 +98,7 @@ test('retired workflow tickets survive startup, serve history, route stored step
     workflows
       .filter((workflow) => workflow.selectable)
       .map((workflow) => workflow.name),
-    ['bug', 'lead', 'onboard-repo'],
+    ['bug', 'explore', 'lead', 'onboard-repo'],
   )
   assert.deepEqual(
     workflows

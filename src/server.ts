@@ -15,6 +15,8 @@ import {
   loadLibrary,
 } from './library/library.ts'
 import { openDatabase } from './store/database.ts'
+import { registerScratchRepository } from './store/repositories.ts'
+import { createScratchGit } from './workspace/scratch.ts'
 import { listenForEvents } from './store/events.ts'
 import { migrate } from './store/migrate.ts'
 import { startScheduler } from './engine/scheduler.ts'
@@ -68,6 +70,10 @@ export async function startFactory(
         'Engine settings come from the factory database; config.json concurrency, stepTimeoutMinutes and agents are ignored.',
       )
     await recordWorkflowVersions(database, loaded.library)
+    await registerScratchRepository(
+      database,
+      await createScratchGit(options.home ?? defaultHome()),
+    )
     for (const warning of addUploads(
       loaded.library,
       await listUploadedWorkflows(database),

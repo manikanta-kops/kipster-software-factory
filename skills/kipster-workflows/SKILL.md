@@ -95,6 +95,7 @@ Any other key is an error. Step ids `finish`, `cancel` and `ask` are reserved.
 | `writer`     | Writes the pull request description.                                       | `done`                           |
 | `onboarder`  | Writes a repository's `.kipster` kit.                                      | `done`                           |
 | `lead`       | Splits the ticket into tasks run as child tickets; decides from reports.   | `done`, `delegate`, `plan-ready` |
+| `explorer`   | Makes designs, prototypes or research as outputs to open in the browser.   | `done`                           |
 
 Role notes:
 
@@ -135,6 +136,11 @@ Role notes:
   publishes.
 - Use `onboarder` only in a workflow that writes the kit, followed by
   `verify-kit`.
+- An `explorer` never changes the repository checkout; a change fails the step
+  for the owner to inspect. It reports `output` artifacts: a file, or a folder
+  that opens at its `index.html`. Follow it with a human step whose
+  `changes-needed` routes back to it. The next run receives earlier outputs
+  and the owner's comments.
 - Kit setup and check run in disposable exact-commit checkouts with fetched
   remote-tracking base refs (for example `origin/next`) and no configured remote.
   Repository gates can compare changesets, migrations and protocol shapes with
@@ -361,8 +367,9 @@ explicitly says otherwise, and then say which rule you broke and why.
 
 ## Built-in workflows
 
-New ticket offers `bug`, `lead` and `onboard-repo`, plus uploaded workflows.
-`lead` covers features and small changes. `task` and `task-pr` remain built-ins
+New ticket offers `bug`, `explore`, `lead` and `onboard-repo`, plus uploaded
+workflows. `lead` covers features and small changes. `explore` makes things to
+look at, such as designs or research, and never opens a pull request. `task` and `task-pr` remain built-ins
 for child tickets delegated by leads; New ticket hides them.
 Use these as patterns. Prefer adapting one over starting from nothing.
 
@@ -541,6 +548,23 @@ steps:
 `onboard-repo` is write-kit (onboarder), verify-kit (limit 3,
 `failed` back to write-kit), approve-kit, maintain-pr (limit 3), merge.
 
+`explore`: an explorer makes outputs, then the owner reviews them. Approving
+finishes the ticket; `changes-needed` sends the comments back to the explorer.
+
+```yaml
+name: explore
+description: Designs, prototypes or research you open in the browser, then review. Needs no repository and never opens a pull request.
+steps:
+  - id: explore
+    kind: agent
+    role: explorer
+
+  - id: review
+    kind: human
+    routes:
+      changes-needed: explore
+```
+
 An example that branches with `decide`: the planner writes a plan, then the
 decision model chooses whether the owner must approve it.
 
@@ -621,7 +645,7 @@ past `approve-plan` explicitly.
   unfinished lead has a task naming it; the refusal lists those ticket numbers.
   Done and cancelled tickets keep their copy. Upload it again to add it back.
 - **Files:** a workflow file in the factory's workflow directory loads at
-  startup. The built-in `bug`, `lead`, `onboard-repo`,
+  startup. The built-in `bug`, `explore`, `lead`, `onboard-repo`,
   `task` and `task-pr` are files, so uploads cannot reuse those names.
 
 ## Versions
@@ -785,6 +809,25 @@ it when planning or when stuck.` Lesson text is not inserted into the prompt.
 With no accepted lessons there is no file or pointer. Owner decisions affect the
 next invocation; existing prompts keep their snapshot. Retire lessons once a
 check prevents the mistake.
+
+## Tickets without a repository
+
+A ticket created without a repository runs in the factory's local scratch
+repository: an empty folder per ticket, with no kit and nowhere to publish.
+Ticket creation rejects a workflow on it that contains `maintain-pr`, `merge`
+or `run-tasks`, or that needs a capability. Read-only dependencies still work,
+so an explorer can study a registered repository without one as the target.
+
+## Outputs
+
+An `output` artifact is something the owner opens in the browser. Its `path`
+is a file or a folder inside the factory home, made only of real files and
+folders (no links), at most 500 MB. The factory copies it and serves it from
+its own address at `/files/<random id>/`; a folder opens at `index.html` or as
+a file list. Pages are sandboxed: HTML, CSS, images, fonts and scripts load,
+including https fonts and libraries, but pages cannot fetch or submit data.
+Outputs are kept; evidence retention does not remove them. A role other than
+`explorer` may also report outputs.
 
 ## Partial results and evidence
 

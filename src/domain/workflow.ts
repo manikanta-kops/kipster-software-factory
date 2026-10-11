@@ -282,6 +282,13 @@ function message(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
 }
 
+/** Steps whose action pushes, opens a pull request or merges. */
+export function publishingSteps(workflow: Workflow): readonly string[] {
+  return workflow.steps
+    .filter((step) => step.kind === 'system' && actions[step.action].publishes)
+    .map((step) => step.id)
+}
+
 /** Capabilities the workflow's steps need that `provided` lacks, with the steps that need each. */
 export function missingCapabilities(
   workflow: Workflow,

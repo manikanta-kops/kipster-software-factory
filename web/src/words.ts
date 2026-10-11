@@ -1,7 +1,9 @@
 import type { StepSummary, Ticket } from '../../src/api/contract.ts'
+import { SCRATCH_REPOSITORY } from '../../src/domain/records.ts'
 
 /** `owner/name` → `name`. */
 export function repositoryName(slug: string) {
+  if (slug === SCRATCH_REPOSITORY) return 'No repository'
   return slug.split('/')[1] ?? slug
 }
 

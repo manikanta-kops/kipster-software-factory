@@ -12,6 +12,7 @@ import {
 import { readUsage } from '../executors/usage.ts'
 import type { AgentConfig } from '../config.ts'
 import { newEvidenceFile } from '../artifacts/storage.ts'
+import { checkOutput } from '../artifacts/outputs.ts'
 import type { AgentStep } from '../domain/workflow.ts'
 import { parseStepResult, type StepResult } from '../domain/lifecycle.ts'
 import { CONTEXT_INDEX_PATH, type TrustedInstructions } from '../kit/kit.ts'
@@ -70,6 +71,14 @@ export async function buildPrompt(input: {
           (await readFile(await artifactPath(home, artifact.path!), 'utf8')),
       })),
   )
+  const outputs = detail.artifacts
+    .filter((artifact) => artifact.kind === 'output')
+    .map((artifact) => ({
+      title: artifact.title,
+      step: artifact.stepId,
+      attempt: artifact.attemptId,
+      path: artifact.path,
+    }))
   const lessons = input.database
     ? await acceptedLessons(input.database, detail.ticket.repository.id)
     : []
@@ -185,6 +194,7 @@ export async function buildPrompt(input: {
         headCommit: input.headCommit ?? null,
         planApproved: Boolean(approval),
         artifacts,
+        ...(outputs.length ? { outputs } : {}),
         earlierSteps: detail.attempts
           .filter((a) => a.summary)
           .map((a) => ({
@@ -240,7 +250,7 @@ export async function buildPrompt(input: {
           `Previous result validation failed:\n${JSON.stringify(input.resultValidationError.slice(0, 4000))}\nThis is the one fresh retry. Correct the result contract and perform this role again using the current context. For proof, use only the newly supplied instances and evidence directories; earlier evidence does not prove this run.`,
         ]
       : []),
-    `Write ${resolve(directory, 'result.json')} before exiting. This file is outside the repository; do not commit it. Required JSON: {"outcome":"...","summary":"nonempty summary","artifacts":[]}. Allowed outcomes: ${[...roles[step.role].outcomes, 'needs-decision'].join(', ')}. Evidence artifacts may include an optional scenario label matching the acceptance scenario in the plan; label key screenshots or recordings with it and optionally scenarioResult (passed, failed, unverified or reproduced). A decision artifact is {"kind":"decision","title":"...","chose":"...","alternative":"...","reason":"..."}, with a nonempty title of at most 200 characters, nonempty choice strings of at most 10000 characters each, and no content or path. Other artifacts have kind (plan, comment, finding, evidence, log, note), a nonempty title of at most 200 characters, and exactly one of content (Markdown) or path (an existing file inside ${home}). Findings may add file (a repository-relative path). Prefer content for plans and findings. Put file evidence in ${input.proof ? 'the instance evidenceDir from the verification context' : directory}. Chat output never decides routing.`,
+    `Write ${resolve(directory, 'result.json')} before exiting. This file is outside the repository; do not commit it. Required JSON: {"outcome":"...","summary":"nonempty summary","artifacts":[]}. Allowed outcomes: ${[...roles[step.role].outcomes, 'needs-decision'].join(', ')}. Evidence artifacts may include an optional scenario label matching the acceptance scenario in the plan; label key screenshots or recordings with it and optionally scenarioResult (passed, failed, unverified or reproduced). A decision artifact is {"kind":"decision","title":"...","chose":"...","alternative":"...","reason":"..."}, with a nonempty title of at most 200 characters, nonempty choice strings of at most 10000 characters each, and no content or path. Other artifacts have kind (plan, comment, finding, evidence, log, note, output), a nonempty title of at most 200 characters, and exactly one of content (Markdown) or path (an existing file inside ${home}). An output delivers something the owner opens in the browser: its path is a file or a folder inside ${home}, with no links and at most 500 MB; a folder opens at its index.html or as a file list. Findings may add file (a repository-relative path). Prefer content for plans and findings. Put file evidence in ${input.proof ? 'the instance evidenceDir from the verification context' : directory}. Chat output never decides routing.`,
   ]
     .filter(Boolean)
     .join('\n\n')
@@ -334,7 +344,8 @@ export async function readResult(
   )
     throw new Error('plan-ready must include a plan artifact')
   for (const artifact of result.artifacts)
-    if (artifact.path) await artifactPath(home, artifact.path)
+    if (artifact.kind === 'output') await checkOutput(home, artifact.path!)
+    else if (artifact.path) await artifactPath(home, artifact.path)
   return result
 }
 

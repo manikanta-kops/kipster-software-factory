@@ -26,7 +26,7 @@ export const createRepositoryRequest = z.strictObject({
 export const createTicketRequest = z.strictObject({
   agents: ticketAgentsSchema.optional(),
   lightsOut: z.boolean().optional(),
-  repository: text.min(1),
+  repository: text.min(1).optional(),
   dependencies: z
     .array(text.regex(REPOSITORY_SLUG, 'use owner/name'))
     .max(50)
