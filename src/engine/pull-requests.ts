@@ -89,6 +89,8 @@ export async function maintainPullRequest(
 ) {
   const { database, github } = options
   const { ticket, repository, attempt } = context
+  if (repository.scratch)
+    throw new Error('The scratch repository never publishes a pull request')
   const git = (args: string[]) => run('git', args, { cwd, signal })
   if (await git(['status', '--porcelain']))
     throw new Error('Cannot sync a dirty ticket worktree')

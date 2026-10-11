@@ -128,7 +128,9 @@ test('lesson decisions in another client update Today live', async ({
   )
   expect(
     (
-      await request.post(`${factory.url}/api/lessons/${proposed.id}/accept`)
+      await request.post(`${factory.url}/api/lessons/${proposed.id}/accept`, {
+        data: {},
+      })
     ).ok(),
   ).toBeTruthy()
   await expect(target).toHaveCount(0)

@@ -33,6 +33,7 @@ describe('loadLibrary', () => {
     if (!result.ok) assert.fail(result.errors.join('\n'))
     assert.deepEqual([...result.library.keys()].sort(), [
       'bug',
+      'explore',
       'lead',
       'onboard-repo',
       'task',

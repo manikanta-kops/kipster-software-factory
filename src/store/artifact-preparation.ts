@@ -3,6 +3,11 @@ import { isAbsolute, resolve } from 'node:path'
 import { FactoryError } from '../domain/errors.ts'
 import { retainArtifact } from '../artifacts/storage.ts'
 import { detectMediaType } from '../artifacts/media-type.ts'
+import {
+  isRetainedOutput,
+  removeOutput,
+  retainedOutputType,
+} from '../artifacts/outputs.ts'
 import type { ArtifactInput } from '../domain/lifecycle.ts'
 import { artifactHome, type Database } from './database.ts'
 export type PreparedArtifact = ArtifactInput & { readonly mediaType?: string }
@@ -43,7 +48,9 @@ export async function withPreparedArtifacts<T>(
           artifact.content !== undefined
             ? 'text/markdown'
             : 'application/octet-stream'
-        if (artifact.path && isAbsolute(artifact.path)) {
+        if (artifact.kind === 'output')
+          mediaType = retainedOutputType(artifact.path!)
+        else if (artifact.path && isAbsolute(artifact.path)) {
           try {
             mediaType = await detectMediaType(artifact.path)
           } catch (error) {
@@ -54,7 +61,7 @@ export async function withPreparedArtifacts<T>(
       } catch (error) {
         if (!input.path) throw error
         if (copy) {
-          await rm(copy, { force: true })
+          await remove(copy)
           copies.splice(copies.indexOf(copy), 1)
         }
         prepared.push({
@@ -83,7 +90,11 @@ export async function withPreparedArtifacts<T>(
         throw error
       }
     }
-    await Promise.all(removable.map((path) => rm(path, { force: true })))
+    await Promise.all(removable.map(remove))
     throw error
   }
+}
+
+function remove(path: string) {
+  return isRetainedOutput(path) ? removeOutput(path) : rm(path, { force: true })
 }

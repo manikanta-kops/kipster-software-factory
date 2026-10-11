@@ -44,6 +44,7 @@ import {
   type ArtifactInput,
   branchName,
   checkCapabilities,
+  checkScratch,
   parseStepResult,
   type Resolution,
   startAttempt,
@@ -316,6 +317,7 @@ export async function createTicketInTransaction(
       `${repository.slug} is ${repository.status}${repository.lastError ? ` (${repository.lastError})` : ''}; tickets can start once it is ready`,
     )
   }
+  checkScratch(workflow, repository)
   if (requireCapabilities) checkCapabilities(workflow, repository)
   const dependencies: Repository[] = []
   for (const slug of input.dependencies ?? []) {

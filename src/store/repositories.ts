@@ -1,8 +1,9 @@
 import { FactoryError } from '../domain/errors.ts'
-import type {
-  Repository,
-  RepositoryStatus,
-  RepositoryKit,
+import {
+  SCRATCH_REPOSITORY,
+  type Repository,
+  type RepositoryStatus,
+  type RepositoryKit,
 } from '../domain/records.ts'
 import { type Database, type Queryable, transaction } from './database.ts'
 import { recordEvents } from './events.ts'
@@ -19,6 +20,7 @@ export interface NewRepository {
 interface RepositoryRow {
   id: number
   auto_merge: boolean
+  scratch: boolean
   slug: string
   clone_url: string
   default_branch: string
@@ -35,6 +37,7 @@ function toRepository(row: RepositoryRow): Repository {
   return {
     id: row.id,
     autoMerge: row.auto_merge,
+    scratch: row.scratch,
     slug: row.slug,
     cloneUrl: row.clone_url,
     defaultBranch: row.default_branch,
@@ -83,6 +86,30 @@ export async function createRepository(
       },
     ])
     return toRepository(row)
+  })
+}
+
+/** Registers the factory's local scratch repository once; the engine clones it like any other. */
+export async function registerScratchRepository(
+  database: Database,
+  cloneUrl: string,
+): Promise<void> {
+  await transaction(database, async (connection) => {
+    const { rows } = await connection.query<RepositoryRow>(
+      `INSERT INTO repositories (slug, clone_url, default_branch, scratch)
+       VALUES ($1, $2, 'main', true)
+       ON CONFLICT DO NOTHING
+       RETURNING *`,
+      [SCRATCH_REPOSITORY, cloneUrl],
+    )
+    if (rows[0])
+      await recordEvents(connection, [
+        {
+          ticketId: null,
+          kind: 'repository.created',
+          data: { repositoryId: rows[0].id, slug: rows[0].slug },
+        },
+      ])
   })
 }
 

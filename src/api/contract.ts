@@ -81,6 +81,8 @@ export interface WorkflowSummary {
   readonly version: string
   readonly description: string
   readonly steps: readonly StepSummary[]
+  /** Whether a step pushes, opens a pull request or merges; such workflows need a repository. */
+  readonly publishes?: boolean
   /** `file` workflows load from the factory's workflow directory; `upload` ones were added through the API. */
   readonly origin: 'file' | 'upload'
 }
@@ -158,8 +160,8 @@ export interface CreateTicketRequest {
   readonly agents?: TicketAgents | undefined
   /** Defaults on for lead and program-lead, off for other workflows. */
   readonly lightsOut?: boolean | undefined
-  /** The repository's `owner/name`. */
-  readonly repository: string
+  /** The repository's `owner/name`; omit it for a ticket without a repository, which runs in the factory's scratch repository. */
+  readonly repository?: string | undefined
   /** Other registered repositories available as read-only context. */
   readonly dependencies?: readonly string[] | undefined
   /** A workflow name; the ticket keeps the library's current version of it. */

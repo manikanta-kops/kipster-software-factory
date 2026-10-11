@@ -3643,3 +3643,24 @@ main > section.settings-page {
   border-bottom: 0;
   border-top: 1px solid var(--hair);
 }
+
+/* ───────── outputs ───────── */
+.output-list {
+  margin: 0 0 8px;
+  padding: 0;
+  list-style: none;
+}
+.output-list li {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--hair);
+}
+.output-list li:last-child {
+  border-bottom: 0;
+}
+.output-list a {
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}

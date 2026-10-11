@@ -244,6 +244,7 @@ test('PostgreSQL completion proposes without blocking; API acceptance reaches th
   })
   const response = await app.request(`/api/lessons/${proposal!.id}/accept`, {
     method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
   })
   assert.equal(response.status, 200)
   assert.equal(
@@ -259,12 +260,21 @@ test('PostgreSQL completion proposes without blocking; API acceptance reaches th
   )
   assert.equal((await app.request('/api/lessons?status=wrong')).status, 400)
   assert.equal(
-    (await app.request('/api/lessons/no/accept', { method: 'POST' })).status,
+    (
+      await app.request('/api/lessons/no/accept', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      })
+    ).status,
     400,
   )
   assert.equal(
-    (await app.request('/api/lessons/999999/accept', { method: 'POST' }))
-      .status,
+    (
+      await app.request('/api/lessons/999999/accept', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      })
+    ).status,
     404,
   )
   const next = await createTicket(db, {
@@ -320,6 +330,7 @@ test('PostgreSQL completion proposes without blocking; API acceptance reaches th
     (
       await app.request(`/api/lessons/${proposal!.id}/accept`, {
         method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
       })
     ).status,
     409,

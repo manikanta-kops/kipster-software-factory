@@ -114,7 +114,7 @@ export async function adoptEvidence(
     path: string
   }>(
     `SELECT a.id, a.ticket_id, a.kind, a.title, a.path FROM artifacts a JOIN attempts at ON at.id = a.attempt_id
-     WHERE a.path IS NOT NULL AND a.pruned_at IS NULL AND at.status IN ('finished', 'failed', 'interrupted')
+     WHERE a.path IS NOT NULL AND a.pruned_at IS NULL AND a.kind <> 'output' AND at.status IN ('finished', 'failed', 'interrupted')
        AND left(a.path, length($1)) <> $1 ORDER BY a.id LIMIT $2`,
     // Retained paths are stored resolved; a relative or trailing-slash home must still match them.
     [`${resolve(home)}/evidence/`, limit],

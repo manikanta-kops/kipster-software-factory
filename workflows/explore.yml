@@ -1,0 +1,11 @@
+name: explore
+description: Designs, prototypes or research you open in the browser, then review. Needs no repository and never opens a pull request.
+steps:
+  - id: explore
+    kind: agent
+    role: explorer
+
+  - id: review
+    kind: human
+    routes:
+      changes-needed: explore

@@ -35,6 +35,7 @@ import {
 } from '../components/Shared.tsx'
 import { repositoriesQuery, ticketQuery } from '../queries.ts'
 import { ArtifactView } from '../components/ArtifactView.tsx'
+import { Outputs } from '../components/Outputs.tsx'
 import { isMedia, MediaGallery, MediaLibrary } from '../components/Media.tsx'
 import { RepositoryTag } from '../components/Filters.tsx'
 import { Icon, stepHue, stepIcon } from '../components/Icon.tsx'
@@ -124,6 +125,7 @@ export function TicketPage({
           />
         )}
       <div className="ticket-primary" id="ticket-details" tabIndex={-1}>
+        <Outputs detail={query.data} />
         {awaitingAction ? (
           <ActionPanel key={ticket.waiting!.attemptId} detail={query.data} />
         ) : (
@@ -289,27 +291,32 @@ function Details({ detail }: { detail: TicketResponse }) {
     ticket.pullRequestUrl && /^https?:\/\//i.test(ticket.pullRequestUrl)
       ? ticket.pullRequestUrl
       : null
+  const publishes = detail.workflow.steps.some(
+    (step) => step.does === 'maintain-pr',
+  )
   return (
     <section className="side-card" aria-label="Details">
       <h2 className="section-title">Details</h2>
       <dl className="details-list">
-        <div>
-          <dt>Pull request</dt>
-          <dd>
-            {pullRequest ? (
-              <a
-                className="text-link"
-                href={pullRequest}
-                target="_blank"
-                rel="noreferrer"
-              >
-                #{/\/pull\/(\d+)/.exec(pullRequest)?.[1] ?? 'Open'} ↗
-              </a>
-            ) : (
-              <span className="muted">Not opened yet</span>
-            )}
-          </dd>
-        </div>
+        {(pullRequest || publishes) && (
+          <div>
+            <dt>Pull request</dt>
+            <dd>
+              {pullRequest ? (
+                <a
+                  className="text-link"
+                  href={pullRequest}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  #{/\/pull\/(\d+)/.exec(pullRequest)?.[1] ?? 'Open'} ↗
+                </a>
+              ) : (
+                <span className="muted">Not opened yet</span>
+              )}
+            </dd>
+          </div>
+        )}
         <div>
           <dt>Repository</dt>
           <dd>

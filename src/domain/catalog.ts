@@ -14,6 +14,8 @@ export interface Role extends StepContract {
 
 export interface Action {
   readonly summary: string
+  /** Pushes, opens pull requests or merges, so it needs a real repository. */
+  readonly publishes: boolean
   readonly params: z.ZodType
   readonly contract: (params: unknown) => StepContract
 }
@@ -86,6 +88,13 @@ export const roles = {
     changes: 'nothing',
     success: 'done',
     outcomes: ['done', 'delegate', 'plan-ready'],
+  },
+  explorer: {
+    summary:
+      'Makes designs, prototypes or research as files to open in the browser, without changing the repository.',
+    changes: 'nothing',
+    success: 'done',
+    outcomes: ['done'],
   },
 } as const satisfies Record<string, Role>
 
@@ -186,12 +195,14 @@ function fixed(success: string, outcomes: readonly string[]) {
 
 export const actions = {
   'verify-kit': {
+    publishes: false,
     summary:
       'Proves the committed kit with setup, check and an isolated running instance.',
     params: noParams,
     contract: fixed('passed', ['passed', 'failed']),
   },
   decide: {
+    publishes: false,
     summary:
       'Asks the decision model a typed question and routes on its answer and confidence.',
     params: decideParams,
@@ -202,6 +213,7 @@ export const actions = {
     }),
   },
   'maintain-pr': {
+    publishes: true,
     summary:
       'Keeps the pull request mergeable: syncs with base, waits for CI and refreshes the description.',
     params: z.strictObject({
@@ -216,12 +228,14 @@ export const actions = {
     }),
   },
   merge: {
+    publishes: true,
     summary:
       'Merges when the repository policy allows it, otherwise waits for a human.',
     params: noParams,
     contract: fixed('merged', ['merged', 'changes-needed', 'rejected']),
   },
   'run-tasks': {
+    publishes: true,
     summary:
       "Runs a lead's tasks as child tickets and reports back each time one finishes.",
     params: runTasksParams,

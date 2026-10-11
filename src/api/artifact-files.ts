@@ -90,7 +90,7 @@ export async function openArtifactFile(
   }
 }
 
-function byteRange(
+export function byteRange(
   header: string | undefined,
   size: number,
 ): { start: number; end: number } | 'unsatisfiable' | undefined {

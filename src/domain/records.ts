@@ -62,11 +62,15 @@ export const ARTIFACT_KINDS = [
   'log',
   'note',
   'decision',
+  'output',
 ] as const
 export type ArtifactKind = (typeof ARTIFACT_KINDS)[number]
 
 /** `owner/name`, as on GitHub. */
 export const REPOSITORY_SLUG = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/
+
+/** The factory's local, empty repository for tickets without one. GitHub owners cannot start with `_`. */
+export const SCRATCH_REPOSITORY = '_local/scratch'
 
 export const HUMAN_CHOICES = ['approved', 'changes-needed', 'rejected'] as const
 export type HumanChoice = (typeof HUMAN_CHOICES)[number]
@@ -112,6 +116,8 @@ export interface RepositoryKit {
 
 export interface Repository {
   readonly autoMerge?: boolean
+  /** The factory's local repository for tickets without one; it never publishes. */
+  readonly scratch?: boolean
   readonly id: number
   /** `owner/name` */
   readonly slug: string
@@ -228,6 +234,8 @@ export interface Artifact {
   readonly content: string | null
   /** A file inside the factory home (absolute, or relative to the home); null for content artifacts. */
   readonly path: string | null
+  /** Where the browser opens an output, such as `/files/<id>/`. */
+  readonly url?: string | null
   readonly createdAt: string
 }
 
