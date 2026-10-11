@@ -24,6 +24,7 @@ import { basename, join, resolve } from 'node:path'
 import { parseArgs } from 'node:util'
 import { factoryVersion } from '../src/config.ts'
 import { root } from './dev-database.ts'
+import { APP_FILES } from './bundle-files.ts'
 import { buildServiceApp } from './native.ts'
 import { SERVICE_APP_NAME, verifyServiceApp } from '../src/service-app.ts'
 
@@ -186,18 +187,8 @@ try {
     root,
   )
   const app = join(bundle, 'app')
-  for (const entry of [
-    'src',
-    'workflows',
-    'package.json',
-    'package-lock.json',
-    'LICENSE',
-    'README.md',
-  ])
+  for (const entry of APP_FILES)
     cpSync(join(root, entry), join(app, entry), { recursive: true })
-  cpSync(join(root, 'dist', 'web'), join(app, 'dist', 'web'), {
-    recursive: true,
-  })
   console.log('Installing production dependencies')
   sh(
     'npm',
