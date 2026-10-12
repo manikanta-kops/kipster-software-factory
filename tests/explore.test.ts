@@ -355,7 +355,7 @@ test('the scratch repository is hidden, reused, and refuses workflows that publi
       title: 'Lead in scratch',
     }),
     'invalid',
-    /"lead" opens a pull request \(run-tasks, maintain-pr, merge\)/,
+    /"lead" opens a pull request \(maintain-pr, merge\)/,
   )
 })
 

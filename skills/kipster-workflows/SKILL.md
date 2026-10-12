@@ -96,6 +96,7 @@ Any other key is an error. Step ids `finish`, `cancel` and `ask` are reserved.
 | `onboarder`  | Writes a repository's `.kipster` kit.                                      | `done`                           |
 | `lead`       | Splits the ticket into tasks run as child tickets; decides from reports.   | `done`, `delegate`, `plan-ready` |
 | `explorer`   | Makes designs, prototypes or research as outputs to open in the browser.   | `done`                           |
+| `validator`  | Checks an explorer's outputs against the task. Changes nothing.            | `passed`, `changes-needed`       |
 
 Role notes:
 
@@ -124,7 +125,9 @@ Role notes:
   could not prove is reported as unverified; that is not `changes-needed`.
   Unverified items mean **untested**: the merge gate, the PR description and
   the ticket list them, and the merge gate requires the owner. A lead's task
-  report carries each task's checker verdict: passed, or its unverified items.
+  report carries each task's checker verdict (from its latest `tester` or
+  `validator`), each step's latest summary and the paths of the outputs that
+  run delivered.
 - When a workflow contains any `reproducer` step, every `tester` in it is a
   bug tester. It fails unless a reproduction succeeded first, and the merge
   gate requires that reproduction. So never mix bug and feature paths in one
@@ -138,9 +141,14 @@ Role notes:
   `verify-kit`.
 - An `explorer` never changes the repository checkout; a change fails the step
   for the owner to inspect. It reports `output` artifacts: a file, or a folder
-  that opens at its `index.html`. Follow it with a human step whose
-  `changes-needed` routes back to it. The next run receives earlier outputs
-  and the owner's comments.
+  that opens at its `index.html`. Follow it with a human step or a
+  `validator` step whose `changes-needed` routes back to it. The next run
+  receives earlier outputs, the owner's comments and the validator's findings.
+- A `validator` checks the outputs of earlier steps against the ticket: each
+  research claim against its source, a design against its brief. It reports
+  `changes-needed` with one finding per problem, otherwise `passed`, listing
+  what it could not confirm. It never edits anything and does not start the
+  app. Use it for outputs; use `tester` and `reviewer` for code.
 - Kit setup and check run in disposable exact-commit checkouts with fetched
   remote-tracking base refs (for example `origin/next`) and no configured remote.
   Repository gates can compare changesets, migrations and protocol shapes with
@@ -149,12 +157,13 @@ Role notes:
   the other repository and resumes the builder after that pull request merges.
   Its optional `otherRepository.workflow` defaults to `lead`. Do not route it.
 - A `lead` never commits. `delegate` hands out tasks and must route to a
-  `run-tasks` step; the validator rejects a lead without that route.
+  `run-tasks` step; workflow validation rejects a lead without that route.
   `plan-ready` comes with a plan; route it to a human step whose `approved`
   and `changes-needed` both route back to the lead. `done` means every task
-  has finished; route it forward to the final tester. Route the final
-  tester's, reviewer's and `maintain-pr`'s failures back to the lead, which
-  fixes them with new tasks.
+  has finished. In a code workflow, route it forward to the final tester and
+  route the final tester's, reviewer's and `maintain-pr`'s failures back to
+  the lead, which fixes them with new tasks. When nothing follows, route
+  `done: finish`; unrouted, `done` continues to the next step in the file.
 
 ## Actions (system steps)
 
@@ -208,15 +217,20 @@ so an unrouted option pauses the ticket.
 
 Action notes:
 
-- `run-tasks` only works as the target of a lead's `delegate`; the validator
-  rejects it anywhere else. Route `reported` back to the lead, and give the
+- `run-tasks` only works as the target of a lead's `delegate`; workflow
+  validation rejects it anywhere else. Route `reported` back to the lead, and give the
   step a `limit`: every report is one more lead session.
 - A task's workflow is checked when the lead asks for it, not at upload. A
   task that lands on the lead's branch must not contain `maintain-pr` or
   `merge`: the system merges it into the lead's branch when it finishes. A
   task that lands as a pull request must contain both. Task workflows cannot
   contain a `lead`. Give their backwards routes `limit: cancel`, so a stuck
-  task reports `failed` to the lead instead of waiting for the owner.
+  task reports `failed` to the lead instead of waiting for the owner, or
+  `limit: finish` when partly checked work is still worth handing back, as in
+  `research-task`.
+- On a ticket without a repository, delegation also rejects a task whose
+  workflow contains `maintain-pr` or `merge`, so every task there lands on the
+  lead's branch.
 - At runtime, two or more `failed` tasks with the same error after removing
   paths, IDs, hashes, timestamps, durations and numbers form a repeated failure.
   `conflict` is excluded. The lead context adds `repeatedFailure` groups with
@@ -367,10 +381,12 @@ explicitly says otherwise, and then say which rule you broke and why.
 
 ## Built-in workflows
 
-New ticket offers `bug`, `explore`, `lead` and `onboard-repo`, plus uploaded
-workflows. `lead` covers features and small changes. `explore` makes things to
-look at, such as designs or research, and never opens a pull request. `task` and `task-pr` remain built-ins
-for child tickets delegated by leads; New ticket hides them.
+New ticket offers `bug`, `explore`, `lead`, `onboard-repo` and `research`,
+plus uploaded workflows. `lead` covers features and small changes. `explore`
+makes things to look at, such as designs or research, and never opens a pull
+request. `research` splits a larger question across validated tasks. `task`,
+`task-pr` and `research-task` remain built-ins for child tickets delegated by
+leads; New ticket hides them.
 Use these as patterns. Prefer adapting one over starting from nothing.
 
 `bug`: reproduce, fix, prove base fails and branch passes, review, publish,
@@ -563,6 +579,60 @@ steps:
     kind: human
     routes:
       changes-needed: explore
+```
+
+`research`: a lead splits the question into aspects and `run-tasks` runs one
+`research-task` per aspect. Each task is an explorer then a validator; a
+failed check goes back to the explorer at most once, then the task finishes
+and the lead sees the verdict. The lead writes the final report as an output
+and finishes. There is no final test, review or pull request.
+
+```yaml
+name: research
+description: A lead splits a question into aspects, each researched and validated as its own task, then writes one report. Needs no repository and never opens a pull request.
+steps:
+  - id: lead
+    kind: agent
+    role: lead
+    instructions: >-
+      This ticket is research. Split the question into independent aspects and
+      delegate one task per aspect. In each task's instructions, state the
+      aspect, the questions to answer and which sources count. Do not report
+      plan-ready. When every task has finished, read their outputs and write one
+      final report as an output: a page that answers the ticket, cites its
+      sources and names what stayed unverified. Then report done.
+    routes:
+      delegate: research
+      done: finish
+
+  - id: research
+    kind: system
+    action: run-tasks
+    with:
+      workflow: research-task
+      maxParallel: 5
+      maxTasks: 12
+    limit: 40
+    routes:
+      reported: lead
+```
+
+```yaml
+name: research-task
+description: One research task from a lead. An explorer writes a sourced report and a validator checks it, at most twice.
+steps:
+  - id: research
+    kind: agent
+    role: explorer
+    instructions: Research the aspect in the task. Write one report page with a source link for every claim.
+
+  - id: validate
+    kind: agent
+    role: validator
+    limit: 2
+    routes:
+      changes-needed: research
+      limit: finish
 ```
 
 An example that branches with `decide`: the planner writes a plan, then the
@@ -814,8 +884,9 @@ check prevents the mistake.
 
 A ticket created without a repository runs in the factory's local scratch
 repository: an empty folder per ticket, with no kit and nowhere to publish.
-Ticket creation rejects a workflow on it that contains `maintain-pr`, `merge`
-or `run-tasks`, or that needs a capability. Read-only dependencies still work,
+Ticket creation rejects a workflow on it that contains `maintain-pr` or
+`merge`, or that needs a capability. A lead may run there with `run-tasks`;
+its tasks land on the lead's branch, which stays local. Read-only dependencies still work,
 so an explorer can study a registered repository without one as the target.
 
 ## Outputs

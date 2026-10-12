@@ -1,4 +1,3 @@
-import { checkerVerdict } from '../domain/task-testing.ts'
 import type { AgentConfig } from '../config.ts'
 import { type RoleName, runTasksParams } from '../domain/catalog.ts'
 import { FactoryError } from '../domain/errors.ts'
@@ -13,6 +12,7 @@ import type { ArtifactInput } from '../domain/lifecycle.ts'
 import {
   checkDelegation,
   delegateTarget,
+  finishedTaskVerdict,
   repeatedFailures,
   keptTaskWork,
 } from '../domain/tasks.ts'
@@ -206,6 +206,7 @@ export async function leadResultProblem(
     ),
     workflows: (name) => library.get(name)?.workflow,
     allowedAgents: options.config.agents.allowed,
+    scratch: !!context.repository.scratch,
   })
   return errors.length ? `Invalid lead result: ${errors.join('; ')}` : null
 }
@@ -379,7 +380,7 @@ export function mergedTaskResult(head: string, verdict: string): string {
 
 async function taskVerdict(options: RunnerOptions, number: number) {
   const child = await getTicketDetail(options.database, number)
-  return child ? checkerVerdict(child) : 'No checker ran.'
+  return child ? finishedTaskVerdict(child) : 'No checker ran.'
 }
 
 async function childWork(

@@ -105,7 +105,7 @@ test('a lead runs branch tasks in parallel, hears each finish while others run, 
   for (const task of done.tasks.filter((item) => item.status === 'merged'))
     assert.match(
       task.result!,
-      /^Merged into the lead branch at [0-9a-f]{40}\. No checker ran\.$/,
+      /^Merged into the lead branch at [0-9a-f]{40}\. No checker ran\.\nStep summaries:\n- build: /,
     )
   const conflict = done.tasks.find((task) => task.key === 'y')!
   assert.match(conflict.result!, /Files: shared\.txt/)
@@ -823,7 +823,7 @@ test("a lead's branch task is built, checked and merged with the checker's verdi
   assert.match(
     task.result!,
     new RegExp(
-      `^Merged into the lead branch at [0-9a-f]{40}\\. Checker test passed at ${checked} with unverified items\\. Unverified by test: Browser view\\.$`,
+      `^Merged into the lead branch at [0-9a-f]{40}\\. Checker test passed at ${checked} with unverified items\\. Unverified by test: Browser view\\.\\nStep summaries:\\n- build: Added change\\.txt\\n- test: Checked the change`,
     ),
   )
   assert.ok(

@@ -96,6 +96,13 @@ export const roles = {
     success: 'done',
     outcomes: ['done'],
   },
+  validator: {
+    summary:
+      "Checks an explorer's outputs against the task: claims backed by sources, the brief met. Changes nothing.",
+    changes: 'nothing',
+    success: 'passed',
+    outcomes: ['passed', 'changes-needed'],
+  },
 } as const satisfies Record<string, Role>
 
 export type RoleName = keyof typeof roles
@@ -235,7 +242,8 @@ export const actions = {
     contract: fixed('merged', ['merged', 'changes-needed', 'rejected']),
   },
   'run-tasks': {
-    publishes: true,
+    // Branch tasks merge locally; a task whose own workflow publishes is checked when it starts.
+    publishes: false,
     summary:
       "Runs a lead's tasks as child tickets and reports back each time one finishes.",
     params: runTasksParams,
@@ -254,4 +262,8 @@ export function isAction(name: string): name is ActionName {
 }
 
 /** Built-in workflows reserved for tasks delegated by leads. */
-export const LEAD_ONLY_WORKFLOWS: readonly string[] = ['task', 'task-pr']
+export const LEAD_ONLY_WORKFLOWS: readonly string[] = [
+  'task',
+  'task-pr',
+  'research-task',
+]

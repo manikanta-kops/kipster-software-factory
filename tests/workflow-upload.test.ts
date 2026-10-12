@@ -114,14 +114,14 @@ describe('uploading a workflow', () => {
     const listed = await workflows()
     assert.deepEqual(
       listed.filter((item) => item.selectable).map((item) => item.name),
-      ['bug', 'explore', 'lead', 'onboard-repo', 'review-only'],
+      ['bug', 'explore', 'lead', 'onboard-repo', 'research', 'review-only'],
     )
     assert.deepEqual(
       listed
         .filter((item) => !item.selectable)
         .map((item) => item.name)
         .sort(),
-      ['task', 'task-pr'],
+      ['research-task', 'task', 'task-pr'],
     )
     assert.equal(listed.find((w) => w.name === 'lead')?.origin, 'file')
     assert.deepEqual(
@@ -179,7 +179,7 @@ steps:
     )
     assert.equal(problem.error, 'The workflow is not valid')
     assert.deepEqual(problem.issues, [
-      'step "build": role must be one of planner, builder, tester, reproducer, reviewer, writer, onboarder, lead, explorer',
+      'step "build": role must be one of planner, builder, tester, reproducer, reviewer, writer, onboarder, lead, explorer, validator',
       'step "test": cannot route "failed"; this step can report passed, changes-needed, needs-decision',
       'step "test": route "changes-needed" goes to unknown step "deploy" (exits: finish, cancel, ask)',
     ])
