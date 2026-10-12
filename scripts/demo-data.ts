@@ -1,7 +1,8 @@
 import { evaluateMergeGate, type MergeFacts } from '../src/domain/merge-gate.ts'
 import { checksResult, ciFailure } from '../src/engine/pull-requests.ts'
 import { mergedTaskResult } from '../src/engine/tasks.ts'
-import { checkerVerdict, untestedReasons } from '../src/domain/task-testing.ts'
+import { finishedTaskVerdict } from '../src/domain/tasks.ts'
+import { untestedReasons } from '../src/domain/task-testing.ts'
 import type { run as runCommand } from '../src/executors/process.ts'
 import { inspectChecks } from '../src/github/checks.ts'
 import { saveMergeGate } from '../src/store/merge-gates.ts'
@@ -686,7 +687,7 @@ async function seedLocked(
     'merged',
     mergedTaskResult(
       'f'.repeat(40),
-      checkerVerdict(
+      finishedTaskVerdict(
         (await getTicketDetail(database, lightsOutUntestedChild))!,
       ),
     ),
@@ -766,7 +767,7 @@ async function seedLocked(
       'merged',
       mergedTaskResult(
         input.commits.lead,
-        checkerVerdict((await getTicketDetail(database, checked))!),
+        finishedTaskVerdict((await getTicketDetail(database, checked))!),
       ),
     )
     await reportTasks(database, tasks.attempt.id)

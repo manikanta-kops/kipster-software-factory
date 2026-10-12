@@ -306,6 +306,21 @@ describe('lead results', () => {
     assert.match(errors, /at most 3 tasks; it has 1 and asked for 4/)
   })
 
+  test('a ticket without a repository refuses tasks that publish and accepts the rest', async () => {
+    const errors = checkDelegation(
+      await input({
+        scratch: true,
+        tasks: [
+          request('docs', { land: 'pr' }),
+          request('aspect', { workflow: 'research-task' }),
+        ],
+      }),
+    )
+    assert.deepEqual(errors, [
+      'task "docs": workflow "task-pr" opens a pull request, and this ticket has no repository; use land branch with a workflow that does not publish',
+    ])
+  })
+
   test('pull request decisions need an undecided ready pr task', async () => {
     const existing = [
       {

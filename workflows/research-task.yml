@@ -1,0 +1,15 @@
+name: research-task
+description: One research task from a lead. An explorer writes a sourced report and a validator checks it, at most twice.
+steps:
+  - id: research
+    kind: agent
+    role: explorer
+    instructions: Research the aspect in the task. Write one report page with a source link for every claim.
+
+  - id: validate
+    kind: agent
+    role: validator
+    limit: 2
+    routes:
+      changes-needed: research
+      limit: finish

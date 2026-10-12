@@ -17,6 +17,7 @@ test('a ticket without a repository can explore but not open a pull request', as
       .locator('label', { has: lead })
       .getByText('Opens a pull request, so it needs a repository.'),
   ).toBeVisible()
+  await expect(page.getByRole('radio', { name: /^research / })).toBeEnabled()
   await page.getByRole('radio', { name: /^explore/ }).check()
   await page.getByLabel('Title').fill('Moodboard for the onboarding')
   await page.getByRole('button', { name: 'Create ticket' }).click()

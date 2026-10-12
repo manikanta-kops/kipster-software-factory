@@ -36,6 +36,8 @@ describe('loadLibrary', () => {
       'explore',
       'lead',
       'onboard-repo',
+      'research',
+      'research-task',
       'task',
       'task-pr',
     ])

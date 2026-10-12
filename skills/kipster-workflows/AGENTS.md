@@ -20,7 +20,8 @@ ticket. A stale guide produces files that fail validation or fail at runtime.
 
 - Keep it self-contained. The reader cannot open other files in this
   repository.
-- State what the validator rejects and what only fails at runtime separately.
+- State what workflow validation rejects and what only fails at runtime
+  separately.
 - Every complete YAML example must be a valid workflow.
   `tests/workflow-skill.test.ts` parses each one and checks that every catalog
   role, action, capability, exit and outcome is named.

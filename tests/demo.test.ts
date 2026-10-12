@@ -9,11 +9,8 @@ import { fileURLToPath } from 'node:url'
 import { promisify } from 'node:util'
 import { after, before, describe, test } from 'node:test'
 import { seedDemo } from '../scripts/demo-data.ts'
-import {
-  checkerVerdict,
-  uncheckedItems,
-  untestedReasons,
-} from '../src/domain/task-testing.ts'
+import { uncheckedItems, untestedReasons } from '../src/domain/task-testing.ts'
+import { finishedTaskVerdict } from '../src/domain/tasks.ts'
 import { mergedTaskResult } from '../src/engine/tasks.ts'
 import {
   createRepository,
@@ -214,11 +211,11 @@ describe('demo data', () => {
     assert.equal(lead.tasks[1]?.status, 'merged')
     assert.equal(
       lead.tasks[1]?.result,
-      mergedTaskResult('f'.repeat(40), checkerVerdict(untested)),
+      mergedTaskResult('f'.repeat(40), finishedTaskVerdict(untested)),
     )
     assert.equal(
       lead.tasks[1]?.result,
-      `Merged into the lead branch at ${'f'.repeat(40)}. Checker test passed with unverified items. Unverified by test: Read the export docs.`,
+      `Merged into the lead branch at ${'f'.repeat(40)}. Checker test passed with unverified items. Unverified by test: Read the export docs.\nStep summaries:\n- build: Synthetic documentation task finished without a verify capability.\n- test: Synthetic checker: read the change without an app; one item stays unverified.`,
     )
   })
 
@@ -277,11 +274,11 @@ describe('demo data', () => {
     )
     assert.equal(
       lead.tasks[0]?.result,
-      mergedTaskResult('2'.repeat(40), checkerVerdict(child)),
+      mergedTaskResult('2'.repeat(40), finishedTaskVerdict(child)),
     )
     assert.equal(
       lead.tasks[0]?.result,
-      `Merged into the lead branch at ${'2'.repeat(40)}. Checker test passed at ${'1'.repeat(40)} with unverified items. Unverified by test: Open the rate limit page in a browser.`,
+      `Merged into the lead branch at ${'2'.repeat(40)}. Checker test passed at ${'1'.repeat(40)} with unverified items. Unverified by test: Open the rate limit page in a browser.\nStep summaries:\n- build: Synthetic builder committed the change.\n- test: Synthetic checker: the kit has no verify block, so it read the diff and ran the tests in a disposable checkout. One item stays unverified.`,
     )
     assert.deepEqual(untestedReasons(lead), [
       'Unverified by final-test: Open the rate limit page in a browser',
@@ -303,11 +300,11 @@ describe('demo data', () => {
     )
     assert.equal(
       lead.tasks[0]?.result,
-      mergedTaskResult('4'.repeat(40), checkerVerdict(child)),
+      mergedTaskResult('4'.repeat(40), finishedTaskVerdict(child)),
     )
     assert.equal(
       lead.tasks[0]?.result,
-      `Merged into the lead branch at ${'4'.repeat(40)}. Checker test passed at ${'3'.repeat(40)}.`,
+      `Merged into the lead branch at ${'4'.repeat(40)}. Checker test passed at ${'3'.repeat(40)}.\nStep summaries:\n- build: Synthetic builder committed the change.\n- test: Synthetic checker: drove the kit's running app; every scenario passed.`,
     )
     assert.deepEqual(untestedReasons(lead), [])
   })
