@@ -1,11 +1,15 @@
 # Workflow format
 
-New ticket offers the built-in `bug`, `explore`, `lead` and `onboard-repo`, plus
-uploaded workflows. `lead` covers features and small changes, with at most 20
-tasks and 50 task reports. `explore` makes designs, prototypes or research to
-open in the browser, then waits for your review; it needs no repository and
-never opens a pull request. `task` and `task-pr` remain available for lead child tickets
-but are hidden from New ticket. Stored tickets keep their workflow definition
+New ticket offers the built-in `bug`, `explore`, `lead`, `onboard-repo` and
+`research`, plus uploaded workflows. `lead` covers features and small changes,
+with at most 20 tasks and 50 task reports. `explore` makes designs, prototypes
+or research to open in the browser, then waits for your review; it needs no
+repository and never opens a pull request. `research` has a lead split a
+question into aspects; each runs as a `research-task` (an explorer, then a
+validator that may send it back once), and the lead writes one report as an
+output. It needs no repository and has no final review. `task`, `task-pr` and
+`research-task` remain available for lead child tickets but are hidden from
+New ticket. Stored tickets keep their workflow definition
 and history even after its file is removed.
 
 Workflows are YAML files named `<name>.yml`. Validate a directory with

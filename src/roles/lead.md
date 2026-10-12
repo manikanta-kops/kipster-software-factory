@@ -6,7 +6,7 @@ Report one outcome:
 
 - `plan-ready` with a plan artifact when the ticket needs the owner to agree the approach first. Use it for large or ambiguous work, not for small clear tickets. After approval, `planApproved` is true; do not ask again unless the owner's comments change the scope.
 - `delegate` to hand out tasks, decide on pull requests, or keep waiting. The system runs the tasks and wakes you each time one finishes, fails, conflicts or has a pull request ready, even while others still run.
-- `done` when every task has finished and the lead branch holds the complete change. A final independent test and review follow; their findings come back to you as a new run.
+- `done` when every task has finished and the work is complete. What follows depends on the workflow, such as a final independent test and review whose findings come back to you as a new run.
 - `needs-decision` only for product or taste questions investigation cannot answer, or a factory cause you cannot work around after classifying a repeated failure.
 
 <!-- /default -->
@@ -15,7 +15,7 @@ Report one outcome:
 
 - `plan-ready` with a plan artifact when the ticket needs the owner to agree the approach first. Use it for large or ambiguous work, not for small clear tickets. Under lights-out it is recorded and treated as approved by the system; `planApproved` is true on the next run.
 - `delegate` to hand out tasks, decide on pull requests, or keep waiting. The system runs the tasks and wakes you each time one finishes, fails, conflicts or has a pull request ready, even while others still run.
-- `done` when every task has finished and the lead branch holds the complete change. A final independent test and review follow; their findings come back to you as a new run.
+- `done` when every task has finished and the work is complete. What follows depends on the workflow, such as a final independent test and review whose findings come back to you as a new run.
 - For product or taste questions investigation cannot answer, choose the sensible default, record it as a decision artifact, and continue. Use `needs-decision` only for the irreversible actions listed in the lights-out instructions.
 
 <!-- /lights-out -->
@@ -52,6 +52,8 @@ Task rules:
 - `delegate` with no new tasks and no decisions keeps waiting; it is valid only while something is still running.
 
 After a report:
+
+A finished task's result names its checker's verdict, each step's latest summary and the outputs it delivered, with their paths. Open the outputs when you need their content.
 
 A checker or final test that names no defect is not a failure: record what was unverified and move on. Never redo the same work or add demo data only for the checker.
 

@@ -19,14 +19,19 @@ export interface CheckFacts {
   readonly artifacts: readonly Artifact[]
 }
 
+const CHECKER_ROLES = ['tester', 'validator']
+
 function latestCheck(facts: CheckFacts): Attempt | undefined {
-  const testers = new Set(
+  const checkers = new Set(
     facts.workflow.steps
-      .filter((step) => step.kind === 'agent' && step.role === 'tester')
+      .filter(
+        (step) =>
+          step.kind === 'agent' && CHECKER_ROLES.includes(step.role ?? ''),
+      )
       .map((step) => step.id),
   )
   return facts.attempts.findLast(
-    (attempt) => testers.has(attempt.stepId) && attempt.waitingFor === null,
+    (attempt) => checkers.has(attempt.stepId) && attempt.waitingFor === null,
   )
 }
 

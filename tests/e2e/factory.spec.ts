@@ -231,12 +231,18 @@ test('create a ticket and explain unavailable workflows', async ({
   await page
     .getByLabel('Repository', { exact: true })
     .selectOption('kipster/demo-shop')
-  await expect(page.getByRole('radio')).toHaveCount(4)
-  for (const name of ['bug', 'explore', 'lead', 'onboard-repo'])
+  await expect(page.getByRole('radio')).toHaveCount(5)
+  for (const name of ['bug', 'explore', 'lead', 'onboard-repo', 'research'])
     await expect(
       page.getByRole('radio', { name: new RegExp(`^${name} `) }),
     ).toBeEnabled()
-  for (const name of ['feature', 'quick-change', 'task', 'task-pr'])
+  for (const name of [
+    'feature',
+    'quick-change',
+    'research-task',
+    'task',
+    'task-pr',
+  ])
     await expect(
       page.getByRole('radio', { name: new RegExp(`^${name} `) }),
     ).toHaveCount(0)

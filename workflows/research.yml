@@ -1,0 +1,27 @@
+name: research
+description: A lead splits a question into aspects, each researched and validated as its own task, then writes one report. Needs no repository and never opens a pull request.
+steps:
+  - id: lead
+    kind: agent
+    role: lead
+    instructions: >-
+      This ticket is research. Split the question into independent aspects and
+      delegate one task per aspect. In each task's instructions, state the
+      aspect, the questions to answer and which sources count. Do not report
+      plan-ready. When every task has finished, read their outputs and write one
+      final report as an output: a page that answers the ticket, cites its
+      sources and names what stayed unverified. Then report done.
+    routes:
+      delegate: research
+      done: finish
+
+  - id: research
+    kind: system
+    action: run-tasks
+    with:
+      workflow: research-task
+      maxParallel: 5
+      maxTasks: 12
+    limit: 40
+    routes:
+      reported: lead

@@ -6,8 +6,9 @@ import type {
   RunTasksParams,
   TaskRequest,
 } from './catalog.ts'
-import type { LeadTask, TaskStatus } from './records.ts'
-import type { SystemStep, Workflow } from './workflow.ts'
+import type { Artifact, Attempt, LeadTask, TaskStatus } from './records.ts'
+import { type CheckFacts, checkerVerdict } from './task-testing.ts'
+import { publishingSteps, type SystemStep, type Workflow } from './workflow.ts'
 
 /** A task in one of these states never changes again. */
 export const FINAL_TASK_STATUSES: readonly TaskStatus[] = [
@@ -177,6 +178,8 @@ export interface DelegationInput {
   readonly params: RunTasksParams
   readonly workflows: (name: string) => Workflow | undefined
   readonly allowedAgents: readonly AgentChoice[]
+  /** The ticket runs in the scratch repository, which has nowhere to publish. */
+  readonly scratch?: boolean
 }
 
 /** Problems with a lead's result given its ticket's tasks; empty when the result can be applied. */
@@ -229,6 +232,10 @@ export function checkDelegation(input: DelegationInput): string[] {
     else {
       const problem = taskWorkflowProblem(workflow, task.land)
       if (problem) errors.push(`${at}: ${problem}`)
+      else if (input.scratch && publishingSteps(workflow).length > 0)
+        errors.push(
+          `${at}: workflow "${name}" opens a pull request, and this ticket has no repository; use land branch with a workflow that does not publish`,
+        )
     }
     if (
       task.agent &&
@@ -313,4 +320,42 @@ export function replacements(
 /** Local branch provenance lets the lead reuse work even after the child's worktree is removed. */
 export function keptTaskWork(branch: string, head: string | null): string {
   return `Branch ${branch} keeps the work. Head commit: ${head ?? 'unavailable'}.`
+}
+
+/** A finished child's checker verdict, then what it delivered. */
+export function finishedTaskVerdict(child: CheckFacts): string {
+  const delivery = childDelivery(child.attempts, child.artifacts)
+  return `${checkerVerdict(child)}${delivery ? `\n${delivery}` : ''}`
+}
+
+/** What a finished child delivered: each step's latest summary and the outputs of that run. */
+function childDelivery(
+  attempts: readonly Pick<Attempt, 'id' | 'stepId' | 'status' | 'summary'>[],
+  artifacts: readonly Pick<
+    Artifact,
+    'attemptId' | 'kind' | 'title' | 'path' | 'prunedAt'
+  >[],
+): string {
+  const latest = new Map<string, { id: number; summary: string }>()
+  for (const attempt of attempts)
+    if (attempt.status === 'finished' && attempt.summary)
+      latest.set(attempt.stepId, { id: attempt.id, summary: attempt.summary })
+  const runs = new Set([...latest.values()].map((attempt) => attempt.id))
+  const outputs = artifacts.filter(
+    (artifact) =>
+      artifact.kind === 'output' &&
+      artifact.path &&
+      !artifact.prunedAt &&
+      runs.has(artifact.attemptId),
+  )
+  return [
+    latest.size
+      ? `Step summaries:\n${[...latest].map(([step, { summary }]) => `- ${step}: ${summary.slice(0, 4000)}`).join('\n')}`
+      : '',
+    outputs.length
+      ? `Outputs:\n${outputs.map((output) => `- ${output.title}: ${output.path}`).join('\n')}`
+      : '',
+  ]
+    .filter(Boolean)
+    .join('\n')
 }

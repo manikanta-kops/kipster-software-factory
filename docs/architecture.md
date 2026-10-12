@@ -14,7 +14,7 @@
 | **Decision**   | A fast typed judgement (a choice with probabilities and a confidence) used where input is unstructured.                                       |
 | **Task**       | Work a lead hands out. It runs as a child ticket and lands on the lead's branch or as its own pull request.                                   |
 
-Roles: planner, builder, tester, reproducer, reviewer, writer, onboarder, lead, explorer.
+Roles: planner, builder, tester, reproducer, reviewer, writer, onboarder, lead, explorer, validator.
 Actions: decide, verify-kit, maintain-pr, merge, run-tasks.
 The catalog in `src/domain/catalog.ts` is the single list of each.
 
@@ -683,7 +683,7 @@ Two lights-out leads show every task being checked. One is in `kipster/docs-site
 whose valid kit has no verify block; the other is in demo-shop. Their state comes
 from the real lifecycle: `claimAttempts` routes each task's build to its `test`
 and each lead's `done` to `final-test`. Each task's result is
-`mergedTaskResult` over `checkerVerdict` of the stored child, the same text
+`mergedTaskResult` over `finishedTaskVerdict` of the stored child, the same text
 `integrate` writes. Each lead's merge gate is `evaluateMergeGate` over identical
 facts plus `untestedReasons` of the stored lead, so only the docs-site gate lists
 the checker's unverified item. The agent results are synthetic.
@@ -1246,11 +1246,21 @@ commit, and registers it once with `repositories.scratch = true`; the scheduler
 clones it like any other, and each ticket gets its own branch and worktree.
 `GET /api/repositories` leaves it out; New ticket offers it as "No repository".
 Ticket creation rejects a workflow on it with a publishing action
-(`Action.publishes`: `maintain-pr`, `merge`, `run-tasks`), and `maintain-pr`
-refuses it again at runtime. Migration 021 adds the column and the `output`
+(`Action.publishes`: `maintain-pr`, `merge`), and `maintain-pr` refuses it
+again at runtime. `run-tasks` does not publish: branch tasks merge into the
+lead's local worktree. Delegation on a scratch ticket rejects a task whose
+workflow publishes, and child ticket creation would refuse it again. Migration 021 adds the column and the `output`
 kind.
 
 The built-in `explore` workflow runs an `explorer` then a human review whose
 `changes-needed` loops back. The explorer must leave the worktree unchanged,
 like every role whose catalog `changes` is not `code` or `kit`. Earlier outputs
 reach the next run as paths in the context packet.
+
+The built-in `research` workflow is a lead whose `done` finishes the ticket
+and whose `run-tasks` defaults to `research-task`: an `explorer`, then a
+`validator` that checks the outputs and sends findings back at most once
+(`limit: finish`). The validator counts as the task's checker in its verdict.
+A finished task's result adds each child step's latest summary and the stored
+paths of the outputs from those runs, so the lead reads the research without
+opening the child ticket.
