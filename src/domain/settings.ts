@@ -68,6 +68,8 @@ export const settingsSchema = z.strictObject({
   }),
   /** Overrides for one workflow, keyed by workflow name. */
   workflows: z.record(z.string().min(1), workflowOverrideSchema),
+  /** Install a newer release at night once no step is running. */
+  autoUpdate: z.boolean().default(true),
 })
 export type Settings = z.infer<typeof settingsSchema>
 
@@ -76,6 +78,7 @@ export const DEFAULT_SETTINGS: Settings = {
   stepTimeoutMinutes: DEFAULT_STEP_TIMEOUT_MINUTES,
   agents: { default: DEFAULT_AGENT, roles: {}, allowed: [], reviewers: [] },
   workflows: {},
+  autoUpdate: true,
 }
 
 /**

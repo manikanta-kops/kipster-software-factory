@@ -64,9 +64,17 @@ export interface SchedulerOptions {
   bugWorkflow?: LibraryEntry
   onError?: (error: unknown) => void
 }
+export interface Scheduler {
+  /** While held, no new step or post-merge check starts; running ones finish. */
+  hold(held: boolean): void
+  /** Steps and post-merge checks still running. */
+  busy(): number
+  close(): Promise<void>
+}
+
 export async function startScheduler(
   options: SchedulerOptions,
-): Promise<{ close(): Promise<void> }> {
+): Promise<Scheduler> {
   const { database, events } = options
   setArtifactHome(database, options.home)
   const config = engineConfig.parse(options.config ?? {})
@@ -102,6 +110,7 @@ export async function startScheduler(
   const mergeJobs = new Map<number, Promise<void>>()
   const taskJobs = new Map<number, Promise<void>>()
   let stopped = false
+  let held = false
   let ticking: Promise<void> | undefined
   let requested = false
   let nextMergePoll = 0
@@ -207,7 +216,7 @@ export async function startScheduler(
           pruning = undefined
         })
     }
-    const capacity = settings.concurrency - active.size
+    const capacity = held ? 0 : settings.concurrency - active.size
     if (capacity > 0) {
       for (const context of await claimAttempts(database, capacity)) {
         if (stopped) break
@@ -298,7 +307,7 @@ export async function startScheduler(
           })
         mergeJobs.set(context.attempt.id, job)
       }
-      for (const check of await pendingPostMergeChecks(database)) {
+      for (const check of held ? [] : await pendingPostMergeChecks(database)) {
         if (stopped) return
         if (postMergeJobs.size >= 2) break
         const key = `${check.repositoryId}:${check.mergeCommit}`
@@ -393,9 +402,14 @@ export async function startScheduler(
   wake()
   let closing: Promise<void> | undefined
   return {
+    hold(next) {
+      held = next
+      if (!held) wake()
+    },
+    busy: () => active.size + postMergeJobs.size,
     close() {
       return (closing ??= (async () => {
-        const held = !stopped
+        const locked = !stopped
         stopped = true
         unsubscribe()
         clearInterval(timer)
@@ -412,7 +426,7 @@ export async function startScheduler(
         ])
         await Promise.all([...active.values()].map((item) => item.done))
         try {
-          if (held) await interruptRunning(database)
+          if (locked) await interruptRunning(database)
         } finally {
           await lock.close()
         }

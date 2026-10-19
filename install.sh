@@ -13,7 +13,8 @@ usage() {
 Usage: install.sh [options]
 
   --home <dir>        Factory home (default: ~/.kipster-factory)
-  --bin-dir <dir>     Where to link the kf command (default: ~/.local/bin)
+  --bin-dir <dir>     Where to link the kf command (default: the one this home
+                      used before, else ~/.local/bin)
   --version <tag>     Install this release tag instead of the latest (e.g. v0.1.0)
   --from <dir>        Install from a local directory with the archive and SHA256SUMS
   --no-start          Configure but do not start the background service
@@ -46,7 +47,7 @@ tilde() {
 
 main() {
   home="$HOME/.kipster-factory"
-  bin_dir="$HOME/.local/bin"
+  bin_dir=""
   release="latest"
   from=""
   start=1
@@ -69,6 +70,10 @@ main() {
       *) fail "Unknown option $1. See --help." ;;
     esac
   done
+
+  # Updates pass only --home; keep linking kf where the first install put it.
+  [ -n "$bin_dir" ] || bin_dir=$(cat "$home/bin-dir" 2>/dev/null || true)
+  [ -n "$bin_dir" ] || bin_dir="$HOME/.local/bin"
 
   printf '%s┌%s  %sInstalling Kipster Software Factory%s\n' "$dim" "$reset" "$bold" "$reset"
   bar
@@ -152,10 +157,13 @@ main() {
   mkdir -p "$bin_dir"
   if [ -e "$bin_dir/kf" ] && [ ! -L "$bin_dir/kf" ]; then
     warn "$(tilde "$bin_dir/kf") exists and is not a link; left it alone. Run $(tilde "$kf") instead."
+  elif [ -L "$bin_dir/kf" ] && [ -e "$bin_dir/kf" ] && [ "$(readlink "$bin_dir/kf")" != "$kf" ]; then
+    warn "$(tilde "$bin_dir/kf") runs another factory; left it alone. Run $(tilde "$kf") instead."
   else
     ln -sfn "$kf" "$bin_dir/kf"
     step "Command" "kf → $(tilde "$bin_dir/kf")"
   fi
+  printf '%s\n' "$bin_dir" >"$home/bin-dir"
   case ":$PATH:" in
     *":$bin_dir:"*) on_path=1 ;;
     *) on_path=0 ;;

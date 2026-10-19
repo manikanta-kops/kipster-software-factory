@@ -1,7 +1,6 @@
 # Install and run
 
-The [setup guide](https://kipster.app/factory/setup) lets your coding agent do
-all of this for you. This page describes what it runs, for people who want to
+The [setup guide](../SETUP.md) lets your coding agent do all of this for you. This page describes what it runs, for people who want to
 install by hand or understand the background service.
 
 ## Install
@@ -20,7 +19,8 @@ Node.js and PostgreSQL. It links `kf` into `~/.local/bin` and runs `kf setup --s
   offers `gh auth login` if you are signed out), Codex and Claude Code. The
   factory clones and pushes GitHub repositories with that `gh` login, so no
   separate git sign-in is needed, and your git configuration is not changed;
-- asks which agent runs steps by default, only when both are installed;
+- asks which agent runs steps by default, only when both are installed (without
+  a terminal it keeps Codex; change it in Settings);
 - creates a private PostgreSQL database in `~/.kipster-factory/postgres` that
   accepts only local socket connections;
 - starts the factory in the background, now and at login, and opens it.
@@ -31,10 +31,33 @@ changes; `explore` makes designs, prototypes or research you open in the
 browser, with or without a repository; `research` lets a lead split a question
 into validated research tasks and write one report. The `task`, `task-pr` and
 `research-task` workflows are reserved for child tasks and hidden from New
-ticket. Re-run the
-command, or `kf update`, to update; your
-configuration, secrets and database are kept. `kf status`, `kf logs -f`,
-`kf stop` and `kf start` manage the background factory.
+ticket. `kf status`, `kf logs -f`, `kf stop` and `kf start` manage the
+background factory.
+
+## Updates
+
+The factory asks GitHub for the latest release when it starts and every six
+hours. When a newer one exists, the web app shows **Update available** at the
+top right and `kf status` names the version.
+
+**Update now**, or `kf update`, holds new steps, waits for running steps and
+post-merge checks to finish, then installs. The install runs as its own
+one-off background job, because the installer stops the factory service. It
+downloads the release's `install.sh` and checks it against the release
+`SHA256SUMS` before running it, and the installer checks the archive the same
+way. The factory then restarts on the new version. Configuration, secrets and
+the database are kept. A waiting update can be cancelled from the web app.
+`kf update --now` skips the wait and interrupts running steps; it is also how a
+stopped factory updates, without starting it.
+
+Between 2 and 5 AM local time, a newer release installs by itself the same way.
+Turn this off under **Settings → Updates**. If an update fails, the factory
+starts its previous version again, the web app shows the error and
+`logs/update.log` in the factory home has the installer output. The night
+update does not retry a release that failed; **Try again** does.
+
+A factory run from source (`npm run dev`, `kf serve`) never checks for or
+installs releases.
 
 On macOS the background service uses its own signed identity, **Kipster Software
 Factory**, for privacy permissions. Mac app control remains available to all

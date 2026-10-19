@@ -122,6 +122,7 @@ describe('settings store and API', () => {
       reviewers: [],
     },
     workflows: {},
+    autoUpdate: true,
   }
 
   before(async () => {

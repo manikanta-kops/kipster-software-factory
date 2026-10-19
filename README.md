@@ -130,10 +130,11 @@ plus where each one sends the work next.
 ## Try it
 
 It's 2026. I don't believe in manual installs anymore. Give this to your coding
-agent and let it figure it out:
+agent and let it figure it out. It runs on macOS for now; if you need Linux or
+Windows, [open an issue](https://github.com/manikanta-kops/kipster-software-factory/issues).
 
 ```
-Set up the Kipster Software Factory on my Mac. Follow https://kipster.app/factory/setup
+Set up the Kipster Software Factory for me. Follow https://raw.githubusercontent.com/manikanta-kops/kipster-software-factory/master/SETUP.md
 ```
 
 ## Learn more

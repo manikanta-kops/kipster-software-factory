@@ -64,6 +64,9 @@ src/
   config.ts     Factory home and config.json.
   setup.ts      Guided setup: tool and GitHub checks, database, port and agent default.
   service.ts    The macOS launchd user agent that runs `kf serve` in the background.
+  updates.ts    Latest-release lookup and the checksum-verified release installer.
+  updater.ts    In-factory updates: hold new steps, wait for idle, install; nightly.
+  update-command.ts  `kf update` and the update line of `kf status`.
 web/            React app: what needs you, workflows, and later tickets.
 workflows/      Built-in workflow library.
 scripts/        Development and test databases, demo data and the release bundle.
@@ -254,8 +257,8 @@ step timeout and Codex for every role.
 #### Settings page
 
 The web app's Settings page (`#/settings`, `GET`/`POST /api/settings`) edits
-`concurrency`, `stepTimeoutMinutes` and `agents` (default, roles, allowed and reviewers)
-while the factory runs, plus per-workflow overrides of role agents, reviewer
+`concurrency`, `stepTimeoutMinutes`, `agents` (default, roles, allowed and reviewers)
+and `autoUpdate` (nightly self-update, default on) while the factory runs, plus per-workflow overrides of role agents, reviewer
 lists and the step timeout. Workflow names retained by stored tickets remain available for overrides
 after their files are removed; they do not reappear on New ticket. Until the
 owner saves, the factory uses the `config.json` values (or
@@ -342,6 +345,28 @@ native executable. The executable stays alive as the Node process's parent and
 forwards shutdown signals. A private `service/runtime.json` selects the release's
 Node and CLI outside the signed app. Updates preserve the app path and signing
 identity, while changing that manifest. A failed stop prevents replacement.
+
+#### Self-update
+
+Only an installed release in the background service updates itself; a source
+run gets a fixed `GET /api/update` naming `kf update`. The updater asks GitHub
+for the tag that `releases/latest` redirects to, at start and every six hours,
+and compares it numerically with the running version. `POST /api/update` holds
+the scheduler: no new attempt or post-merge check starts. Once nothing is
+running it bootstraps a run-once launchd job, `<label>.update`, that runs
+`kf update --now` and writes `<home>/logs/update.log`. The job is separate
+because `install.sh` stops the factory's own job. Its plist is removed right
+after loading so login never reruns it. `kf update --now` downloads that
+release's `install.sh` and `SHA256SUMS`, checks the script, and runs it with
+`--version`. On failure it records `<home>/update-failed.json` and starts the
+previous version if the service is down; the API reports `failed` for that
+release until it is retried. `POST /api/update/cancel` releases a waiting hold.
+Between 02:00 and 05:00 local time, with `autoUpdate` on, the updater requests
+an available release once per night, skipping one that failed. The hold is in
+memory; a restart clears it.
+
+`install.sh` leaves a `kf` link that points at another factory home alone, so
+updating a second home never takes over the first one's command.
 
 The launcher has the hardened-runtime Apple Events entitlement and usage
 descriptions. This enables permission requests; it does not grant consent.

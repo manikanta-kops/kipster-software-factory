@@ -34,7 +34,8 @@ import { type Context, Hono } from 'hono'
 import { cors } from 'hono/cors'
 import type { ContentfulStatusCode } from 'hono/utils/http-status'
 import { z } from 'zod'
-import { DEFAULT_ALLOWED_ORIGINS } from '../config.ts'
+import { DEFAULT_ALLOWED_ORIGINS, factoryVersion } from '../config.ts'
+import { fixedVersion, type Updater } from '../updater.ts'
 import { FactoryError, WorkflowInUse } from '../domain/errors.ts'
 import { runsOf } from '../domain/lifecycle.ts'
 import { describeRoutes, stepLimit } from '../domain/routing.ts'
@@ -84,6 +85,7 @@ import type {
   WorkflowResponse,
   WorkflowsResponse,
   WorkflowSummary,
+  UpdateResponse,
 } from './contract.ts'
 import { streamEvents } from './event-stream.ts'
 import {
@@ -111,6 +113,8 @@ export interface AppOptions {
   readonly webRoot?: string
   /** Engine settings from config.json, used until the owner saves settings. */
   readonly settings?: Settings
+  /** Release checks and self-update; absent, the factory reports its version only. */
+  readonly updates?: Updater
 }
 
 class InvalidRequest extends FactoryError {
@@ -136,6 +140,10 @@ export function createApp({
   allowedOrigins = DEFAULT_ALLOWED_ORIGINS,
   webRoot,
   settings: fallback = DEFAULT_SETTINGS,
+  updates = fixedVersion(
+    factoryVersion(),
+    'This factory cannot update itself. Run kf update.',
+  ),
 }: AppOptions) {
   setArtifactHome(database, home)
   const app = new Hono()
@@ -223,6 +231,16 @@ export function createApp({
     await database.query('SELECT 1')
     return c.json<HealthResponse>({ status: 'ok', database: 'ok' })
   })
+
+  app.get('/api/update', async (c) =>
+    c.json<UpdateResponse>(await updates.status()),
+  )
+  app.post('/api/update', async (c) =>
+    c.json<UpdateResponse>(await updates.request()),
+  )
+  app.post('/api/update/cancel', async (c) =>
+    c.json<UpdateResponse>(await updates.cancel()),
+  )
 
   app.get('/api/workflows', (c) =>
     c.json<WorkflowsResponse>({

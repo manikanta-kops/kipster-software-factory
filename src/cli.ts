@@ -21,11 +21,9 @@ import {
   waitForFactory,
 } from './service.ts'
 import { startManagedDatabase } from './store/cluster.ts'
+import { updateFactory, updateLine } from './update-command.ts'
 import { openDatabase } from './store/database.ts'
 import { migrate } from './store/migrate.ts'
-
-const INSTALLER =
-  'https://github.com/manikanta-kops/kipster-software-factory/releases/latest/download/install.sh'
 
 const usage = `Usage: kf <command> [options]
 
@@ -35,7 +33,7 @@ Commands:
   stop      Stop the background factory and remove it from login
   status    Show whether the background factory is running
   logs      Show the background factory's log (-f follows it)
-  update    Install the latest release
+  update    Install the latest release once running steps finish (--now: at once)
   secret    set <name>, list, or remove <name> (values stay in the secret store)
   serve     Migrate the database, load workflows and serve the factory
   migrate   Apply pending database migrations
@@ -48,6 +46,7 @@ Options:
   --no-scheduler       Serve demo data or UI work without executing tickets
   --non-interactive    Setup without prompts (current values are defaults)
   --start              After setup, start the background factory
+  --now                With update: install now, even if steps are running
   --typesafe-stdin     Validate and save a TypeSafe key read from stdin
   --secret-backend file  Use the file backend explicitly (for tests/headless installs)
   --workflows <dir>     Workflow directory (default: built-in workflows)`
@@ -64,6 +63,7 @@ async function main(argv: string[]): Promise<number> {
       'no-scheduler': { type: 'boolean' },
       'non-interactive': { type: 'boolean' },
       start: { type: 'boolean' },
+      now: { type: 'boolean' },
       follow: { type: 'boolean', short: 'f' },
       version: { type: 'boolean', short: 'v' },
       'typesafe-stdin': { type: 'boolean' },
@@ -237,6 +237,7 @@ async function main(argv: string[]): Promise<number> {
         `Home      ${displayPath(home)}`,
         `Database  ${config.databaseUrl ? 'your PostgreSQL' : 'private PostgreSQL'}`,
         `Service   ${healthy ? `running at ${url}` : loaded ? 'started but not responding; see kf logs' : 'stopped; start it with kf start'}`,
+        `Update    ${await updateLine(home, config.port, healthy)}`,
       ].join('\n'),
     )
     return healthy ? 0 : 1
@@ -258,16 +259,7 @@ async function main(argv: string[]): Promise<number> {
     )
   }
 
-  if (command === 'update') {
-    const installer = spawn(
-      '/bin/sh',
-      ['-c', 'curl -fsSL "$1" | sh -s -- --home "$2"', 'kf', INSTALLER, home],
-      { stdio: 'inherit' },
-    )
-    return new Promise((resolve) =>
-      installer.once('exit', (code) => resolve(code ?? 1)),
-    )
-  }
+  if (command === 'update') return updateFactory(home, values.now ?? false)
 
   console.error(`Unknown command "${command}".\n\n${usage}`)
   return 2
