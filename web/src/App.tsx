@@ -9,6 +9,7 @@ import { Repositories } from './pages/Repositories.tsx'
 import { SettingsPage } from './pages/Settings.tsx'
 import { usePath } from './router.ts'
 import { useLiveEvents } from './queries.ts'
+import { UpdateNotice } from './components/UpdateNotice.tsx'
 import { noFilter, type TicketFilter } from './components/Filters.tsx'
 
 export function App() {
@@ -87,6 +88,7 @@ export function App() {
                 ? 'Connecting'
                 : 'Reconnecting'}
           </output>
+          <UpdateNotice />
           <a className="button primary new-ticket" href="#/tickets/new">
             New ticket
           </a>

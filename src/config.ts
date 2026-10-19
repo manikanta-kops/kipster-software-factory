@@ -67,6 +67,7 @@ export function settingsFromConfig(config: EngineConfig): Settings {
     stepTimeoutMinutes: config.stepTimeoutMinutes,
     agents: config.agents,
     workflows: {},
+    autoUpdate: true,
   }
 }
 

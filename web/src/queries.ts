@@ -35,6 +35,11 @@ export const settingsQuery = queryOptions({
   queryKey: ['settings'],
   queryFn: ({ signal }) => api.settings(signal),
 })
+export const updateQuery = queryOptions({
+  queryKey: ['update'],
+  queryFn: ({ signal }) => api.update(signal),
+  retry: false,
+})
 export const ticketQuery = (number: number) =>
   queryOptions({
     queryKey: ['ticket', number],

@@ -47,6 +47,8 @@ export function launchAgent(options: {
   log: string
   workingDirectory: string
   bundleIdentifier?: string
+  /** Run once at load and never restart. */
+  once?: boolean
 }): string {
   const string = (value: string) => `<string>${escapeXml(value)}</string>`
   return `<?xml version="1.0" encoding="UTF-8"?>
@@ -69,11 +71,7 @@ ${options.program.map((part) => `    ${string(part)}`).join('\n')}
   ${string(options.workingDirectory)}
   <key>RunAtLoad</key>
   <true/>
-  <key>KeepAlive</key>
-  <dict>
-    <key>SuccessfulExit</key>
-    <false/>
-  </dict>
+${options.once ? '' : '  <key>KeepAlive</key>\n  <dict>\n    <key>SuccessfulExit</key>\n    <false/>\n  </dict>\n'}\
   <key>ThrottleInterval</key>
   <integer>10</integer>
   <key>StandardOutPath</key>
@@ -199,4 +197,47 @@ export async function waitForFactory(
     await new Promise((done) => setTimeout(done, 500))
   }
   return false
+}
+
+export function updateLog(home: string): string {
+  return join(home, 'logs', 'update.log')
+}
+
+/**
+ * Runs `kf update --now` as its own launchd job. The installer stops the
+ * factory service, which would also stop an update running inside it.
+ */
+export async function startUpdateJob(home: string): Promise<void> {
+  requireMacOS()
+  const label = `${serviceLabel(home)}.update`
+  if (isLoaded(label)) launchctl(['bootout', `${domain()}/${label}`])
+  const path = plistPath(label)
+  await writeFile(
+    path,
+    launchAgent({
+      label,
+      program: [
+        process.execPath,
+        CLI,
+        'update',
+        '--now',
+        '--home',
+        resolve(home),
+      ],
+      path: servicePath(process.env['PATH'] ?? '/usr/bin:/bin'),
+      log: updateLog(home),
+      workingDirectory: resolve(home),
+      once: true,
+    }),
+  )
+  try {
+    const result = launchctl(['bootstrap', domain(), path])
+    if (result.status !== 0)
+      throw new Error(
+        `launchctl could not start the update: ${(result.stderr || result.stdout).trim()}`,
+      )
+  } finally {
+    // The loaded job runs without its file; removing it keeps login from rerunning the update.
+    await rm(path, { force: true })
+  }
 }

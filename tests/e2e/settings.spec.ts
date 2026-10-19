@@ -40,6 +40,9 @@ test('edit limits, allowed agents and a workflow override; they persist', async 
   await page.getByLabel('Step timeout for task (minutes)').fill('240')
   await setAgent(page, 'task builder', 'codex', 'gpt-6.1-sol', 'high')
   await setAgent(page, 'task reviewer', 'claude', 'claude-opus-5-5', 'medium')
+  const nightly = page.getByLabel('Update automatically at night')
+  await expect(nightly).toBeChecked()
+  await nightly.uncheck()
   await page.getByRole('button', { name: 'Save settings' }).click()
   await expect(page.getByText('Settings saved.')).toBeVisible()
   await expect(page.locator('.settings-source')).toContainText(/^Saved /)
@@ -74,10 +77,12 @@ test('edit limits, allowed agents and a workflow override; they persist', async 
         },
       },
     },
+    autoUpdate: false,
   })
 
   await page.reload()
   await expect(concurrency).toHaveValue('3')
+  await expect(nightly).not.toBeChecked()
   await expect(timeout).toHaveValue('240')
   await expect(page.getByLabel('Allowed 1 model')).toHaveValue(
     'claude-opus-5-5',
