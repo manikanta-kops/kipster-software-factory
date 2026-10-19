@@ -53,13 +53,14 @@ update waits for them and prints its progress. Then go to step 6.
 ## 4. Install
 
 Download the installer and its checksums from the latest release, verify the
-installer, then run it:
+installer, then run it. Run this as one command, exactly as written:
 
 ```sh
-work=$(mktemp -d) && cd "$work"
-base=https://github.com/manikanta-kops/kipster-software-factory/releases/latest/download
-curl -fsSLO "$base/install.sh" && curl -fsSLO "$base/SHA256SUMS"
-grep ' install.sh$' SHA256SUMS | shasum -a 256 -c - && sh install.sh
+cd "$(mktemp -d)" &&
+  curl -fsSLO https://github.com/manikanta-kops/kipster-software-factory/releases/latest/download/install.sh &&
+  curl -fsSLO https://github.com/manikanta-kops/kipster-software-factory/releases/latest/download/SHA256SUMS &&
+  grep ' install.sh$' SHA256SUMS | shasum -a 256 -c - &&
+  sh install.sh
 ```
 
 - If the checksum check fails, run nothing. Report it to the person.
