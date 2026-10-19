@@ -37,6 +37,8 @@ import {
 import { createScratchGit } from '../../src/workspace/scratch.ts'
 import { join } from 'node:path'
 import { createApp } from '../../src/api/app.ts'
+import type { UpdateResponse } from '../../src/api/contract.ts'
+import type { Updater } from '../../src/updater.ts'
 import { BUILT_WEB_APP } from '../../src/server.ts'
 import { listenForEvents } from '../../src/store/events.ts'
 import {
@@ -73,8 +75,55 @@ const fixtures = new Map<
     gate: (state: string, number?: number) => Promise<void>
     autoMerge: () => Promise<void>
     prune: () => Promise<void>
+    finishSteps?: () => void
   }
 >()
+
+/** A release check whose running steps a test finishes; installing "restarts" on the new version. */
+function fakeUpdates() {
+  let current = '0.4.3'
+  let state: UpdateResponse['state'] = 'available'
+  let running = 1
+  const install = () => {
+    state = 'installing'
+    setTimeout(() => {
+      current = '9.9.9'
+      state = 'none'
+    }, 5_000)
+  }
+  const status = async (): Promise<UpdateResponse> => ({
+    current,
+    latest: '9.9.9',
+    checkedAt: new Date().toISOString(),
+    state,
+    running,
+    blocked: null,
+    error: null,
+    automatic: true,
+    notes:
+      'https://github.com/manikanta-kops/kipster-software-factory/releases/tag/v9.9.9',
+  })
+  const updater: Updater = {
+    status,
+    async request() {
+      if (running) state = 'waiting'
+      else install()
+      return status()
+    },
+    async cancel() {
+      state = 'available'
+      return status()
+    },
+    close() {},
+  }
+  return {
+    updater,
+    finishSteps() {
+      running = 0
+      if (state === 'waiting') install()
+    },
+  }
+}
 // Register before the app's static fallback by composing a small fixture router.
 const { Hono } = await import('hono')
 const router = new Hono()
@@ -471,6 +520,7 @@ router.post('/__test/fixtures', async (c) => {
     )
   const fixtureEvents = listenForEvents(fixture.database)
   await fixtureEvents.ready
+  const updates = c.req.query('update') === 'true' ? fakeUpdates() : undefined
   const fixtureApp = createApp({
     database: fixture.database,
     library: await builtInLibrary(),
@@ -478,6 +528,7 @@ router.post('/__test/fixtures', async (c) => {
     home: fixtureHome,
     webRoot: BUILT_WEB_APP,
     allowedOrigins: [`http://127.0.0.1:${port}`, 'null'],
+    ...(updates ? { updates: updates.updater } : {}),
   })
   const fixtureServer = await new Promise<ReturnType<typeof serve>>(
     (resolve) => {
@@ -497,6 +548,7 @@ router.post('/__test/fixtures', async (c) => {
   }
   fixtures.set(url, {
     disconnect,
+    ...(updates ? { finishSteps: updates.finishSteps } : {}),
     autoMerge: async () => {
       const detail = (await getTicketDetail(
         fixture.database,
@@ -694,6 +746,11 @@ router.post('/__test/update-log', async (c) => {
     finish?: boolean
   }>()
   await fixtures.get(url)?.updateLog(finish)
+  return c.json({ ok: true })
+})
+router.post('/__test/finish-steps', async (c) => {
+  const { url } = await c.req.json<{ url: string }>()
+  fixtures.get(url)?.finishSteps?.()
   return c.json({ ok: true })
 })
 router.post('/__test/dispose', async (c) => {

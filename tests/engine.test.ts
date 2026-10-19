@@ -558,6 +558,26 @@ test('concurrency is bounded and shutdown interrupts work for restart', async (t
   )
 })
 
+test('a held scheduler starts no new step until released; running steps count as busy', async (t) => {
+  const f = await setup(t, { planner: [{ wait: true }, {}] })
+  const scheduler = await f.start()
+  await f.ticket('First')
+  await until(
+    async () => f.invocations.length,
+    (value) => value === 1,
+  )
+  assert.equal(scheduler.busy(), 1)
+  scheduler.hold(true)
+  await f.ticket('Second')
+  await new Promise((done) => setTimeout(done, 800))
+  assert.equal(f.invocations.length, 1)
+  scheduler.hold(false)
+  await until(
+    async () => f.invocations.length,
+    (value) => value === 2,
+  )
+})
+
 test('no commits asks for a decision; closing an unmerged PR rejects it', async (t) => {
   const f = await setup(t)
   await f.start()
@@ -1262,6 +1282,7 @@ test('saved settings reach steps that start later without a restart', async (t) 
       reviewers: [],
     },
     workflows: {},
+    autoUpdate: true,
   } satisfies Settings
   await saveSettings(f.store.database, saved)
   const { updatedAt } = await effectiveSettings(f.store.database, saved)

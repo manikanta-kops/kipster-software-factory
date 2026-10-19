@@ -647,6 +647,7 @@ test('a task agent runs only the builder; workflow overrides and the allowed lis
         roles: { builder: sol, reviewer: opusMedium },
       },
     },
+    autoUpdate: true,
   })
   const leadPrompts: string[] = []
   f.setBehaviour(async (role, invocation, title) => {

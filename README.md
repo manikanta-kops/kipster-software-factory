@@ -1,32 +1,64 @@
+<h1 align="center">Kipster Software Factory</h1>
+
 <p align="center">
-  <strong>Kipster Software Factory</strong><br />
-  Turns tickets into pull requests you can trust.
+  <b>Give it a ticket. Get back a pull request you can trust.</b>
 </p>
 
-You describe a problem and agree the outcome. The factory plans, builds, proves
-the change by running the real app, keeps the pull request ready, and only
-interrupts you for decisions that are yours to make.
+## How AI coding grew up
 
-> **Status: Slices 1–3 complete.** Onboard a repository, approve a ticket, and
-> let fresh agents build, prove and review it. The factory attaches real browser
-> evidence to the tested commit, synchronizes base changes, waits for required
-> CI, and routes PR feedback back to the builder. Proven with real agents on the
-> private factory-floor test bed; the owner merges. Decisions and merge policy
-> come next in the [roadmap](docs/roadmap.md).
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/phases-dark.png">
+  <img src="docs/assets/phases-light.png" alt="Phase 1, copy and paste. Phase 2, Tab, Tab, Tab. Phase 3, agents. What comes next, workflows." width="100%">
+</picture>
 
-## How it works
+**Phase 1: Copy and paste.** We asked ChatGPT a question, copied the answer into
+our editor and fixed whatever didn't compile. The AI knew nothing about our
+code. Fitting the answer in was our job.
 
-A **ticket** belongs to one repository and runs one **workflow**. A workflow is
-a list of steps of three kinds:
+**Phase 2: Tab, Tab, Tab.** The AI moved into the editor. It guessed the next
+line and we pressed Tab. Typing got faster, but we still wrote every function
+and read every line.
 
-| Kind   | What happens                                                          |
-| ------ | --------------------------------------------------------------------- |
-| agent  | A fresh agent session in a fixed **role** (planner, builder, tester…) |
-| human  | The ticket waits for you to approve, request changes or reject        |
-| system | Deterministic work: keep the PR current, merge, decide                |
+**Phase 3: Agents.** Claude Code, Codex and others started doing the work. We
+say what we want, and the agent reads the code, changes it and runs the tests.
+Most of the time we don't read every line anymore. But we still sit with it:
+one agent, one terminal, and us watching.
 
-Each step reports an outcome, and **routes** send the ticket forward, back to
-an earlier step, or to you. Loops have limits, so nothing spins forever.
+## What comes next
+
+The next step isn't a smarter agent. It's a system.
+
+You hand a task to the system and walk away. Inside, different agents do
+different jobs. One breaks the work down, one builds, one tests it in the
+running app and one reviews. When something isn't right, it goes back around.
+You only step in for decisions that are yours to make.
+
+For that to work, you have to trust the system. That trust doesn't come from
+one good model. It comes in layers, built into the workflow.
+
+That's why I built the Kipster Software Factory.
+
+## Everything is a workflow
+
+Think about how you fix a bug. First you reproduce it, then you fix it. Then you
+check that the fix really works, and someone reviews the code. If anything is
+wrong, it goes back.
+
+The factory does exactly that.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/bug-dark.png">
+  <img src="docs/assets/bug-light.png" alt="Reproduce, fix, test, review, merge. A failed test or a review with changes needed goes back to fix." width="100%">
+</picture>
+
+1. A **reproducer** shows the bug happening in the real app.
+2. A **builder** fixes it.
+3. A **tester** shows the bug failing on the old code and passing on the new.
+4. A **reviewer** reads the change. Anything wrong goes back to the builder.
+5. The pull request stays current with its base branch and CI, and lands
+   through the merge gate.
+
+A workflow is a short YAML file:
 
 ```yaml
 name: bug
@@ -35,15 +67,18 @@ steps:
   - id: reproduce
     kind: agent
     role: reproducer
-    needs: [verify]
   - id: fix
     kind: agent
     role: builder
   - id: test
     kind: agent
     role: tester
-    needs: [verify]
     limit: 3
+    routes:
+      changes-needed: fix
+  - id: review
+    kind: agent
+    role: reviewer
     routes:
       changes-needed: fix
   - id: merge
@@ -51,154 +86,65 @@ steps:
     action: merge
 ```
 
-Each repository describes how to build, run and verify itself in a `.kipster/`
-folder, so the engine stays the same for every project.
+## My favorite: the lead
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/lead-dark.png">
+  <img src="docs/assets/lead-light.png" alt="A lead hands out tasks. Each task is built and tested in its own loop and reports back. Two tasks run side by side while a third waits. When every task is in, the whole change gets a final test, a review and a pull request." width="100%">
+</picture>
+
+For anything bigger than a bug, I give the ticket to a lead. The lead is a
+strong model; at the time of writing I use Claude Opus 5.5. It's the
+coordinator for the whole task.
+
+First it reads the code, understands the ticket and breaks the work into small
+pieces. Each piece goes to its own small workflow, where a builder makes it and
+a tester proves it. When a piece is done, it reports back to the lead. The lead
+checks it, then hands out the next one. When pieces don't depend on each other,
+the lead runs them side by side.
+
+When every piece is in, a tester checks the whole change against the ticket, a
+reviewer reads it end to end, and it comes to you as one pull request.
+
+## In a nutshell
+
+The factory gives you a team of roles. Each one does one job well.
+
+- **Lead:** breaks big work into small tasks and coordinates them. Never writes code.
+- **Planner:** turns a ticket into a short plan with checks a tester can run.
+- **Reproducer:** proves the bug happens in the real app before anyone fixes it.
+- **Builder:** writes the code and commits it.
+- **Tester:** didn't write the change. Proves it works in the running app.
+- **Reviewer:** reads the change for serious problems and sends it back if it finds any.
+- **Explorer:** makes designs, prototypes and research you open in the browser.
+- **Validator:** checks an explorer's work against what you asked for.
+
+A workflow can also have two kinds of step that aren't agents:
+
+- **You:** the ticket waits until you approve, ask for changes or reject.
+- **The system:** plain code, no AI. It keeps the pull request up to date and merges it.
+
+Now combine them any way you want. A workflow is just the order they run in,
+plus where each one sends the work next.
+
+## Try it
+
+It's 2026. I don't believe in manual installs anymore. Give this to your coding
+agent and let it figure it out. It runs on macOS for now; if you need Linux or
+Windows, [open an issue](https://github.com/manikanta-kops/kipster-software-factory/issues).
+
+```
+Set up the Kipster Software Factory for me. Follow https://raw.githubusercontent.com/manikanta-kops/kipster-software-factory/master/SETUP.md
+```
+
+## Learn more
 
 - [Architecture](docs/architecture.md): concepts, modules and data flow
 - [Workflow format](docs/workflows.md): every field, outcome and default
 - [Workflow guide](docs/workflow-guide.md): principles for workflows you can trust
+- [Repository kit](docs/kit.md): how a repository tells agents to build, run and verify it
+- [Install and run](docs/install.md): manual install, the background service and defaults
+- [Development](docs/development.md): run the factory from source and test it
 
-## Install
-
-On macOS (Apple Silicon or Intel):
-
-```sh
-curl -fsSL https://github.com/manikanta-kops/kipster-software-factory/releases/latest/download/install.sh | sh
-```
-
-The installer downloads the release for your Mac, checks its SHA-256 against the
-release checksums and installs it in `~/.kipster-factory`. The release includes
-Node.js and PostgreSQL. It links `kf` into `~/.local/bin` and runs `kf setup --start`, which:
-
-- checks git, the GitHub CLI (showing the signed-in account and its scopes;
-  offers `gh auth login` if you are signed out), Codex and Claude Code. The
-  factory clones and pushes GitHub repositories with that `gh` login, so no
-  separate git sign-in is needed, and your git configuration is not changed;
-- asks which agent runs steps by default, only when both are installed;
-- creates a private PostgreSQL database in `~/.kipster-factory/postgres` that
-  accepts only local socket connections;
-- starts the factory in the background, now and at login, and opens it.
-
-The built-in workflows (`bug`, `explore`, `lead`, `onboard-repo` and
-`research`) are ready immediately. `lead` covers planned features and small
-changes; `explore` makes designs, prototypes or research you open in the
-browser, with or without a repository; `research` lets a lead split a question
-into validated research tasks and write one report. The `task`, `task-pr` and
-`research-task` workflows are reserved for child tasks and hidden from New
-ticket. Re-run the
-command, or `kf update`, to update; your
-configuration, secrets and database are kept. `kf status`, `kf logs -f`,
-`kf stop` and `kf start` manage the background factory.
-
-On macOS the background service uses its own signed identity, **Kipster Software
-Factory**, for privacy permissions. Mac app control remains available to all
-agent jobs. macOS still asks you to approve the access a job needs; the factory
-cannot grant it itself. See [macOS permissions](docs/macos-permissions.md) for
-setup, release signing and verification.
-
-New `lead` and `program-lead` tickets default to Lights-out: the system approves
-lead plans, agents choose and record sensible defaults, and a child needing a
-decision parks while siblings continue. New ticket lets you change the setting;
-children inherit it, and ticket pages show the Decision log. The merge gate
-still applies. Every task and the lead's final change are checked by a tester,
-in the running app when the kit can start it and otherwise in a disposable
-checkout. What the tester could not prove shows as an **Untested** warning and
-requires owner merging. Settings can select
-parallel lead reviewers from claude and codex. Lead review has five rounds by
-default, then publishes unresolved findings for the owner. The engine replaces
-reviewers and testers whose CLI/model matches a builder when an independent
-candidate exists; otherwise it records the exception and requires owner merging.
-
-The factory suggests one-line lessons from repeated review findings, recorded
-failures and owner corrections when a ticket finishes or needs you. Accept or
-reject them in Today's Lessons group; accepted repository and engine lessons
-are available to every fresh agent step through a file outside the repository.
-Lessons never hold up tickets. Repositories lists accepted lessons with a
-Retire control and reason. A repository can have 30 accepted lessons; retire
-one before accepting another.
-
-## Run from source
-
-Requires Node.js 26.10 (see `.nvmrc`) and PostgreSQL 18 (`initdb` and `pg_ctl`
-on `PATH`).
-
-```sh
-nvm install
-npm ci
-npm run dev        # local database, API on :4600 and the web app on :5173
-```
-
-`npm run dev` does not restart the factory on source edits, so active agent steps
-keep running. Stop and start it explicitly to load server changes, or opt into
-automatic restarts with `npm run dev -- --watch`. Vite still hot-reloads the web app.
-Startup also builds the web app for the API origin on :4600, so PR evidence and
-ticket links work there; :5173 remains the live development UI.
-
-`npm run dev` keeps its database in `.local/`. To run a source checkout like an
-installation, build the web app, set up and serve:
-
-```sh
-npm run build
-npm run kf -- setup
-npm start
-```
-
-`kf setup` creates and migrates a private PostgreSQL cluster in the factory home
-unless you pass `--database-url <url>` to use your own database. It keeps the
-configured port, or picks the first free port from 4600 on first setup. Re-run it to
-update settings; other configuration fields are retained. For scripts, use
-`npm run kf -- setup --non-interactive`. Use `--home <directory>` on setup and
-serve for a separate factory.
-
-Concurrency, the step timeout (120 minutes by default) and the agent for each
-role and reviewer lists, globally or per workflow, are edited on the web app's Settings page and
-apply to steps that start afterwards, without a restart. `config.json` supplies
-their starting values until the first save; see
-[the architecture](docs/architecture.md#settings-page).
-
-TypeSafe is optional: its key powers decision steps (for example judging whether
-a PR is safe to auto-merge). Without it those decisions come to you. Store a key
-with `kf secret set typesafe`, or validate one from stdin during setup with
-`--typesafe-stdin`.
-
-Manage secrets with `npm run kf -- secret set <name>`, `secret list`, and
-`secret remove <name>`. Set reads hidden terminal input or piped stdin; list
-shows names and backends only. Secrets use the OS credential store, with a
-mode-0600 `secrets.json` fallback if it is unavailable. No environment variables
-or .env files configure integrations. `--secret-backend file` explicitly chooses
-the file store for headless installations and tests. Only macOS Keychain has been
-tested; Linux Secret Service is supported but unverified, and Windows validation
-is deferred. Browsers on other origins may call the API only if they are
-listed in `allowedOrigins` (default: the Vite dev server and the Tauri shell).
-
-## Develop
-
-```sh
-npm run check      # lint, format and type checks
-npm test           # unit and integration tests against a throwaway PostgreSQL
-npm run test:e2e   # browser tests against the built app
-npm run kf -- check [dir]   # validate a directory of workflow files
-npm run dev -- --no-scheduler # serve UI without running agents
-npm run seed:demo  # fill the dev database with tickets in every state
-```
-
-Demo seeding requires an empty database with no running scheduler. Stop the
-normal dev server, seed, then use `npm run dev -- --no-scheduler` (or
-`kf serve --no-scheduler`). A database marked as demo refuses to start a
-scheduler, including after a restart. Keep real runs in a separate checkout's
-`.local/` database. Development workspaces and evidence also live under
-`.local/factory/`. Demo media is generated there (synthetic images/video/logs,
-never real verification evidence); seed with `--home <directory>` when serving a
-different home. The demo includes valid/invalid kits and current/stale lead
-verdicts with recorded commits. Override with `npm run dev -- --home <directory>`.
-It also includes **Overnight report export (synthetic demo)**, a lights-out lead
-with a Decision log, a parked child with a recorded choice and a merged
-child whose checker left an item unverified. **Document the API rate limits
-(checked without verify)** and **Show stock levels on product pages (checked
-with verify)** are lights-out leads whose task ran build then test and whose
-final test ran; the first, in `kipster/docs-site` without a verify block, shows
-the unverified item in its task result and merge gate. **Historical quick-change ticket** retains a completed plan from
-the retired workflow and waits for plan approval. These are
-synthetic choices for UI inspection; no agents or real verification ran.
-
-See [CONTRIBUTING.md](CONTRIBUTING.md). Licensed under [Apache-2.0](LICENSE).
+Early development. See the [roadmap](docs/roadmap.md).
+Licensed under [Apache-2.0](LICENSE).

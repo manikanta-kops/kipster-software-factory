@@ -6,9 +6,18 @@ import {
   engineConfig,
   type EngineConfig,
   defaultHome,
+  factoryVersion,
   settingsFromConfig,
 } from './config.ts'
-import { hasSavedSettings } from './store/settings.ts'
+import { effectiveSettings, hasSavedSettings } from './store/settings.ts'
+import { isServiceLoaded, startUpdateJob } from './service.ts'
+import { startUpdater, type Updater } from './updater.ts'
+import {
+  clearFailedUpdate,
+  isInstalledRelease,
+  latestRelease,
+  readFailedUpdate,
+} from './updates.ts'
 import {
   addUploads,
   BUILT_IN_WORKFLOWS,
@@ -104,6 +113,29 @@ export async function startFactory(
     await database.end()
     throw error
   }
+  const home = options.home ?? defaultHome()
+  let updates: Updater | undefined
+  if (scheduler && isInstalledRelease(home)) {
+    let serviceLoaded = { at: 0, value: false }
+    updates = startUpdater({
+      current: factoryVersion(),
+      blocked() {
+        if (Date.now() - serviceLoaded.at > 60_000)
+          serviceLoaded = { at: Date.now(), value: isServiceLoaded(home) }
+        return serviceLoaded.value
+          ? null
+          : 'This factory is not running as the background service. Run kf update.'
+      },
+      latest: (signal) => latestRelease(signal),
+      scheduler,
+      automatic: async () =>
+        (await effectiveSettings(database, settingsFromConfig(config))).settings
+          .autoUpdate,
+      install: () => startUpdateJob(home),
+      failed: () => readFailedUpdate(home),
+      clearFailed: () => clearFailedUpdate(home),
+    })
+  }
   const app = createApp({
     database,
     library: loaded.library,
@@ -114,6 +146,7 @@ export async function startFactory(
       ? {}
       : { allowedOrigins: options.allowedOrigins }),
     ...(options.webRoot === undefined ? {} : { webRoot: options.webRoot }),
+    ...(updates ? { updates } : {}),
   })
   const host = options.host ?? '127.0.0.1'
   const server = await new Promise<ReturnType<typeof serve>>(
@@ -125,6 +158,7 @@ export async function startFactory(
       listening.once('error', reject)
     },
   ).catch(async (error) => {
+    updates?.close()
     await scheduler?.close()
     await events.close()
     await database.end()
@@ -134,6 +168,7 @@ export async function startFactory(
   return {
     url: `http://${host}:${options.port}`,
     async close() {
+      updates?.close()
       await scheduler?.close()
       await events.close()
       await new Promise<void>((resolve, reject) => {

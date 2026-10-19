@@ -58,6 +58,20 @@ test('the launch agent runs the factory with the captured PATH and escapes value
   )
 })
 
+test('a run-once launch agent never restarts', () => {
+  const plist = launchAgent({
+    label: 'app.kipster.factory.update',
+    program: ['/opt/kf/node', '/opt/kf/app/src/cli.ts', 'update', '--now'],
+    path: '/usr/bin:/bin',
+    log: '/Users/me/.kipster-factory/logs/update.log',
+    workingDirectory: '/Users/me/.kipster-factory',
+    once: true,
+  })
+  assert.match(plist, /<key>RunAtLoad<\/key>\s*<true\/>/)
+  assert.doesNotMatch(plist, /KeepAlive/)
+  assert.doesNotMatch(plist, /AssociatedBundleIdentifiers/)
+})
+
 test('setup picks the next free port when the default is taken', async (t) => {
   const busy = createServer()
   await new Promise<void>((resolve) => busy.listen(0, '127.0.0.1', resolve))

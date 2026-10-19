@@ -36,6 +36,7 @@ interface Draft {
   reviewers: AgentDraft[]
   allowed: AgentDraft[]
   overrides: OverrideDraft[]
+  autoUpdate: boolean
 }
 
 const EMPTY_AGENT: AgentDraft = { cli: '', model: '', effort: '' }
@@ -69,6 +70,7 @@ function toDraft(settings: Settings): Draft {
         roles: roleDrafts(override.roles ?? {}),
       }),
     ),
+    autoUpdate: settings.autoUpdate,
   }
 }
 
@@ -114,6 +116,7 @@ function fromDraft(draft: Draft): unknown {
         },
       ]),
     ),
+    autoUpdate: draft.autoUpdate,
   }
 }
 
@@ -448,6 +451,26 @@ function SettingsForm({ response }: { response: SettingsResponse }) {
             Add override
           </button>
         </div>
+      </fieldset>
+
+      <fieldset>
+        <legend>Updates</legend>
+        <label className="workflow-choice">
+          <input
+            type="checkbox"
+            checked={draft.autoUpdate}
+            onChange={(event) =>
+              update((d) => ({ ...d, autoUpdate: event.target.checked }))
+            }
+          />
+          <span>
+            Update automatically at night{' '}
+            <span className="muted">
+              Between 2 and 5 AM, a newer release installs once no step is
+              running.
+            </span>
+          </span>
+        </label>
       </fieldset>
 
       {issues.get('') && <p className="error">{issues.get('')}</p>}

@@ -51,6 +51,25 @@ export type {
   WorkflowOverride,
 } from '../domain/settings.ts'
 
+/** The installed release and whether a newer one can be installed. */
+export interface UpdateResponse {
+  readonly current: string
+  /** Newest release on GitHub; null until a check succeeds. */
+  readonly latest: string | null
+  readonly checkedAt: string | null
+  /** `waiting`: new steps are held until running ones finish; then it installs. */
+  readonly state: 'none' | 'available' | 'waiting' | 'installing' | 'failed'
+  /** Steps and post-merge checks the update waits for. */
+  readonly running: number
+  /** Why this factory cannot update itself, for example when it runs from source. */
+  readonly blocked: string | null
+  readonly error: string | null
+  /** Settings: install a newer release at night once nothing is running. */
+  readonly automatic: boolean
+  /** Release notes for the newer release. */
+  readonly notes: string | null
+}
+
 export interface HealthResponse {
   readonly status: 'ok'
   readonly database: 'ok'

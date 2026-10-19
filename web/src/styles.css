@@ -237,6 +237,46 @@ code {
     opacity: 0.3;
   }
 }
+.update {
+  position: relative;
+}
+.update-pill {
+  min-height: 28px;
+  padding: 0 12px;
+  font-size: 12.5px;
+  background: var(--accent-wash);
+  color: var(--accent);
+  box-shadow: none;
+}
+.update-pill:hover {
+  background: color-mix(in srgb, var(--accent) 20%, transparent);
+}
+.update-pill.failed {
+  background: var(--red-wash);
+  color: var(--red-ink);
+}
+.update-pill.done {
+  background: var(--green-wash);
+  color: var(--green);
+}
+.update-panel {
+  position: absolute;
+  top: calc(100% + 10px);
+  right: 0;
+  z-index: 60;
+  display: grid;
+  gap: 10px;
+  justify-items: start;
+  width: 320px;
+  padding: 16px;
+  border-radius: 14px;
+  background: var(--card);
+  box-shadow: var(--shadow-lift);
+  font-size: 13.5px;
+}
+.update-panel p {
+  margin: 0;
+}
 main {
   padding: 0 32px 96px;
   outline: none;
@@ -3262,6 +3302,13 @@ button.small {
     width: 100%;
     margin-left: -10px;
     flex-wrap: wrap;
+  }
+  .update-panel {
+    position: fixed;
+    top: 64px;
+    right: 16px;
+    left: 16px;
+    width: auto;
   }
   main {
     padding: 0 16px 72px;

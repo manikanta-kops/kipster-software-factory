@@ -22,6 +22,7 @@ export const test = base.extend<{
   withArtifacts: boolean
   withDecisions: boolean
   withExplore: boolean
+  withUpdate: boolean
   verdict: 'changes-needed' | 'unobserved' | 'default'
 }>({
   withLessons: [false, { option: true }],
@@ -31,6 +32,7 @@ export const test = base.extend<{
   withUsage: [false, { option: true }],
   withDecisions: [false, { option: true }],
   withExplore: [false, { option: true }],
+  withUpdate: [false, { option: true }],
   withLegacy: [false, { option: true }],
   withArtifacts: [false, { option: true }],
   verdict: ['default', { option: true }],
@@ -47,11 +49,12 @@ export const test = base.extend<{
       withLinks,
       withTasks,
       withUsage,
+      withUpdate,
     },
     runTest,
   ) => {
     const response = await request.post(
-      `/__test/fixtures?lessons=${withLessons}&legacy=${withLegacy}&artifacts=${withArtifacts}&decisions=${withDecisions}&verdict=${verdict}&autoMerge=${withAutoMerge}&links=${withLinks}&tasks=${withTasks}&usage=${withUsage}&explore=${withExplore}`,
+      `/__test/fixtures?lessons=${withLessons}&legacy=${withLegacy}&artifacts=${withArtifacts}&decisions=${withDecisions}&verdict=${verdict}&autoMerge=${withAutoMerge}&links=${withLinks}&tasks=${withTasks}&usage=${withUsage}&explore=${withExplore}&update=${withUpdate}`,
     )
     expect(response.ok()).toBeTruthy()
     const fixture = (await response.json()) as FactoryFixture
